@@ -36,6 +36,7 @@ function App() {
     downloadProgress,
     pairDevice,
     connectDevice,
+    enableWirelessFromUsb,
     listScrcpyOptions,
     runTerminalCommand,
     runningDevices,
@@ -345,6 +346,7 @@ function App() {
                     onSelectDevice={setActiveDevice}
                     onPair={pairDevice}
                     onConnect={connectDevice}
+                    onUsbToWireless={enableWirelessFromUsb}
                     isRefreshing={isRefreshing}
                     onFilePush={handleFileBrowse}
                     historyDevices={historyDevices}
