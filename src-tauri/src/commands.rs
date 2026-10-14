@@ -277,7 +277,8 @@ pub async fn get_mdns_devices(custom_path: Option<String>) -> serde_json::Value 
                 let mut services = Vec::new();
                 let mut seen = std::collections::HashSet::new();
                 for line in out_str.lines().skip(1) {
-                    let parts: Vec<&str> = line.split('\t').collect();
+                    // ADB prints columns separated by variable whitespace, not reliably tabs.
+                    let parts: Vec<&str> = line.split_whitespace().collect();
                     if parts.len() >= 3 {
                         let name = parts[0].trim();
                         let service = parts[1].trim();
@@ -304,46 +305,84 @@ pub async fn get_mdns_devices(custom_path: Option<String>) -> serde_json::Value 
     }
 }
 
+/// Only consider TLS connect advertisements, never the distinct pairing port.
+fn mdns_connect_candidates(output: &str, requested: &str) -> Vec<String> {
+    let host = requested.rsplit_once(':').map(|(h, _)| h).unwrap_or(requested);
+    let mut candidates = Vec::new();
+    for line in output.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 3 || !fields[1].contains("_adb-tls-connect._tcp") { continue; }
+        let address = fields[2];
+        if address.rsplit_once(':').map(|(h, _)| h) == Some(host)
+            && address != requested && !candidates.iter().any(|v| v == address) {
+            candidates.push(address.to_owned());
+        }
+    }
+    candidates
+}
+
+async fn attempt_adb_connect(adb_path: &str, address: &str) -> Result<(bool, String), String> {
+    let mut command = create_command(adb_path);
+    command.arg("connect").arg(address).kill_on_drop(true);
+    let output = timeout(Duration::from_secs(10), command.output())
+        .await
+        .map_err(|_| format!("Connection to {} timed out after 10s", address))?
+        .map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let message = if stdout.is_empty() { stderr.clone() } else if stderr.is_empty() { stdout.clone() } else { format!("{}\\n{}", stdout, stderr) };
+    let lower = message.to_lowercase();
+    let success = output.status.success()
+        && (lower.contains("connected to") || lower.contains("already connected to"))
+        && !lower.contains("cannot connect") && !lower.contains("failed to connect");
+    Ok((success, message))
+}
+
 #[tauri::command]
 pub async fn adb_connect(window: Window, ip: String, custom_path: Option<String>, silent: Option<bool>) -> Result<serde_json::Value, String> {
     let silent = silent.unwrap_or(false);
     let adb_path = get_binary_path("adb", custom_path);
-    if !silent {
-        let _ = window.emit("scrcpy-log", format!("[SYSTEM] Attempting wireless connection to {}...", ip));
+    let requested = ip.trim();
+    if requested.is_empty() { return Ok(json!({ "success": false, "message": "Enter a device IP address" })); }
+    if !silent { let _ = window.emit("scrcpy-log", format!("[SYSTEM] Connecting to {}...", requested)); }
+
+    let (success, mut message) = attempt_adb_connect(&adb_path, requested).await?;
+    if success {
+        if !silent { let _ = window.emit("scrcpy-log", format!("[ADB] {}", message)); }
+        return Ok(json!({ "success": true, "message": message, "address": requested }));
     }
 
-    let child = create_command(&adb_path)
-        .arg("connect")
-        .arg(&ip)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to start adb connect: {}", e))?;
-
-    // Implement 5s timeout
-    let output_res = timeout(Duration::from_secs(5), child.wait_with_output()).await;
-
-    match output_res {
-        Ok(Ok(output)) => {
-            let out_text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let err_text = String::from_utf8_lossy(&output.stderr).trim().to_string();
-
-            if !silent {
-                // Log everything to terminal for visibility
-                if !out_text.is_empty() { let _ = window.emit("scrcpy-log", format!("[ADB] {}", out_text)); }
-                if !err_text.is_empty() { let _ = window.emit("scrcpy-log", format!("[ADB ERROR] {}", err_text)); }
+    // On Android 11+, the TLS debugging port changes. Recover from a stale
+    // 5555/history entry using ADB's advertised connect port for the SAME IP.
+    let mut mdns = create_command(&adb_path);
+    mdns.arg("mdns").arg("services").kill_on_drop(true);
+    if let Ok(Ok(output)) = timeout(Duration::from_secs(5), mdns.output()).await {
+        if output.status.success() {
+            let listing = String::from_utf8_lossy(&output.stdout);
+            for candidate in mdns_connect_candidates(&listing, requested) {
+                if !silent { let _ = window.emit("scrcpy-log", format!("[ADB] Retrying discovered wireless debugging port {}", candidate)); }
+                match attempt_adb_connect(&adb_path, &candidate).await {
+                    Ok((true, result)) => {
+                        if !silent { let _ = window.emit("scrcpy-log", format!("[ADB] {}", result)); }
+                        return Ok(json!({ "success": true, "message": result, "address": candidate }));
+                    }
+                    Ok((false, reason)) => message = reason,
+                    Err(reason) => message = reason,
+                }
             }
+        }
+    }
+    if !silent { let _ = window.emit("scrcpy-log", format!("[ADB] {}", message)); }
+    Ok(json!({ "success": false, "message": format!("{}. Check the phone's current Wireless debugging IP & port; pairing and connection ports are different.", message) }))
+}
 
-            let success = output.status.success() && !out_text.contains("cannot connect") && !out_text.contains("failed");
-            Ok(json!({ "success": success, "message": if out_text.is_empty() { err_text } else { out_text } }))
-        }
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => {
-            if !silent {
-                let _ = window.emit("scrcpy-log", format!("[SYSTEM] Connection to {} timed out after 5s.", ip));
-            }
-            Ok(json!({ "success": false, "message": "connection timed out" }))
-        }
+#[cfg(test)]
+mod wireless_connection_tests {
+    use super::mdns_connect_candidates;
+    #[test]
+    fn selects_current_tls_port_for_same_ip_only() {
+        let output = "List of discovered mdns services\\nadb-phone._adb-tls-pairing._tcp. _adb-tls-pairing._tcp. 192.168.2.149:38912\\nadb-phone._adb-tls-connect._tcp. _adb-tls-connect._tcp. 192.168.2.149:42137\\nadb-other._adb-tls-connect._tcp. _adb-tls-connect._tcp. 192.168.2.150:44444";
+        assert_eq!(mdns_connect_candidates(output, "192.168.2.149:5555"), vec!["192.168.2.149:42137"]);
     }
 }
 
