@@ -12,6 +12,7 @@ describe('Sidebar Component', () => {
         onSelectDevice: vi.fn(),
         onPair: vi.fn(),
         onConnect: vi.fn(),
+        onUsbToWireless: vi.fn(),
         historyDevices: [],
         onFilePush: vi.fn(),
         isRefreshing: false
@@ -51,6 +52,25 @@ describe('Sidebar Component', () => {
         // Switch to Wireless
         fireEvent.click(screen.getByText('Wireless'));
         expect(screen.getByText('Wireless Setup Tip')).toBeInTheDocument();
+    });
+
+
+    it('runs USB -> Wi-Fi only for an authorized USB-style device serial', async () => {
+        const onUsbToWireless = vi.fn().mockResolvedValue({ success: true });
+        render(<Sidebar {...mockProps} devices={[
+            '32c35470', '192.168.2.226:5555',
+            'adb-phone._adb-tls-connect._tcp', 'emulator-5554'
+        ]} onUsbToWireless={onUsbToWireless} />);
+        fireEvent.click(screen.getByText('Wireless'));
+        fireEvent.click(screen.getByTitle('32c35470'));
+        await waitFor(() => expect(onUsbToWireless).toHaveBeenCalledWith('32c35470'));
+        expect(screen.queryByTitle('192.168.2.226:5555')).not.toBeInTheDocument();
+    });
+
+    it('disables USB-to-Wi-Fi while a device refresh is active', () => {
+        render(<Sidebar {...mockProps} devices={['32c35470']} isRefreshing={true} />);
+        fireEvent.click(screen.getByText('Wireless'));
+        expect(screen.getByTitle('32c35470')).toBeDisabled();
     });
 
     it('opens a pairing modal for a discovered device on the pairing screen, and submits the code', async () => {
