@@ -386,6 +386,142 @@ mod wireless_connection_tests {
     }
 }
 
+fn valid_wifi_ip(raw: &str) -> Option<String> {
+    let ip = raw.trim().split('/').next()?.parse::<std::net::Ipv4Addr>().ok()?;
+    if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast()
+        || ip.is_link_local() || ip.is_broadcast() {
+        return None;
+    }
+    Some(ip.to_string())
+}
+
+fn parse_wifi_ip(output: &str) -> Option<String> {
+    let words: Vec<&str> = output.split_whitespace().collect();
+    words.windows(2).find_map(|pair| {
+        if pair[0] == "inet" || pair[0] == "src" {
+            valid_wifi_ip(pair[1])
+        } else {
+            None
+        }
+    })
+}
+
+async fn adb_output(adb_path: &str, args: &[&str]) -> Result<(bool, String), String> {
+    let mut command = create_command(adb_path);
+    command.args(args).kill_on_drop(true);
+    let output = timeout(Duration::from_secs(10), command.output())
+        .await
+        .map_err(|_| "ADB command timed out".to_string())?
+        .map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let message = match (stdout.is_empty(), stderr.is_empty()) {
+        (false, false) => format!("{}\n{}", stdout, stderr),
+        (false, true) => stdout,
+        (true, _) => stderr,
+    };
+    Ok((output.status.success(), message))
+}
+
+/// Enable classic adb-over-TCP/IP through an authorized USB device.
+/// This does not require mDNS or Android 11+ TLS wireless pairing.
+#[tauri::command]
+pub async fn adb_usb_to_wireless(
+    window: Window,
+    device: String,
+    custom_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    if device.trim().is_empty() || device.contains(':')
+        || device.starts_with("adb-") || device.starts_with("emulator-")
+        || device.chars().any(char::is_whitespace) {
+        return Ok(json!({"success": false, "message": "Select an authorized USB device."}));
+    }
+    let adb_path = get_binary_path("adb", custom_path);
+    let (ok, listing) = adb_output(&adb_path, &["devices", "-l"]).await?;
+    let authorized = ok && listing.lines().skip(1).any(|line| {
+        matches!(parse_adb_device_line(line), Some((serial, state))
+            if serial == device && state == "device")
+    });
+    if !authorized {
+        return Ok(json!({"success": false, "message": "USB device not connected or not authorized."}));
+    }
+
+    // Read the phone's Wi-Fi IPv4 address before restarting adbd in TCP mode.
+    let mut wifi_ip = None;
+    for args in [
+        vec!["-s", device.as_str(), "shell", "ip", "-f", "inet", "addr", "show", "wlan0"],
+        vec!["-s", device.as_str(), "shell", "ip", "route", "show", "dev", "wlan0"],
+    ] {
+        if let Ok((true, result)) = adb_output(&adb_path, &args).await {
+            wifi_ip = parse_wifi_ip(&result);
+            if wifi_ip.is_some() { break; }
+        }
+    }
+    if wifi_ip.is_none() {
+        if let Ok((true, result)) = adb_output(
+            &adb_path, &["-s", device.as_str(), "shell", "getprop", "dhcp.wlan0.ipaddress"]
+        ).await {
+            wifi_ip = valid_wifi_ip(&result);
+        }
+    }
+    let Some(wifi_ip) = wifi_ip else {
+        return Ok(json!({"success": false, "message": "Phone Wi-Fi IPv4 address not found. Enable Wi-Fi and keep USB connected."}));
+    };
+
+    let address = format!("{}:5555", wifi_ip);
+    let _ = window.emit("scrcpy-log", format!("[ADB] Switching {} to TCP/IP at {}", device, address));
+    let (started, message) = adb_output(
+        &adb_path, &["-s", device.as_str(), "tcpip", "5555"]
+    ).await?;
+    if !started {
+        return Ok(json!({"success": false, "message": format!("adb tcpip 5555 failed: {}", message)}));
+    }
+    let mut last_error = String::new();
+    for attempt in 0..4 {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(800)).await;
+        }
+        match attempt_adb_connect(&adb_path, &address).await {
+            Ok((true, message)) => {
+                let _ = window.emit("scrcpy-log", format!("[ADB] Connected wirelessly: {}", address));
+                return Ok(json!({"success": true, "address": address, "message": message}));
+            },
+            Ok((false, message)) => last_error = message,
+            Err(message) => last_error = message,
+        }
+    }
+    Ok(json!({
+        "success": false,
+        "address": address,
+        "message": format!("TCP/IP enabled but connection to {} failed: {}. Check Wi-Fi/LAN reachability.", address, last_error)
+    }))
+}
+
+#[cfg(test)]
+mod usb_wireless_tests {
+    use super::{parse_wifi_ip, valid_wifi_ip};
+    #[test]
+    fn extracts_wlan_address_from_android_ip_addr() {
+        assert_eq!(
+            parse_wifi_ip("3: wlan0: <UP> mtu 1500\n inet 192.168.2.226/24 brd 192.168.2.255"),
+            Some("192.168.2.226".to_owned())
+        );
+    }
+    #[test]
+    fn extracts_wlan_address_from_route() {
+        assert_eq!(
+            parse_wifi_ip("192.168.2.0/24 dev wlan0 proto kernel scope link src 192.168.2.226"),
+            Some("192.168.2.226".to_owned())
+        );
+    }
+    #[test]
+    fn invalid_ips_are_rejected() {
+        assert_eq!(valid_wifi_ip("127.0.0.1"), None);
+        assert_eq!(valid_wifi_ip("999.1.1.1"), None);
+        assert_eq!(valid_wifi_ip("192.168.2.226/24"), Some("192.168.2.226".to_owned()));
+    }
+}
+
 #[tauri::command]
 pub async fn adb_pair(window: Window, ip: String, code: String, custom_path: Option<String>) -> Result<serde_json::Value, String> {
     let adb_path = get_binary_path("adb", custom_path);
