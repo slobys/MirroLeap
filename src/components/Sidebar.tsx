@@ -35,6 +35,7 @@ export interface SidebarProps {
     onSelectDevice: (d: string) => void;
     onPair: (ip: string, code: string) => Promise<any>;
     onConnect: (ip: string) => Promise<any>;
+    onUsbToWireless: (serial: string) => Promise<any>;
     isRefreshing?: boolean;
     onFilePush: () => void;
     // History props
@@ -54,6 +55,7 @@ export default function Sidebar({
     onSelectDevice,
     onPair,
     onConnect,
+    onUsbToWireless,
     isRefreshing,
     onFilePush,
     historyDevices = [],
@@ -66,6 +68,7 @@ export default function Sidebar({
     const [pairIp, setPairIp] = React.useState('');
     const [pairCode, setPairCode] = React.useState('');
     const pairCodeRef = React.useRef<HTMLInputElement>(null);
+    const usbDevices = devices.filter(serial => !serial.includes(':') && !serial.startsWith('adb-') && !serial.startsWith('emulator-'));
 
     // Tapping a discovered device opens this instead of attempting a doomed
     // `adb connect`: a device that shows up here but isn't in the hub above
@@ -254,6 +257,29 @@ export default function Sidebar({
                                     {t('sidebar.wirelessSetupTipTextBefore')} <span className="text-zinc-300 underline decoration-primary/30 decoration-dashed">{t('sidebar.wirelessSetupTipSameWifi')}</span> {t('sidebar.wirelessSetupTipAnd')} <span className="text-zinc-300 underline decoration-primary/30 decoration-dashed">{t('sidebar.wirelessSetupTipWirelessDebugging')}</span>{t('sidebar.wirelessSetupTipTextAfter')}
                                 </p>
                             </div>
+                            {/* USB-authorized ADB -> traditional TCP/IP, without mDNS pairing. */}
+                            {usbDevices.length > 0 && (
+                                <div className="space-y-2 border border-primary/20 rounded-lg p-3 bg-primary/5">
+                                    <div className="text-[10px] font-black text-primary flex items-center gap-2">
+                                        <Usb size={12} />{t('sidebar.usb')} → {t('sidebar.wireless')}
+                                    </div>
+                                    <p className="text-[10px] text-zinc-500">
+                                        {t('sidebar.usbSetupTipTextBefore')} {t('sidebar.usbSetupTipUsbDebugging')} · ADB TCP/IP 5555
+                                    </p>
+                                    {usbDevices.map(serial => (
+                                        <button
+                                            key={serial}
+                                            title={serial}
+                                            onClick={() => onUsbToWireless(serial)}
+                                            disabled={isRefreshing}
+                                            className="w-full flex items-center justify-between gap-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 px-3 py-2 text-left text-zinc-200 text-[10px] font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <span className="truncate">{deviceFriendlyNames[serial] || deviceModels[serial] || serial}</span>
+                                            <span className="flex items-center gap-1 text-primary shrink-0"><Wifi size={12} />{t('sidebar.connect')}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                             <div className="space-y-3">
                                 <div className="border-b border-zinc-800/50 pb-1.5">
                                     <span className="text-[9px] font-black uppercase text-zinc-500 tracking-widest">{t('sidebar.ipConnect')}</span>
