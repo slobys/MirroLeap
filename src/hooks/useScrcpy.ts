@@ -706,6 +706,34 @@ export function useScrcpy() {
         }
     };
 
+
+    // A USB-authorized device can switch into traditional TCP/IP ADB mode,
+    // independent of mDNS / Android 11 TLS pairing.
+    const enableWirelessFromUsb = async (device: string, customPath?: string) => {
+        setIsRefreshing(true);
+        try {
+            setLogs(prev => [...prev.slice(-100), `[ADB] USB → Wi-Fi: ${device}...`]);
+            const res: any = await invoke('adb_usb_to_wireless', {
+                device,
+                customPath: customPath || config.scrcpyPath
+            });
+            if (res.success && typeof res.address === 'string') {
+                addToHistory(res.address);
+                await fetchDevicesOnce(customPath || config.scrcpyPath, true);
+                setActiveDevice(res.address);
+                setLogs(prev => [...prev.slice(-100), t('logs.connectedSuccessfully', { ip: res.address })]);
+            } else {
+                setLogs(prev => [...prev.slice(-100), t('logs.connectionFailed', { message: String(res.message) })]);
+            }
+            return res;
+        } catch (e: any) {
+            setLogs(prev => [...prev.slice(-100), t('logs.connectionError', { error: String(e) })]);
+            return { success: false, message: String(e) };
+        } finally {
+            setIsRefreshing(false);
+        }
+    };
+
     const connectDevice = async (ip: string, customPath?: string) => {
         setIsRefreshing(true);
         try {
@@ -868,6 +896,7 @@ export function useScrcpy() {
         scrcpyStatus,
         pairDevice,
         connectDevice,
+        enableWirelessFromUsb,
         listScrcpyOptions,
         runTerminalCommand,
         runningDevices,
