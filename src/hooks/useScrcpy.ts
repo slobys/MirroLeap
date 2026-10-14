@@ -712,20 +712,12 @@ export function useScrcpy() {
             // Attempt 1: Connect
             let res: any = await invoke('adb_connect', { ip, customPath: customPath || config.scrcpyPath });
 
-            // Retry Logic: If failed, try to disconnect first then reconnect
-            if (!res.success && typeof res.message === 'string' && (res.message.includes('failed to connect') || res.message.includes('cannot connect'))) {
-                setLogs(prev => [...prev.slice(-100), t('logs.connectionFailedRetrying')]);
-                // Force disconnect to clear ghost state
-                await invoke('run_terminal_command', { cmd: `adb disconnect ${ip}`, customPath: customPath || config.scrcpyPath });
-                // Small delay
-                await new Promise(r => setTimeout(r, 500));
-                // Attempt 2
-                res = await invoke('adb_connect', { ip, customPath: customPath || config.scrcpyPath });
-            }
-
+            // Rust already retries the current mDNS-advertised TLS connect port.
+            // Retrying the rejected port and disconnecting would only add delay.
             if (res.success) {
-                setLogs(prev => [...prev.slice(-100), t('logs.connectedSuccessfully', { ip })]);
-                addToHistory(ip);
+                const connectedAddress = typeof res.address === 'string' ? res.address : ip;
+                setLogs(prev => [...prev.slice(-100), t('logs.connectedSuccessfully', { ip: connectedAddress })]);
+                addToHistory(connectedAddress);
 
                 // Allow ADB to settle and state to update
                 await new Promise(r => setTimeout(r, 1000));
