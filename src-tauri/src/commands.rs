@@ -1848,6 +1848,7 @@ mod tests {
             vsync: None,
             window_x: None,
             window_y: None,
+            ignore_video_encoder_constraints: None,
         }
     }
 
