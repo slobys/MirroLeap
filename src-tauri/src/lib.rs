@@ -109,6 +109,7 @@ pub fn run() {
             commands::check_scrcpy,
             commands::get_devices,
             commands::adb_connect,
+            commands::adb_usb_to_wireless,
             commands::get_mdns_devices,
             commands::adb_pair,
             commands::adb_shell,
