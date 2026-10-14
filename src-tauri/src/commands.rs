@@ -277,20 +277,14 @@ pub async fn get_mdns_devices(custom_path: Option<String>) -> serde_json::Value 
                 let mut services = Vec::new();
                 let mut seen = std::collections::HashSet::new();
                 for line in out_str.lines().skip(1) {
-                    // ADB prints columns separated by variable whitespace, not reliably tabs.
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 3 {
-                        let name = parts[0].trim();
-                        let service = parts[1].trim();
-                        let address = parts[2].trim();
+                    if let Some((name, service, address)) = parse_mdns_service_line(line) {
                         let key = format!("{}|{}|{}", name, service, address);
-                        if !seen.contains(&key) {
+                        if seen.insert(key) {
                             services.push(json!({
                                 "name": name,
                                 "service": service,
                                 "address": address
                             }));
-                            seen.insert(key);
                         }
                     }
                 }
@@ -305,17 +299,40 @@ pub async fn get_mdns_devices(custom_path: Option<String>) -> serde_json::Value 
     }
 }
 
-/// Only consider TLS connect advertisements, never the distinct pairing port.
+/// ADB uses either two columns (service FQDN, IP:port) or three
+/// (instance, service type, IP:port), depending on platform-tools version.
+/// Normalize both without mistaking the pairing port for the connect port.
+fn parse_mdns_service_line(line: &str) -> Option<(String, &'static str, String)> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() < 2 { return None; }
+    let address = *fields.last()?;
+    let (host, port) = address.rsplit_once(':')?;
+    if host.is_empty() || port.parse::<u16>().ok().filter(|p| *p > 0).is_none() {
+        return None;
+    }
+    let kind = fields[..fields.len() - 1].iter().find_map(|field| {
+        if field.contains("_adb-tls-connect._tcp") {
+            Some("_adb-tls-connect._tcp")
+        } else if field.contains("_adb-tls-pairing._tcp") {
+            Some("_adb-tls-pairing._tcp")
+        } else {
+            None
+        }
+    })?;
+    let instance = fields[0].split("._adb-tls-").next()?.trim_end_matches('.');
+    if instance.is_empty() { return None; }
+    Some((instance.to_owned(), kind, address.to_owned()))
+}
+
 fn mdns_connect_candidates(output: &str, requested: &str) -> Vec<String> {
     let host = requested.rsplit_once(':').map(|(h, _)| h).unwrap_or(requested);
     let mut candidates = Vec::new();
     for line in output.lines() {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.len() < 3 || !fields[1].contains("_adb-tls-connect._tcp") { continue; }
-        let address = fields[2];
+        let Some((_, service, address)) = parse_mdns_service_line(line) else { continue; };
+        if service != "_adb-tls-connect._tcp" { continue; }
         if address.rsplit_once(':').map(|(h, _)| h) == Some(host)
-            && address != requested && !candidates.iter().any(|v| v == address) {
-            candidates.push(address.to_owned());
+            && address != requested && !candidates.contains(&address) {
+            candidates.push(address);
         }
     }
     candidates
@@ -378,11 +395,39 @@ pub async fn adb_connect(window: Window, ip: String, custom_path: Option<String>
 
 #[cfg(test)]
 mod wireless_connection_tests {
-    use super::mdns_connect_candidates;
+    use super::{mdns_connect_candidates, parse_mdns_service_line};
+
     #[test]
     fn selects_current_tls_port_for_same_ip_only() {
-        let output = "List of discovered mdns services\\nadb-phone._adb-tls-pairing._tcp. _adb-tls-pairing._tcp. 192.168.2.149:38912\\nadb-phone._adb-tls-connect._tcp. _adb-tls-connect._tcp. 192.168.2.149:42137\\nadb-other._adb-tls-connect._tcp. _adb-tls-connect._tcp. 192.168.2.150:44444";
-        assert_eq!(mdns_connect_candidates(output, "192.168.2.149:5555"), vec!["192.168.2.149:42137"]);
+        let output = r#"List of discovered mdns services
+adb-phone._adb-tls-pairing._tcp. _adb-tls-pairing._tcp. 192.168.2.149:38912
+adb-phone._adb-tls-connect._tcp. _adb-tls-connect._tcp. 192.168.2.149:42137
+adb-other._adb-tls-connect._tcp. _adb-tls-connect._tcp. 192.168.2.150:44444"#;
+        assert_eq!(
+            mdns_connect_candidates(output, "192.168.2.149:5555"),
+            vec!["192.168.2.149:42137"]
+        );
+    }
+
+    #[test]
+    fn parses_two_column_adb_mdns_services() {
+        assert_eq!(
+            parse_mdns_service_line("adb-phone._adb-tls-connect._tcp.    192.168.2.226:42351"),
+            Some(("adb-phone".to_owned(), "_adb-tls-connect._tcp", "192.168.2.226:42351".to_owned()))
+        );
+    }
+
+    #[test]
+    fn does_not_confuse_pairing_with_connection() {
+        let output = r#"List of discovered mdns services
+adb-phone._adb-tls-pairing._tcp. 192.168.2.226:30001"#;
+        assert!(mdns_connect_candidates(output, "192.168.2.226:5555").is_empty());
+    }
+
+    #[test]
+    fn ignores_invalid_mdns_rows() {
+        assert_eq!(parse_mdns_service_line("List of discovered mdns services"), None);
+        assert_eq!(parse_mdns_service_line("adb-x._adb-tls-connect._tcp. 10.0.0.4:bad"), None);
     }
 }
 
