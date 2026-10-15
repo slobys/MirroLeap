@@ -14,6 +14,13 @@ use serde::Deserialize;
 
 const AUDIO_FALLBACK_CHAIN: &[&str] = &["aac", "flac", "raw"];
 
+fn require_main_window(window: &Window) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("This device operation is only available from the main MirroLeap window.".into());
+    }
+    Ok(())
+}
+
 fn is_audio_codec_error(text: &str) -> bool {
     let lower = text.to_lowercase();
     if lower.contains("could not create default audio encoder")
@@ -358,6 +365,7 @@ async fn attempt_adb_connect(adb_path: &str, address: &str) -> Result<(bool, Str
 
 #[tauri::command]
 pub async fn adb_connect(window: Window, ip: String, custom_path: Option<String>, silent: Option<bool>) -> Result<serde_json::Value, String> {
+    require_main_window(&window)?;
     let silent = silent.unwrap_or(false);
     let adb_path = get_binary_path("adb", custom_path);
     let requested = ip.trim();
@@ -477,6 +485,7 @@ pub async fn adb_usb_to_wireless(
     device: String,
     custom_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    require_main_window(&window)?;
     if device.trim().is_empty() || device.contains(':')
         || device.starts_with("adb-") || device.starts_with("emulator-")
         || device.chars().any(char::is_whitespace) {
@@ -656,6 +665,7 @@ mod connection_diagnostics_tests {
 
 #[tauri::command]
 pub async fn adb_pair(window: Window, ip: String, code: String, custom_path: Option<String>) -> Result<serde_json::Value, String> {
+    require_main_window(&window)?;
     let adb_path = get_binary_path("adb", custom_path);
     let _ = window.emit("scrcpy-log", format!("[SYSTEM] Pairing with {}...", ip));
 
@@ -679,7 +689,10 @@ pub async fn adb_pair(window: Window, ip: String, code: String, custom_path: Opt
 }
 
 #[tauri::command]
-pub async fn adb_shell(device: String, command: String, custom_path: Option<String>) -> serde_json::Value {
+pub async fn adb_shell(window: Window, device: String, command: String, custom_path: Option<String>) -> serde_json::Value {
+    if let Err(message) = require_main_window(&window) {
+        return json!({ "success": false, "message": message });
+    }
     let adb_path = get_binary_path("adb", custom_path);
     
     let output = create_command(&adb_path)
@@ -698,10 +711,39 @@ pub async fn adb_shell(device: String, command: String, custom_path: Option<Stri
     }
 }
 
+/// The advanced terminal intentionally accepts arbitrary ADB/scrcpy arguments,
+/// but ONLY from the main application window. The translucent phone webviews
+/// must not be able to invoke it, even if a future CSP regression occurs.
+fn parse_terminal_input(raw: &str) -> Result<Vec<String>, String> {
+    if raw.len() > 2048 || raw.chars().any(|c| matches!(c, '\r' | '\n' | '\0')) {
+        return Err("Command must be one line, at most 2048 bytes.".into());
+    }
+    let parts = split_args(raw)?;
+    if parts.is_empty() {
+        return Err("No command provided".into());
+    }
+    Ok(parts)
+}
+
+fn capped_console_output(bytes: &[u8]) -> String {
+    const MAX_OUTPUT: usize = 64 * 1024;
+    let head = &bytes[..bytes.len().min(MAX_OUTPUT)];
+    let mut rendered = String::from_utf8_lossy(head).into_owned();
+    if bytes.len() > MAX_OUTPUT {
+        rendered.push_str("\n[output truncated at 64 KiB]");
+    }
+    rendered
+}
+
 #[tauri::command]
-pub async fn run_terminal_command(device: Option<String>, cmd: String, custom_path: Option<String>) -> serde_json::Value {
-    let mut parts = split_args(&cmd).unwrap_or_else(|_| cmd.split_whitespace().map(|s| s.to_string()).collect());
-    if parts.is_empty() { return json!({ "success": false, "message": "No command provided" }); }
+pub async fn run_terminal_command(window: Window, device: Option<String>, cmd: String, custom_path: Option<String>) -> serde_json::Value {
+    if window.label() != "main" {
+        return json!({ "success": false, "message": "Only the main window can run terminal commands." });
+    }
+    let mut parts = match parse_terminal_input(&cmd) {
+        Ok(parts) => parts,
+        Err(e) => return json!({"success": false, "message": e}),
+    };
 
     let first_part = parts[0].to_lowercase();
     let is_scrcpy = first_part == "scrcpy";
@@ -738,21 +780,23 @@ pub async fn run_terminal_command(device: Option<String>, cmd: String, custom_pa
         args.push(part);
     }
 
-    let output = create_command(&exe_path)
-        .args(&args)
-        .output()
-        .await;
+    let mut process = create_command(&exe_path);
+    process.args(&args).kill_on_drop(true);
+    // Explicitly bound even for commands like 'adb logcat'. Unbounded output
+    // and dangling ADB children must not stall the GUI indefinitely.
+    let output = timeout(Duration::from_secs(20), process.output()).await;
 
     match output {
-        Ok(o) => {
-             json!({ 
-                 "success": o.status.success(), 
+        Ok(Ok(o)) => {
+             json!({
+                 "success": o.status.success(),
                  "binary": binary_name,
-                 "stdout": String::from_utf8_lossy(&o.stdout).to_string(),
-                 "stderr": String::from_utf8_lossy(&o.stderr).to_string()
+                 "stdout": capped_console_output(&o.stdout),
+                 "stderr": capped_console_output(&o.stderr)
              })
         },
-        Err(e) => json!({ "success": false, "message": e.to_string() })
+        Ok(Err(e)) => json!({ "success": false, "message": e.to_string() }),
+        Err(_) => json!({ "success": false, "message": "Command timed out after 20 seconds. The child process was stopped." })
     }
 }
 
@@ -784,7 +828,10 @@ fn split_args(s: &str) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub async fn push_file(device: String, file_path: String, custom_path: Option<String>) -> serde_json::Value {
+pub async fn push_file(window: Window, device: String, file_path: String, custom_path: Option<String>) -> serde_json::Value {
+    if let Err(message) = require_main_window(&window) {
+        return json!({ "success": false, "message": message });
+    }
     let adb_path = get_binary_path("adb", custom_path);
     
     let output = create_command(&adb_path)
@@ -809,7 +856,10 @@ pub async fn push_file(device: String, file_path: String, custom_path: Option<St
 }
 
 #[tauri::command]
-pub async fn install_apk(device: String, file_path: String, custom_path: Option<String>) -> serde_json::Value {
+pub async fn install_apk(window: Window, device: String, file_path: String, custom_path: Option<String>) -> serde_json::Value {
+    if let Err(message) = require_main_window(&window) {
+        return json!({ "success": false, "message": message });
+    }
     let adb_path = get_binary_path("adb", custom_path);
     
     let output = create_command(&adb_path)
@@ -837,6 +887,7 @@ pub async fn install_apk(device: String, file_path: String, custom_path: Option<
 
 #[tauri::command]
 pub async fn kill_adb(window: Window, custom_path: Option<String>) -> Result<serde_json::Value, String> {
+    require_main_window(&window)?;
     let adb_path = get_binary_path("adb", custom_path);
     let _ = window.emit("scrcpy-log", "[SYSTEM] Terminating ADB stack...".to_string());
     
@@ -1728,6 +1779,7 @@ enum AttemptOutcome {
 
 #[tauri::command]
 pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: ScrcpyConfig, app_handle: tauri::AppHandle) -> Result<(), String> {
+    require_main_window(&window)?;
 
     let video_dir = app_handle.path().video_dir().ok().map(|p| p.to_string_lossy().to_string());
 
@@ -2360,7 +2412,15 @@ mod tests {
 }
 
 #[tauri::command]
-pub async fn stop_scrcpy(state: State<'_, ScrcpyState>, device: String) -> Result<(), String> {
+pub async fn stop_scrcpy(window: Window, state: State<'_, ScrcpyState>, device: String) -> Result<(), String> {
+    require_main_window(&window)?;
+    stop_scrcpy_impl(state, device).await
+}
+
+/// Internal control is called only after device_frame::control has verified
+/// the current toolbar window belongs to this device. Expose no unguarded
+/// Tauri IPC entry point for arbitrary webviews to stop other sessions.
+pub async fn stop_scrcpy_impl(state: State<'_, ScrcpyState>, device: String) -> Result<(), String> {
     let child = {
         let mut processes = state.processes.lock().unwrap();
         processes.remove(&device)
@@ -2407,6 +2467,7 @@ pub async fn download_scrcpy(
     window: Window,
     state: State<'_, ScrcpyState>,
 ) -> Result<(), String> {
+    require_main_window(&window)?;
     if !state.processes.lock().unwrap().is_empty() {
         return Err("Stop all running scrcpy sessions before updating the engine.".into());
     }
@@ -2460,18 +2521,88 @@ pub async fn get_videos_dir(app_handle: tauri::AppHandle) -> Result<String, Stri
         .map_err(|e| e.to_string())
 }
 
+/// A fixed filename under Downloads is the only permitted report destination.
+/// Never allow directory separators, Windows drive prefixes, alternate data
+/// streams, hidden filenames or symlinks supplied by an IPC caller.
+fn validated_report_filename(name: &str) -> Result<&str, String> {
+    if name.is_empty() || name.len() > 96 || name.starts_with('.') ||
+        !name.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+    {
+        return Err("Invalid report filename. Use only letters, digits, '-', '_' and '.'.".into());
+    }
+    if ![".json", ".txt", ".log"].iter().any(|extension| name.ends_with(extension)) {
+        return Err("Report must be .json, .txt or .log".into());
+    }
+    Ok(name)
+}
+
 #[tauri::command]
-pub async fn save_report(app_handle: tauri::AppHandle, content: String, name: String) -> Result<String, String> {
-    use std::fs;
+pub async fn save_report(window: Window, app_handle: tauri::AppHandle, content: String, name: String) -> Result<String, String> {
+    use std::fs::{self, OpenOptions};
+    use std::io::Write;
     use tauri::Manager;
 
+    if window.label() != "main" {
+        return Err("Only the main window can export reports.".into());
+    }
+    let file_name = validated_report_filename(&name)?;
+    if content.len() > 2 * 1024 * 1024 {
+        return Err("Report exceeds the 2 MiB export limit.".into());
+    }
     let downloads = app_handle.path().download_dir()
         .map_err(|e| e.to_string())?;
-    
-    let path = downloads.join(&name);
-    fs::write(&path, content).map_err(|e| e.to_string())?;
-    
+    fs::create_dir_all(&downloads).map_err(|e| format!("Cannot create Downloads directory: {e}"))?;
+    let path = downloads.join(file_name);
+    // create_new refuses overwrites and existing symlinks/reparse points.
+    // Do not replace arbitrary files on repeated exports.
+    let mut output = OpenOptions::new().write(true).create_new(true).open(&path)
+        .map_err(|e| format!("Cannot create new report file: {e}"))?;
+    if let Err(error) = output.write_all(content.as_bytes()) {
+        drop(output);
+        let _ = fs::remove_file(&path);
+        return Err(format!("Cannot write report: {error}"));
+    }
     Ok(path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod report_terminal_security_tests {
+    use super::{validated_report_filename, parse_terminal_input, capped_console_output};
+
+    #[test]
+    fn report_exports_only_safe_flat_filenames() {
+        for good in ["mirroleap-logs-42.json", "scrcpy-gui-logs-123.json", "report.txt", "a_b-1.log"] {
+            assert_eq!(validated_report_filename(good).unwrap(), good);
+        }
+        let too_long = "abcdefghijklmnopqrstuv".repeat(6);
+        for bad in ["", "../evil.json", "folder/file.log", "folder\\file.log",
+            "C:\\temp\\target.json", ".hidden.json", "test.json:stream",
+            "file.exe", "a\0b.json", "bad name.json", too_long.as_str(),
+        ] {
+            assert!(validated_report_filename(bad).is_err(), "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn terminal_refuses_malformed_or_unbounded_inputs() {
+        let too_long = "a".repeat(2049);
+        for bad in ["", "  ", "adb shell \"unterminated", "adb devices\nexit", "adb\0devices",
+            too_long.as_str()] {
+            assert!(parse_terminal_input(bad).is_err(), "accepted {bad:?}");
+        }
+        assert_eq!(parse_terminal_input("adb shell getprop ro.product.model").unwrap()[0], "adb");
+        assert_eq!(parse_terminal_input("devices -l").unwrap(),
+            vec!["devices".to_string(), "-l".to_string()]);
+    }
+
+    #[test]
+    fn terminal_output_has_visible_size_cap() {
+        assert_eq!(capped_console_output("正常输出".as_bytes()), "正常输出");
+        let big = vec![b'x'; 90_000];
+        let truncated = capped_console_output(&big);
+        assert!(truncated.len() < 70_000);
+        assert!(truncated.contains("output truncated"));
+    }
 }
 
 #[tauri::command]

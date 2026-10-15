@@ -60,9 +60,11 @@ assert not any(
 controls_page = (root / "public/phone-controls.html").read_text(encoding="utf-8")
 backend = (root / "src-tauri/src/device_frame.rs").read_text(encoding="utf-8")
 capability = (root / "src-tauri/capabilities/default.json").read_text(encoding="utf-8")
+controls_capability = (root / "src-tauri/capabilities/controls.json").read_text(encoding="utf-8")
 assert all(f'id="{key}"' in controls_page for key in ("drag", "minimize", "close"))
 assert all(f"act('{key}')" in controls_page for key in ("drag", "minimize", "close"))
-assert 'phone-controls-*' in capability
+assert 'phone-controls-*' in controls_capability
+assert 'phone-controls-*' not in capability, "Phone controls must not inherit main UI permissions"
 # The v4.3.3 SVG corner matte was a SHARP SQUARE RECTANGLE, which itself
 # protruded beyond the handset's rounded outer silhouette. Do not bring it back.
 seal = top.find('.//svg:g[@id="screen-seam-seal"]', ns)

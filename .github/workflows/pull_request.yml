@@ -15,11 +15,17 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Security dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Security baseline
+        run: python3 scripts/check_security_baseline.py
 
       - name: Lint Frontend
         run: npm run lint
@@ -59,11 +65,17 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Security dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Security baseline
+        run: python3 scripts/check_security_baseline.py
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

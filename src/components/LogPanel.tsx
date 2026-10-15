@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, memo } from 'react';
 import { Terminal, Trash2, Download } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
+import { safeDiagnosticSettings, redactDiagnosticText } from '../utils/diagnostics';
 
 interface LogPanelProps {
     logs: string[];
@@ -48,20 +49,14 @@ const LogPanel = memo(({ logs, onClear, onAddLog, onRunCommand }: LogPanelProps)
                 <div className="flex gap-2 shrink-0">
                     <button
                         onClick={async () => {
-                            const storageData: Record<string, string> = {};
-                            for (let i = 0; i < localStorage.length; i++) {
-                                const key = localStorage.key(i);
-                                if (key) storageData[key] = localStorage.getItem(key) || "";
-                            }
-
                             const data = {
                                 timestamp: new Date().toISOString(),
-                                localStorage: storageData,
-                                logs: logs
+                                settings: safeDiagnosticSettings(localStorage),
+                                logs: logs.slice(-250).map(redactDiagnosticText)
                             };
 
                             try {
-                                const fileName = `scrcpy-gui-logs-${Date.now()}.json`;
+                                const fileName = `mirroleap-logs-${Date.now()}.json`;
                                 await invoke('save_report', {
                                     content: JSON.stringify(data, null, 2),
                                     name: fileName

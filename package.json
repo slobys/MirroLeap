@@ -1,7 +1,7 @@
 {
   "name": "mirroleap",
   "private": true,
-  "version": "4.6.2",
+  "version": "4.6.3",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -16,7 +16,7 @@
     "@tailwindcss/postcss": "4.2.4",
     "@tauri-apps/api": "2.10.1",
     "@tauri-apps/plugin-dialog": "2.7.0",
-    "browserslist": "4.28.2",
+    "browserslist": "4.29.3",
     "caniuse-lite": "1.0.30001791",
     "lucide-react": "0.564.0",
     "react": "19.2.5",
@@ -34,10 +34,10 @@
     "@vitejs/plugin-react": "6.0.1",
     "autoprefixer": "10.5.0",
     "jsdom": "29.1.0",
-    "postcss": "8.5.12",
+    "postcss": "8.5.30",
     "tailwindcss": "4.2.4",
     "typescript": "6.0.3",
-    "vite": "8.0.10",
-    "vitest": "4.1.5"
+    "vite": "8.3.4",
+    "vitest": "4.1.11"
   }
 }

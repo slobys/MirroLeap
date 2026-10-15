@@ -3,6 +3,7 @@ import {
     Settings2, ShieldCheck, Smartphone, Volume2, VolumeX, Wifi,
 } from 'lucide-react';
 import type { PendingAdbDevice, ScrcpyConfig } from '../hooks/useScrcpy';
+import { applyMirrorPreset, activeMirrorPreset, type MirrorPreset } from '../utils/mirrorPresets';
 
 type Props = {
     locale: string;
@@ -170,6 +171,28 @@ export default function CompactDashboard({
                         </div>
 
                         <div className="ml-field mt-5">
+                            <label htmlFor="ml-preset" className="ml-field-title">
+                                {copy('场景预设', 'Scenario profile')}
+                            </label>
+                            <select id="ml-preset" className="ml-select"
+                                value={activeMirrorPreset(config)}
+                                disabled={isSwitchingResolution}
+                                onChange={(event) => {
+                                    if (event.target.value !== 'custom') {
+                                        onConfigChange(applyMirrorPreset(config, event.target.value as MirrorPreset));
+                                    }
+                                }}>
+                                <option value="custom" disabled>{copy('自定义参数', 'Custom settings')}</option>
+                                <option value="balanced">{copy('均衡 · 日常使用', 'Balanced · Everyday')}</option>
+                                <option value="presentation">{copy('演示 · 文字清晰', 'Presentation · Clear text')}</option>
+                                <option value="low-latency">{copy('流畅 · 游戏操作', 'Smooth · Low latency')}</option>
+                                <option value="quality">{copy('高清 · 视频观看', 'Quality · Video')}</option>
+                            </select>
+                            {running && <p className="ml-muted mt-1 text-[11px]" role="note">
+                                {copy('场景配置下次启动投屏时生效，不会打断当前画面。', 'Profile settings apply on the next session without interrupting this mirror.')}
+                            </p>}
+                        </div>
+                        <div className="ml-field mt-3">
                             <label htmlFor="ml-resolution" className="ml-field-title">{copy('分辨率', 'Resolution')}</label>
                             <select id="ml-resolution" value={config.res || '0'}
                                 disabled={isSwitchingResolution}

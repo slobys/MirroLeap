@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "phone-controls-only",
+  "description": "Hover controls call scoped native commands, without shell or dialog plugin rights.",
+  "windows": ["phone-controls-*"],
+  "permissions": ["core:default"]
+}

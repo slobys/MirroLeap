@@ -33,6 +33,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev
       - run: npm ci
+      - run: npm audit --audit-level=high
       - run: npm test
       - run: npm run build
       - run: python3 scripts/check_device_frame.py
@@ -40,6 +41,7 @@ jobs:
       - run: python3 scripts/check_landscape_toolbar.py
       - run: python3 scripts/check_portable_release.py
       - run: python3 scripts/check_compact_home.py
+      - run: python3 scripts/check_security_baseline.py
       - run: python3 scripts/check_repository_migration.py
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
@@ -152,6 +154,10 @@ jobs:
           基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 投屏核心。
 
           ### 主要更新
+          - **v4.6.3 稳定与安全**：修复 npm 依赖安全公告，自动测试增加依赖漏洞扫描；配置 Tauri CSP 并将主界面、悬浮控制栏和启动画面分权隔离。
+          - **保护导出与高级终端**：只允许主窗口调用终端和报告导出，限制报告文件名/体积及终端执行时间；诊断报告按白名单保存非敏感设置并对常见设备地址做脱敏。
+          - **一键场景预设**：均衡、演示、流畅、高清四个视频预设，运行中的投屏不会因切换预设而自动重启；其它设置不受影响。
+          - **本地优先**：移除主界面加载 Google Fonts 的远程请求。依旧保留原有 USB/Wi-Fi、真机边框、画笔及完整高级设置。
           - **独立仓库**：项目已迁入 [slobys/MirroLeap](https://github.com/slobys/MirroLeap)，不再作为 GitHub fork 展示；完整保留原项目署名与开源授权。
           - **开发历史保留**：原先 slobys/scrcpy-gui 的 14 个分支、14 个标签和历史 Release 已迁移，新版本从本独立仓库发布。
           - **v4.6.1 悬浮栏防越界**：悬浮控制栏被约束在手机投屏画面的可见上下边缘之间，并避开当前 Windows 显示器任务栏；拖动、横屏与最小化恢复时持续重新计算。
