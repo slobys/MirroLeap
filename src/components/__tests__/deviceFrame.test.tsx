@@ -14,7 +14,7 @@ describe('iPhone-style live device shell setting', () => {
       config={{ device: 'phone', sessionMode: 'mirror', deviceFrame: true }}
       setConfig={setConfig}
     />);
-    const label = screen.getByText('iPhone-style device frame');
+    const label = screen.getByText('iPhone-style slim titanium bezel');
     fireEvent.click(label);
     expect(setConfig).toHaveBeenCalledWith(
       expect.objectContaining({ deviceFrame: false, device: 'phone', sessionMode: 'mirror' })
@@ -27,6 +27,6 @@ describe('iPhone-style live device shell setting', () => {
       config={{ device: 'phone', sessionMode: 'mirror', deviceFrame: true }}
       setConfig={vi.fn()}
     />);
-    expect(screen.queryByText('iPhone-style device frame')).not.toBeInTheDocument();
+    expect(screen.queryByText('iPhone-style slim titanium bezel')).not.toBeInTheDocument();
   });
 });

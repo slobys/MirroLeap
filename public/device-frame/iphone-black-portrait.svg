@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="2150"
+     viewBox="0 0 1000 2150" preserveAspectRatio="none" aria-hidden="true">
+  <title>Slim black titanium phone bezel, no notch, transparent screen aperture</title>
+  <!--
+    SOURCE OF TRUTH for src-tauri/src/frame_layout.rs:
+    artboard 1000 x 2150; actual video is visible through the unpainted
+    x=18,y=18,w=964,h=2114 opening. Preserve this geometry when redesigning.
+    The screen's Android contents are never embedded into this asset.
+    Portrait only: on landscape the native scrcpy window is shown without skin.
+  -->
+  <defs>
+    <linearGradient id="titanium" x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+      <stop offset="0" stop-color="#989ca1"/>
+      <stop offset=".016" stop-color="#353940"/>
+      <stop offset=".09" stop-color="#16191e"/>
+      <stop offset=".35" stop-color="#656970"/>
+      <stop offset=".62" stop-color="#22252a"/>
+      <stop offset=".87" stop-color="#797e85"/>
+      <stop offset=".984" stop-color="#3c4047"/>
+      <stop offset="1" stop-color="#afb3b8"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#a5a9ae"/>
+      <stop offset=".028" stop-color="#363a40"/>
+      <stop offset=".35" stop-color="#2c3036"/>
+      <stop offset=".76" stop-color="#555b62"/>
+      <stop offset=".98" stop-color="#282c31"/>
+      <stop offset="1" stop-color="#90959c"/>
+    </linearGradient>
+    <linearGradient id="buttonLeft" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#202329"/>
+      <stop offset=".43" stop-color="#8b9097"/>
+      <stop offset=".83" stop-color="#4b5057"/>
+      <stop offset="1" stop-color="#1b1e22"/>
+    </linearGradient>
+    <linearGradient id="buttonRight" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1b1d22"/>
+      <stop offset=".42" stop-color="#4d5159"/>
+      <stop offset=".80" stop-color="#999da3"/>
+      <stop offset="1" stop-color="#22252a"/>
+    </linearGradient>
+    <!-- Alpha cutout: the centre is REAL transparency, not a black/white fill.
+         This mask also creates the minimal dark rounded corner treatment. -->
+    <mask id="transparentScreen" maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="2150">
+      <rect width="1000" height="2150" fill="#ffffff"/>
+      <rect x="18" y="18" width="964" height="2114" rx="57" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <!-- All body surfaces are clipped *outside* the exact video aperture.
+       Never put any element over the top centre of the Android screen. -->
+  <g mask="url(#transparentScreen)">
+    <rect x="1" y="1" width="998" height="2148" rx="76"
+          fill="url(#titanium)" />
+    <rect x="2" y="2" width="996" height="2146" rx="75"
+          fill="none" stroke="#d3d5d6" stroke-opacity=".38" stroke-width="1.4"/>
+    <rect x="4.2" y="4.2" width="991.6" height="2141.6" rx="72"
+          fill="#23262c" />
+    <rect x="5.5" y="5.5" width="989" height="2139" rx="70.8"
+          fill="none" stroke="url(#edge)" stroke-width="2.3"/>
+    <rect x="7.5" y="7.5" width="985" height="2135" rx="69"
+          fill="#07090d"/>
+    <rect x="10" y="10" width="980" height="2130" rx="65"
+          fill="#181a1f"/>
+    <rect x="12" y="12" width="976" height="2126" rx="63"
+          fill="#020305"/>
+    <rect x="15" y="15" width="970" height="2120" rx="60"
+          fill="#101115"/>
+    <!-- Edge nearer glass: a subtle optical highlight rather than a thick
+         black border or bright decorative ring. -->
+    <rect x="16.5" y="16.5" width="967" height="2117" rx="58"
+          fill="none" stroke="#8d9197" stroke-opacity=".29" stroke-width="1.3"/>
+  </g>
+
+  <!-- Physical side controls only, never fake status bar / notch / island. -->
+  <g aria-hidden="true">
+    <rect x=".7" y="328" width="3.4" height="56" rx="1.5"
+          fill="url(#buttonLeft)" />
+    <rect x=".7" y="454" width="3.4" height="134" rx="1.5"
+          fill="url(#buttonLeft)" />
+    <rect x=".7" y="632" width="3.4" height="134" rx="1.5"
+          fill="url(#buttonLeft)" />
+    <rect x="995.9" y="510" width="3.4" height="212" rx="1.5"
+          fill="url(#buttonRight)" />
+    <path d="M1.6 337v38 M1.6 465v112 M1.6 643v112"
+          stroke="#c5c8cb" stroke-opacity=".34" stroke-width=".6" stroke-linecap="round" />
+    <path d="M998.3 525v180" stroke="#d1d4d7" stroke-opacity=".33"
+          stroke-width=".7" stroke-linecap="round" />
+  </g>
+</svg>

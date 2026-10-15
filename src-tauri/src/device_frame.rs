@@ -2,12 +2,12 @@
 //!
 //! This is NOT a screenshot or a second video stream: scrcpy continues to draw
 //! and receive mouse/keyboard events unmodified. A small transparent WebView2
-//! window paints only the metallic bezel, button shapes and camera island.
+//! window paints only a thin, SVG-based black titanium case and side buttons.
 //! The whole overlay ignores mouse events so clicks reach scrcpy below it.
 //!
 //! The frame stays in the normal Windows z-order (not globally TOPMOST) to
 //! avoid obscuring unrelated applications. It follows the SDL client rect,
-//! automatically hides while minimized/maximized and closes with the session.
+//! automatically hides while minimized/maximized/landscape, and closes with the session.
 
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
@@ -47,6 +47,8 @@ fn screen_rect(pid: u32) -> Option<(HWND, FrameRect)> {
     if !unsafe { ClientToScreen(hwnd, &mut origin) }.as_bool() {
         return None;
     }
+    // This first skin is deliberately portrait-only. Landscape shows the
+    // unmodified scrcpy window; rotating back automatically restores the shell.
     let frame = expand_screen(ScreenRect {
         x: origin.x,
         y: origin.y,
