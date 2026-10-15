@@ -28,6 +28,11 @@ export interface WirelessDiagnosis {
     adbError?: string | null;
 }
 
+export interface PendingAdbDevice {
+    serial: string;
+    state: string;
+}
+
 /** Whether an mDNS-discovered device is already present in `devices`.
  *  A device connected via a plain `adb connect ip:port` is tracked under that
  *  same "ip:port" serial, but one already connected through wireless
@@ -105,6 +110,7 @@ export function useScrcpy() {
     // -l`'s own `model:` field). Never used for identity/comparisons -- `d`
     // (the serial) remains the source of truth everywhere else.
     const [deviceModels, setDeviceModels] = useState<Record<string, string>>({});
+    const [pendingDevices, setPendingDevices] = useState<PendingAdbDevice[]>([]);
     // Nicer than deviceModels when available (e.g. "Galaxy S23" instead of
     // "SM S911B"), fetched lazily per device via one extra `adb shell
     // getprop` round-trip -- see the effect below for the once-per-serial
@@ -397,6 +403,7 @@ export function useScrcpy() {
 
             if (!res.error) {
                 newDevices = res.devices as string[];
+                setPendingDevices(Array.isArray(res.pendingDevices) ? res.pendingDevices : []);
                 if (res.deviceModels) {
                     setDeviceModels(res.deviceModels as Record<string, string>);
                 }
@@ -940,6 +947,7 @@ export function useScrcpy() {
     return {
         devices,
         deviceModels,
+        pendingDevices,
         deviceFriendlyNames,
         logs,
         setLogs,
