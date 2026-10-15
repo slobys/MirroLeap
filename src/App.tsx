@@ -151,9 +151,7 @@ function App() {
               'info',
               t('alerts.updateBtn'),
               async () => {
-                if (config.scrcpyPath) {
-                  setConfig(prev => ({ ...prev, scrcpyPath: undefined }));
-                }
+                // Preserve the current working core if download or validation fails.
                 await downloadScrcpy();
               },
               true,
