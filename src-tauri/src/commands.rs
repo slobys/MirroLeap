@@ -565,6 +565,92 @@ mod usb_wireless_tests {
     }
 }
 
+/// Only probe the explicitly requested IPv4 endpoint; never scan the LAN.
+fn parse_diagnostic_endpoint(raw: &str) -> Option<std::net::SocketAddrV4> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() { return None; }
+    let (host, port) = match trimmed.rsplit_once(':') {
+        Some((host, port)) => (host, port.parse::<u16>().ok()?),
+        None => (trimmed, 5555),
+    };
+    if port == 0 { return None; }
+    let ip = host.parse::<std::net::Ipv4Addr>().ok()?;
+    if ip.is_unspecified() || ip.is_multicast() || ip.is_broadcast() {
+        return None;
+    }
+    Some(std::net::SocketAddrV4::new(ip, port))
+}
+
+/// Classify the failure rather than asking users to retry a dead 5555 port.
+/// A TCP probe checks reachability, not ADB authorization or successful pairing.
+#[tauri::command]
+pub async fn diagnose_adb_connection(
+    ip: String,
+    custom_path: Option<String>,
+) -> serde_json::Value {
+    let Some(endpoint) = parse_diagnostic_endpoint(&ip) else {
+        return json!({"code": "invalid", "address": ip, "alternatives": []});
+    };
+    let address = endpoint.to_string();
+    let adb_path = get_binary_path("adb", custom_path);
+    let mut adb_error = None;
+    let mut current_state: Option<String> = None;
+    match adb_output(&adb_path, &["devices", "-l"]).await {
+        Ok((true, listing)) => {
+            for line in listing.lines().skip(1) {
+                if let Some((serial, state)) = parse_adb_device_line(line) {
+                    if serial == address { current_state = Some(state); break; }
+                }
+            }
+        }
+        Ok((false, message)) => adb_error = Some(message),
+        Err(message) => adb_error = Some(message),
+    }
+    if let Some(state) = current_state {
+        let code = if state == "device" { "connected" }
+            else if state == "unauthorized" { "unauthorized" } else { "offline" };
+        return json!({"code": code, "address": address, "alternatives": [], "adbError": adb_error});
+    }
+
+    let mut alternatives = Vec::<String>::new();
+    if let Ok((true, listing)) = adb_output(&adb_path, &["mdns", "services"]).await {
+        alternatives = mdns_connect_candidates(&listing, &address);
+    }
+
+    // Do not perform a UDP or broad port scan. This is one user-requested TCP
+    // attempt, with a tight timeout.
+    let probe = timeout(Duration::from_secs(2), tokio::net::TcpStream::connect(endpoint)).await;
+    let code = match probe {
+        Ok(Ok(_)) => "port_open",
+        Ok(Err(ref error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => "refused",
+        Ok(Err(ref error)) if error.kind() == std::io::ErrorKind::TimedOut => "timeout",
+        Ok(Err(_)) => "unreachable",
+        Err(_) => "timeout",
+    };
+    let code = if !alternatives.is_empty() { "port_changed" } else { code };
+    json!({"code": code, "address": address, "alternatives": alternatives, "adbError": adb_error})
+}
+
+#[cfg(test)]
+mod connection_diagnostics_tests {
+    use super::parse_diagnostic_endpoint;
+
+    #[test]
+    fn defaults_plain_ipv4_to_legacy_port() {
+        assert_eq!(parse_diagnostic_endpoint("192.168.2.226").unwrap().to_string(), "192.168.2.226:5555");
+    }
+    #[test]
+    fn preserves_explicit_wireless_debugging_port() {
+        assert_eq!(parse_diagnostic_endpoint("192.168.2.226:42783").unwrap().to_string(), "192.168.2.226:42783");
+    }
+    #[test]
+    fn rejects_invalid_inputs() {
+        for invalid in ["", "10.0.0.1:0", "10.0.0.1:99999", "example.com:5555", "256.0.0.1:5", "0.0.0.0:5555"] {
+            assert!(parse_diagnostic_endpoint(invalid).is_none(), "{invalid}");
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn adb_pair(window: Window, ip: String, code: String, custom_path: Option<String>) -> Result<serde_json::Value, String> {
     let adb_path = get_binary_path("adb", custom_path);
