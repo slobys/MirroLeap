@@ -14,6 +14,14 @@
 
 ScrcpyGUI v4 is a modern, feature-rich GUI for [scrcpy](https://github.com/Genymobile/scrcpy), completely rebuilt from the ground up using **Tauri v2**, **React 19**, and **Rust**. It transforms your Android device into a professional tool for gaming, development, and content creation.
 
+## 🛠️ Community Fork — v4.2 Stability Preview
+
+This fork prioritizes reliable wireless ADB connections, readable diagnostics, safe scrcpy engine updates with rollback, and a resizable/scalable workspace. The desktop GUI remains based on the original scrcpy engine.
+
+**中文开发计划与测试清单：** [ROADMAP_CN.md](ROADMAP_CN.md)
+
+---
+
 ## 🚀 Key Features
 
 - **✨ Best Looking GUI**: A stunning, modern interface with smooth animations and a premium look and feel.
