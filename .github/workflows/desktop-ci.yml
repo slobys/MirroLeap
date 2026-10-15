@@ -59,6 +59,8 @@ jobs:
         with:
           workspaces: src-tauri -> target
       - run: npm ci
+      - name: Real Edge dashboard geometry (idle, running and core-missing)
+        run: node scripts/windows-dashboard-layout.mjs
       - name: Build original standalone desktop executable (unpatched, without any installer)
         run: npm run tauri build -- --no-bundle
       - name: Stage extract-and-run portable version
@@ -160,6 +162,8 @@ jobs:
           基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 投屏核心。
 
           ### 主要更新
+          - **v4.6.5 首页按钮与底部链接布局修复**：开始/停止投屏按钮完整收在投屏卡片内，不再盖住「更多功能与快捷键」。卡片根据内容自动确定最小高度，窗口缩小时通过整页滚动确保所有操作可达，默认窗口可直接完整看到按钮与链接。
+          - **新增 32 组真实 Edge 视觉布局测试**：Windows CI 在默认/最小/最大/窄屏、投屏前/投屏中/引擎未安装/分辨率切换、100%/150% 缩放组合下，读取实际元素矩形并验证按钮与卡片、底部链接互不遮挡。新增测试与真实 WebView2 首页启动校验相互补充。
           - **v4.6.4 白屏恢复**：修复 v4.6.3 在部分 Windows WebView2 环境中安装后只显示空白背景的问题。暂时回退新增的全局 CSP 到此前可用版本的设置，保留其它 Tauri 权限隔离、日志与更新完整性保护。
           - **真实启动验收**：Windows CI 不再只检查 EXE 能否构建；打包程序会在 WebView2 中真实启动，并通过页面 DOM 检查确认 MirroLeap 首页、设备卡片和投屏控制已经渲染，防止空白版再次进入 Releases。
           - **故障提示**：即使前端 JS 启动异常，也有独立于 React 的初始提示，不再只显示毫无说明的空白窗口。严格 CSP 将在完成兼容性验证后重新引入。

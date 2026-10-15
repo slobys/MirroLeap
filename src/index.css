@@ -268,9 +268,15 @@ body {
    Only the frequently used controls live here; the existing advanced
    components remain available in the categorized Settings view.
    Semantic surface tokens automatically follow theme and light/dark mode. */
-.ml-home { overflow-y: auto; scrollbar-gutter: stable; }
+.ml-home {
+  /* The page itself is the scroll container. Never clip a card's start/stop
+     button or the settings link to fit an unrealistically short viewport. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
 .ml-home-header {
-  min-height: 82px; padding: 18px 28px;
+  min-height: 72px; padding: 12px 28px; flex: 0 0 auto;
   border-bottom: 1px solid var(--border-base);
   background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
 }
@@ -298,8 +304,18 @@ body {
 .ml-icon-button:hover:not(:disabled), .ml-secondary-action:hover,
 .ml-footer-link:hover { color: var(--primary); border-color: var(--primary); }
 .ml-icon-button:disabled { opacity: .45; cursor: progress; }
-.ml-home-body { padding: 26px 28px 16px; display: flex; flex-direction: column; }
-.ml-intro { margin-bottom: 18px; }
+.ml-home-body {
+  padding: 18px 28px 10px;
+  display: flex;
+  flex-direction: column;
+  /* flex:1 / min-height:0 compressed the grid to the viewport, even though
+     the right card contained ~500 CSS px of controls. Its start/stop button
+     painted OUTSIDE the card over the footer. Grow to the real intrinsic
+     content height and scroll the entire page if the viewport is shorter. */
+  flex: 1 0 auto;
+  min-height: min-content;
+}
+.ml-intro { margin-bottom: 12px; flex-shrink: 0; }
 .ml-status-chip {
   display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
   padding: 9px 13px; border-radius: 100px; font-size: 11px;
@@ -312,9 +328,14 @@ body {
 }
 .ml-ready .ml-status-dot, .ml-running-light.ml-on { background: #10b981; box-shadow: 0 0 0 3px rgba(16,185,129,.1); }
 .ml-missing .ml-status-dot { background: #eab308; }
-.ml-dashboard-grid { grid-template-columns: minmax(260px, 0.95fr) minmax(310px, 1.25fr); flex: 1; min-height: 336px; }
+.ml-dashboard-grid {
+  grid-template-columns: minmax(260px, 0.95fr) minmax(310px, 1.25fr);
+  grid-template-rows: minmax(max-content, 1fr);
+  flex: 1 0 auto;
+  min-height: 336px;
+}
 .ml-card {
-  padding: 19px 20px; border-radius: 19px; min-height: 0;
+  padding: 14px 18px; border-radius: 19px; min-height: max-content;
   background: color-mix(in srgb, var(--bg-surface) 91%, var(--bg-base));
   border: 1px solid var(--border-base);
   box-shadow: 0 8px 32px rgba(0,0,0,.035);
@@ -351,7 +372,7 @@ body {
   font-weight: 600; font-size: 12px; min-height: 40px;
 }
 .ml-hero {
-  padding: 15px; background: var(--bg-elevated);
+  padding: 12px; background: var(--bg-elevated);
   border: 1px solid var(--border-base); border-radius: 14px;
 }
 .ml-hero-icon {
@@ -393,10 +414,21 @@ body {
 }
 .ml-primary-action { background: var(--primary); color: var(--text-on-primary); }
 .ml-stop-action { color: #fff; background: #c63a40; }
+.ml-mirror-card .ml-primary-action, .ml-mirror-card .ml-stop-action {
+  flex-shrink: 0;
+  margin-top: 12px;
+}
+.ml-card-spacer { flex: 1 1 8px; min-height: 8px; }
 .ml-primary-action:hover:not(:disabled), .ml-stop-action:hover { filter: brightness(1.08); }
 .ml-primary-action:active:not(:disabled), .ml-stop-action:active { transform: scale(.99); }
 .ml-primary-action:disabled { opacity: .45; cursor: not-allowed; }
-.ml-home-footer { min-height: 49px; padding: 9px 0 0; }
+.ml-home-footer {
+  min-height: 42px;
+  padding: 9px 0 0;
+  margin-top: 8px;
+  flex: 0 0 auto;
+  position: relative;
+}
 .ml-footer-link { font-size: 11px; color: var(--text-muted); font-weight: 650; }
 .ml-settings-top { border-bottom: 1px solid var(--border-base); background: var(--bg-surface); }
 .ml-settings-tab {
@@ -413,7 +445,11 @@ body {
 @media (max-width: 740px) {
   .ml-home-header { padding: 14px 18px; }
   .ml-home-body { padding: 17px 18px 16px; }
-  .ml-dashboard-grid { grid-template-columns: 1fr; min-height: auto; }
+  .ml-dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    min-height: auto;
+  }
   .ml-device-list { max-height: 160px; }
   .ml-home-footer { margin-top: 10px; }
 }
