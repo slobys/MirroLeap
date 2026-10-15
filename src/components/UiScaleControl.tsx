@@ -26,7 +26,7 @@ export default function UiScaleControl() {
         } catch {
             // Browser storage may be disabled; the current session still works.
         }
-        return () => document.documentElement.style.removeProperty('zoom');
+        return () => { document.documentElement.style.removeProperty('zoom'); };
     }, [scale]);
 
     return (
