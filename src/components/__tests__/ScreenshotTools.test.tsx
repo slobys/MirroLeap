@@ -26,7 +26,7 @@ describe('MirroCapture local screenshot', () => {
     }));
     expect(await screen.findByRole('status')).toHaveTextContent('MirroLeap-Screenshot-20261015-121235.png');
     expect(button).toBeEnabled();
-    expect(screen.getByText(/Pen annotations are not included yet/)).toBeInTheDocument();
+    expect(screen.getByText(/Annotated capture requires an active mirrored phone/)).toBeInTheDocument();
   });
 
   it('prevents concurrent screenshot capture calls while the first one is pending', async () => {
@@ -48,5 +48,30 @@ describe('MirroCapture local screenshot', () => {
       .toBe('Android authorization required');
     expect(screenshotErrorMessage(new Error('Disconnected while saving')))
       .toBe('Disconnected while saving');
+  });
+
+  it('saves annotated screenshots only on explicit click, retaining existing pen state', async () => {
+    invokeMock.mockResolvedValue('C:\\Downloads\\MirroLeap-Annotated-123.png');
+    render(<ScreenshotTools device="emulator-5554"/>);
+    fireEvent.click(screen.getByRole('button', {name: 'Save annotated screenshot'}));
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith('save_annotated_screenshot', {
+      device: 'emulator-5554', customPath: undefined,
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('MirroLeap-Annotated-123.png');
+    expect(screen.getByRole('button', {name:'Save phone screenshot'})).toBeEnabled();
+  });
+
+  it('prevents two capture modes from running concurrently', async () => {
+    let complete!: (path: string) => void;
+    invokeMock.mockReturnValue(new Promise(resolve => { complete = resolve; }));
+    render(<ScreenshotTools device="emulator-5554"/>);
+    fireEvent.click(screen.getByRole('button', {name:'Save annotated screenshot'}));
+    expect(screen.getByRole('button', {name:'Save phone screenshot'})).toBeDisabled();
+    expect(screen.getByRole('button', {name:'Save annotated screenshot'})).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', {name:'Save phone screenshot'}));
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    await act(async () => complete('C:\\Downloads\\MirroLeap-Annotated.png'));
+    expect(screen.getByRole('button', {name:'Save phone screenshot'})).toBeEnabled();
   });
 });

@@ -42,6 +42,7 @@ jobs:
       - run: python3 scripts/check_portable_release.py
       - run: python3 scripts/check_compact_home.py
       - run: python3 scripts/check_security_baseline.py
+      - run: python3 scripts/check_annotated_capture.py
       - run: python3 scripts/check_repository_migration.py
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
@@ -162,6 +163,9 @@ jobs:
           基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 投屏核心。
 
           ### 主要更新
+          - **v4.7.1 MirroCapture 批注图片导出**：在手机投屏画面完成画笔圈画后，到「设置 → 工具与日志」点击「保存含画笔截图」。截取当前选定 Android 手机的原始 PNG，并将当前手机的透明画笔图层按像素比例合成到原分辨率，生成单独的 MirroLeap-Annotated-*.png 文件，保留原始截图按钮。
+          - **颜色、橡皮擦和方向防错**：来自同一窗口的透明 Canvas 快照支持原有画笔与 destination-out 橡皮擦效果；采用只接受匹配设备/一次性令牌的本地 IPC 回传。无画笔、投屏最小化、旋转不匹配、PNG 损坏或超时都会提示错误，不会偷偷保存错误的合成图。
+          - **隐私保护**：只有用户点击保存时才截屏，不上传手机画面；不包含电脑桌面、手机边框或浮动工具条；保留现有下载目录独占创建与错误回滚。新增截图合成与画笔回调自动测试。
           - **v4.7.0 MirroCapture 本地手机截图**：在「设置 → 工具与日志」一键抓取当前选中 Android 手机的原始 PNG 到 Windows 下载文件夹；通过 ADB exec-out screencap -p 实现，不上传云端、不重启投屏，保存成功后显示完整路径。
           - **截图安全与稳定性**：设备标识校验，独立 20 秒命令超时、24MiB 上限，PNG 头部/IHDR/终止标识检查；独占创建防覆盖、无设备时禁用按钮、失败显式提示、运行中避免并发重复截图。原始 PNG **不含 MirroLeap 的画笔叠加标注**，后续单独开发批注合成与导出。
           - **v4.6.5 首页按钮与底部链接布局修复**：开始/停止投屏按钮完整收在投屏卡片内，不再盖住「更多功能与快捷键」。卡片根据内容自动确定最小高度，窗口缩小时通过整页滚动确保所有操作可达，默认窗口可直接完整看到按钮与链接。

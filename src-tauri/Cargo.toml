@@ -1,6 +1,6 @@
 [package]
 name = "mirroleap"
-version = "4.7.0"
+version = "4.7.1"
 authors = ["slobys", "KB-kil0bit contributors"]
 description = "MirroLeap: a lightweight Android mirroring desktop client powered by scrcpy"
 edition = "2021"
@@ -30,6 +30,8 @@ tauri-plugin-shell = "2.3.5"
 tauri-plugin-dialog = "2.7.0"
 chrono = "0.4.43"
 sha2 = "0.10"
+base64 = "0.22"
+png = "0.17"
 # Global OS shortcuts: Ctrl+Alt+Shift+C to recentre the active mirror window
 # (all platforms) and Ctrl+Alt+Shift+W to drag the borderless scrcpy window
 # with the mouse (Windows-only). See src/shortcuts.rs and src/grab.rs.

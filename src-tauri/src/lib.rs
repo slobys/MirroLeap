@@ -1,4 +1,5 @@
 mod commands;
+mod capture_compositor;
 mod core_manager;
 mod frame_layout;
 #[cfg(target_os = "windows")]
@@ -125,6 +126,7 @@ pub fn run() {
             commands::stop_scrcpy,
             commands::device_frame_control,
             commands::device_frame_ack,
+            commands::device_frame_capture_ack,
             commands::recenter_scrcpy_window,
             commands::set_active_device,
             commands::download_scrcpy,
@@ -133,6 +135,7 @@ pub fn run() {
             commands::get_videos_dir,
             commands::save_report,
             commands::save_device_screenshot,
+            commands::save_annotated_screenshot,
             commands::get_scrcpy_bin_dir,
             commands::run_terminal_command,
             commands::check_scrcpy_update,

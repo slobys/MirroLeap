@@ -194,7 +194,25 @@
       },
       setSize(value) { if ([3, 5, 9].includes(value)) size = value; },
       undo() { if (drawing) drawing = null; else strokes.pop(); redraw(); },
-      clear() { drawing = null; strokes.length = 0; redraw(); }
+      clear() { drawing = null; strokes.length = 0; redraw(); },
+      // Rust invokes this on the SAME overlay instance that displays the pen
+      // strokes. Capture the already-rasterized transparent bitmap so the
+      // eraser's destination-out effect survives compositing. Never include
+      // the separate SVG phone bezel / native hover control window.
+      captureSnapshot() {
+        if (drawing) throw new Error('Finish drawing before saving the annotated screenshot.');
+        if (!strokes.length) throw new Error('There are no pen strokes to export.');
+        fit();
+        if (canvas.width < 1 || canvas.height < 1 ||
+            canvas.width * canvas.height > 16_000_000) {
+          throw new Error('Annotation canvas dimensions are not ready.');
+        }
+        return {
+          png: canvas.toDataURL('image/png'),
+          orientation: document.documentElement.dataset.orientation || 'portrait',
+          strokes: strokes.length
+        };
+      }
     });
   })();
   </script>

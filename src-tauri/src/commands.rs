@@ -740,16 +740,10 @@ fn valid_android_screenshot_png(bytes: &[u8]) -> bool {
     (1..=16_384).contains(&width) && (1..=16_384).contains(&height)
 }
 
-#[tauri::command]
-pub async fn save_device_screenshot(
-    window: Window, app_handle: tauri::AppHandle,
-    device: String, custom_path: Option<String>,
-) -> Result<String, String> {
-    require_main_window(&window)?;
-    validate_capture_device(&device)?;
+async fn capture_device_png(device: &str, custom_path: Option<String>) -> Result<Vec<u8>, String> {
     let adb = get_binary_path("adb", custom_path);
     let mut command = create_command(&adb);
-    command.arg("-s").arg(&device).args(["exec-out", "screencap", "-p"])
+    command.arg("-s").arg(device).args(["exec-out", "screencap", "-p"])
         .stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     let mut child = command.spawn().map_err(|e| format!("Cannot start ADB screenshot: {e}"))?;
     let capture = async {
@@ -766,9 +760,13 @@ pub async fn save_device_screenshot(
         }
         Ok::<Vec<u8>, String>(png)
     };
-    let png = timeout(Duration::from_secs(20), capture).await
-        .map_err(|_| "Android screenshot timed out after 20 seconds.".to_string())??;
+    timeout(Duration::from_secs(20), capture).await
+        .map_err(|_| "Android screenshot timed out after 20 seconds.".to_string())?
+}
 
+fn save_screenshot_to_downloads(
+    app_handle: &tauri::AppHandle, png: &[u8], prefix: &str,
+) -> Result<String, String> {
     use std::fs::{self, OpenOptions};
     use std::io::Write;
     let downloads = app_handle.path().download_dir()
@@ -779,7 +777,7 @@ pub async fn save_device_screenshot(
     // prevents overwriting existing files or following a symlink.
     for attempt in 0..100 {
         let suffix = if attempt == 0 { String::new() } else { format!("-{attempt}") };
-        let path = downloads.join(format!("MirroLeap-Screenshot-{stamp}{suffix}.png"));
+        let path = downloads.join(format!("{prefix}-{stamp}{suffix}.png"));
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut output) => {
                 if let Err(error) = output.write_all(&png).and_then(|_| output.sync_all()) {
@@ -794,6 +792,48 @@ pub async fn save_device_screenshot(
         }
     }
     Err("Too many screenshots with the same timestamp. Retry shortly.".into())
+}
+
+#[tauri::command]
+pub async fn save_device_screenshot(
+    window: Window, app_handle: tauri::AppHandle,
+    device: String, custom_path: Option<String>,
+) -> Result<String, String> {
+    require_main_window(&window)?;
+    validate_capture_device(&device)?;
+    let png = capture_device_png(&device, custom_path).await?;
+    save_screenshot_to_downloads(&app_handle, &png, "MirroLeap-Screenshot")
+}
+
+/// Export only user-drawn annotations composited onto an Android screencap.
+/// If no active Windows phone frame/drawing exists, return a clear error;
+/// never silently save an unannotated or incorrectly rotated screenshot.
+#[tauri::command]
+pub async fn save_annotated_screenshot(
+    window: Window, app_handle: tauri::AppHandle,
+    device: String, custom_path: Option<String>,
+) -> Result<String, String> {
+    require_main_window(&window)?;
+    validate_capture_device(&device)?;
+    #[cfg(target_os = "windows")]
+    {
+        let snapshot = crate::device_frame::capture_ink_snapshot(&app_handle, &device).await?;
+        if snapshot.stroke_count == 0 {
+            return Err("Draw at least one stroke before saving an annotated image".into());
+        }
+        let raw_png = capture_device_png(&device, custom_path).await?;
+        let annotated = tokio::task::spawn_blocking(move || {
+            crate::capture_compositor::composite_annotated_png(
+                &raw_png, &snapshot.png_data_url, &snapshot.orientation
+            )
+        }).await.map_err(|e| format!("Annotation image compositor stopped unexpectedly: {e}"))??;
+        save_screenshot_to_downloads(&app_handle, &annotated, "MirroLeap-Annotated")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app_handle, custom_path);
+        Err("Annotated screenshot requires the Windows phone frame overlay".into())
+    }
 }
 
 #[cfg(test)]
@@ -2624,6 +2664,29 @@ pub fn device_frame_ack(
     {
         let _ = (window, token, success);
         Err("Annotation acknowledgements are Windows-only".into())
+    }
+}
+
+/// One-shot transparent Canvas export from the actual phone-frame-* WebView.
+/// The caller's native Tauri window label and a pending nonce must both
+/// match; a main window or another device cannot impersonate this response.
+#[tauri::command]
+pub fn device_frame_capture_ack(
+    window: Window,
+    token: u64,
+    png: String,
+    orientation: String,
+    strokes: usize,
+    error: Option<String>,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        crate::device_frame::acknowledge_ink_capture(&window, token, png, orientation, strokes, error)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, token, png, orientation, strokes, error);
+        Err("Annotated screenshots require a Windows phone frame".into())
     }
 }
 
