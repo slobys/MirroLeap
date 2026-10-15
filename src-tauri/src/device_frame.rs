@@ -21,16 +21,18 @@ use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowRect,
+    GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
+    GetWindowRect, GW_HWNDPREV,
     IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow,
     HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
     SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
 };
 
 use crate::frame_layout::{
-    expand_screen, is_frame_edge_hover, native_clip_radius, toolbar_position,
-    FrameRect, ScreenRect, TOOLBAR_HEIGHT, ANNOTATION_TOOLBAR_HEIGHT, TOOLBAR_WIDTH,
+    expand_screen, is_frame_edge_hover, native_clip_radius, toolbar_placement,
+    FrameRect, ScreenRect, ToolbarLayout, TOOLBAR_HEIGHT, TOOLBAR_WIDTH,
 };
 use crate::ScrcpyState;
 
@@ -218,31 +220,41 @@ fn inside(x: i32, y: i32, rect: ScreenRect, margin: i32) -> bool {
         && y >= rect.y - margin && y < rect.y + rect.height + margin
 }
 
-fn place_overlay(
-    overlay: &WebviewWindow,
-    video: HWND,
-    frame: FrameRect,
-    drawing: bool,
-    toolbar_hwnd: Option<HWND>,
-) -> Result<(), String> {
-    let shell = overlay.hwnd().map_err(|e| e.to_string())?;
-    let focused = unsafe { GetForegroundWindow() };
-    // Clicking the interactive toolbar may move the transparent webview
-    // *behind* SDL in Windows z-order. Promote it while drawing, even when
-    // the tool window (rather than scrcpy) currently owns foreground focus.
-    let promote = focused == video || (drawing &&
-        (focused == shell || toolbar_hwnd == Some(focused)));
-    let order = if promote { Some(HWND_TOP) } else { None };
-    let flags = if promote { SWP_NOACTIVATE } else { SWP_NOACTIVATE | SWP_NOZORDER };
-    unsafe { SetWindowPos(shell, order, frame.x, frame.y, frame.width, frame.height, flags) }
-        .map_err(|e| format!("Could not position device shell: {e}"))
+/// Insert a companion IMMEDIATELY above its video/shell anchor, instead of
+/// HWND_TOP. This matters when a browser is foreground: elevating a floating
+/// WebView to the absolute top would paint a ghost toolbar over the browser;
+/// keeping it above SDL but below the browser preserves the video stack.
+fn position_above(window: HWND, anchor: HWND, rect: ScreenRect) -> Result<(), String> {
+    let previous = unsafe { GetWindow(anchor, GW_HWNDPREV) };
+    let (after, flags) = if previous == window {
+        (None, SWP_NOACTIVATE | SWP_NOZORDER)
+    } else if previous.0.is_null() {
+        (Some(HWND_TOP), SWP_NOACTIVATE)
+    } else {
+        (Some(previous), SWP_NOACTIVATE)
+    };
+    unsafe { SetWindowPos(window, after, rect.x, rect.y, rect.width, rect.height, flags) }
+        .map_err(|e| format!("Could not position companion above its owner: {e}"))
 }
 
-fn place_toolbar(toolbar: &WebviewWindow, rect: ScreenRect) -> Result<(), String> {
+fn place_overlay(overlay: &WebviewWindow, video: HWND, frame: FrameRect) -> Result<(), String> {
+    let shell = overlay.hwnd().map_err(|e| e.to_string())?;
+    position_above(shell, video, ScreenRect {
+        x: frame.x, y: frame.y, width: frame.width, height: frame.height,
+    })
+}
+
+fn place_toolbar(toolbar: &WebviewWindow, overlay: &WebviewWindow, rect: ScreenRect) -> Result<(), String> {
     let hwnd = toolbar.hwnd().map_err(|e| e.to_string())?;
-    unsafe {
-        SetWindowPos(hwnd, Some(HWND_TOP), rect.x, rect.y, rect.width, rect.height, SWP_NOACTIVATE)
-    }.map_err(|e| format!("Could not position hover controls: {e}"))
+    // A user is actively pressing toolbar buttons: don't sink that focused
+    // HWND behind an unrelated browser until focus actually changes away.
+    if unsafe { GetForegroundWindow() } == hwnd {
+        return unsafe {
+            SetWindowPos(hwnd, Some(HWND_TOP), rect.x, rect.y, rect.width, rect.height, SWP_NOACTIVATE)
+        }.map_err(|e| format!("Could not position focused toolbar: {e}"));
+    }
+    let shell = overlay.hwnd().map_err(|e| e.to_string())?;
+    position_above(hwnd, shell, rect)
 }
 
 async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar: WebviewWindow) {
@@ -255,6 +267,11 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut controls_rect: Option<ScreenRect> = None;
     let mut controls_y_offset: Option<i32> = None;
     let mut last_nearby: Option<Instant> = None;
+    let mut video_was_unavailable = true;
+    let mut restored_at: Option<Instant> = None;
+    let mut previous_layout: Option<ToolbarLayout> = None;
+    let mut layout_synced_at: Option<Instant> = None;
+    let mut clip_retry_reported = false;
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -283,12 +300,22 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             controls_y_offset = None;
             last_nearby = None;
             applied_orientation = None;
+            previous_layout = None;
+            layout_synced_at = None;
+            video_was_unavailable = true;
             continue;
         };
 
         let hwnd = captured.hwnd;
         let frame = captured.frame;
         let screen = captured.screen;
+        if video_was_unavailable {
+            // The video can be restored while the browser still owns focus.
+            // Show the control handle briefly so the user can discover it
+            // without having to guess the edge-hover gesture again.
+            restored_at = Some(Instant::now());
+            video_was_unavailable = false;
+        }
         let landscape = crate::frame_layout::is_landscape(screen.width, screen.height);
 
         // Switch the external phone skin, NOT the native video stream. Retry
@@ -306,10 +333,17 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // Re-create it after scrcpy rotation, resize, or codec-retry PID change.
         if last_client_size != Some((pid, screen.width, screen.height)) {
             if let Err(error) = apply_native_corner_clip(hwnd, screen) {
-                let _ = app.emit("scrcpy-log",
-                    format!("[FRAME] Native screen corners unavailable: {error}"));
-                break;
+                if !clip_retry_reported {
+                    let _ = app.emit("scrcpy-log",
+                        format!("[FRAME] Native screen corners unavailable; retrying: {error}"));
+                    clip_retry_reported = true;
+                }
+                // Immediately after taskbar restoration SDL can still be
+                // resizing its HWND. Losing one GDI region request must NOT
+                // permanently terminate the overlay + toolbar follow loop.
+                continue;
             }
+            clip_retry_reported = false;
             clipped_pid = Some(pid);
             last_client_size = Some((pid, screen.width, screen.height));
         }
@@ -334,7 +368,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 shell_visible = true;
                 previous_frame = None;
                 // Re-establish HWND z-order AFTER making WebView visible.
-                if let Err(error) = place_overlay(&overlay, hwnd, frame, inking, toolbar_hwnd) {
+                if let Err(error) = place_overlay(&overlay, hwnd, frame) {
                     let _ = app.emit("scrcpy-log", format!("[FRAME] Retrying restored shell: {error}"));
                     shell_visible = false;
                 }
@@ -342,8 +376,11 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 shell_visible = false;
             }
         }
-        if shell_visible && (previous_frame != Some(frame) || foreground == hwnd || (inking && active)) {
-            match place_overlay(&overlay, hwnd, frame, inking, toolbar_hwnd) {
+        let shell_behind_video = overlay_hwnd.map(|shell| {
+            unsafe { GetWindow(hwnd, GW_HWNDPREV) } != shell
+        }).unwrap_or(true);
+        if shell_visible && (previous_frame != Some(frame) || shell_behind_video || foreground == hwnd || (inking && active)) {
+            match place_overlay(&overlay, hwnd, frame) {
                 Ok(()) => previous_frame = Some(frame),
                 Err(error) => {
                     // Do not destroy the skin or toolbar just because Windows
@@ -354,8 +391,9 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             }
         }
 
-        // Keep phone interactions native. Detect edge hover at the OS level,
-        // then show ONLY a small interactive popover to the right of the phone.
+        // Keep Android interactions native. The palette is contained in the
+        // same WebView window as the rail but never increases its *height*
+        // until a narrow desktop margin requires a compact stacked layout.
         let cursor = pointer();
         let dragging = is_dragging(&device);
         let close_to_edge = cursor.map(|(x,y)| is_frame_edge_hover(x,y,frame)).unwrap_or(false);
@@ -366,64 +404,71 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // After a Windows taskbar restore the SDL window may be visible even
         // while another application owns foreground focus. An actual pointer
         // hover over the phone bezel should STILL reveal its control handle.
-        let wanted = close_to_edge || (active && (inside_controls || dragging || inking));
+        let recent_restore = restored_at.map(|t| t.elapsed() < Duration::from_millis(2200))
+            .unwrap_or(false);
+        let wanted = close_to_edge || dragging || inking || inside_controls || recent_restore;
         if wanted { last_nearby = Some(Instant::now()); }
         let lingering = last_nearby.map(|t| t.elapsed() < Duration::from_millis(550))
             .unwrap_or(false);
         let show_controls = wanted || (active && lingering);
 
         if show_controls {
-            if controls_rect.is_none() {
-                let desktop = virtual_desktop();
-                let y = cursor.map(|(_,y)| y).unwrap_or(frame.y + 80);
-                let mut rect = toolbar_position(frame, y, desktop);
-                rect.height = if inking { ANNOTATION_TOOLBAR_HEIGHT } else { TOOLBAR_HEIGHT };
-                rect.y = rect.y.clamp(desktop.y,
-                    (desktop.y + desktop.height - rect.height).max(desktop.y));
-                controls_y_offset = Some(rect.y - frame.y);
-                controls_rect = Some(rect);
+            let desktop = virtual_desktop();
+            // WebView is laid out in CSS DIPs. Use the SDL monitor's physical
+            // DPI to size the native window (DPI can change when dragging to
+            // a different monitor).
+            let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
+            if controls_y_offset.is_none() {
+                let mouse_y = cursor.filter(|(_, y)| *y >= frame.y && *y < frame.y + frame.height)
+                    .map(|(_, y)| y).unwrap_or(frame.y + 100);
+                let narrow_height = (TOOLBAR_HEIGHT as i64 * dpi as i64 / 96) as i32;
+                let top = mouse_y - narrow_height / 2;
+                let compact = toolbar_placement(frame, top, desktop, false, dpi);
+                controls_y_offset = Some(compact.rect.y - frame.y);
             }
-            // Follow the *moving phone*, but don't make the toolbar chase the
-            // pointer vertically while the user tries to press a button.
-            if let Some(mut rect) = controls_rect {
-                let desktop = virtual_desktop();
-                rect.height = if inking { ANNOTATION_TOOLBAR_HEIGHT } else { TOOLBAR_HEIGHT };
-                let left_gap = frame.x - 8 - TOOLBAR_WIDTH;
-                let right_gap = frame.x + frame.width + 8;
-                let prefer_right = right_gap + TOOLBAR_WIDTH <= desktop.x + desktop.width;
-                rect.x = if prefer_right { right_gap } else { left_gap };
-                rect.x = rect.x.clamp(desktop.x, (desktop.x+desktop.width-rect.width).max(desktop.x));
-                rect.y = (frame.y + controls_y_offset.unwrap_or(rect.y - frame.y))
-                    .clamp(desktop.y, (desktop.y + desktop.height - rect.height).max(desktop.y));
-                if let Err(error) = place_toolbar(&toolbar, rect) {
-                    // Transient Win32 z-order errors during minimize/restore
-                    // must not kill the task that is supposed to restore the
-                    // whole phone-frame session.
+            // The top of the compact rail is stable as the phone moves; the
+            // expanded flyout is allowed to move UP to fit within the desktop.
+            let top = frame.y + controls_y_offset.unwrap_or(0);
+            let placement = toolbar_placement(frame, top, desktop, inking, dpi);
+            let rect = placement.rect;
+            let actually_visible = toolbar.hwnd().ok()
+                .map(|h| unsafe { IsWindowVisible(h).as_bool() }).unwrap_or(false);
+            let mut newly_shown = false;
+            if !controls_visible || !actually_visible {
+                if toolbar.show().is_ok() {
+                    controls_visible = true;
+                    newly_shown = true;
+                } else {
+                    controls_visible = false;
+                }
+            }
+            if controls_visible {
+                // Tauri show() can reset the native HWND's position and z-order.
+                // Always place AFTER show, immediately above the visible shell,
+                // not HWND_TOP above an unrelated foreground browser.
+                if let Err(error) = place_toolbar(&toolbar, &overlay, rect) {
                     let _ = app.emit("scrcpy-log",
                         format!("[FRAME] Repositioning toolbar on next tick: {error}"));
                     controls_rect = None;
                 } else {
                     controls_rect = Some(rect);
                 }
-            }
-            let actually_visible = toolbar.hwnd().ok()
-                .map(|h| unsafe { IsWindowVisible(h).as_bool() }).unwrap_or(false);
-            if !controls_visible || !actually_visible {
-                if toolbar.show().is_ok() {
-                    controls_visible = true;
-                    // Showing a hidden WebView can reset its HWND placement;
-                    // re-apply coordinates after showing rather than before.
-                    if let Some(rect) = controls_rect {
-                        let _ = place_toolbar(&toolbar, rect);
+                let refresh_layout = layout_synced_at.map(|t| t.elapsed() > Duration::from_secs(2))
+                    .unwrap_or(true);
+                if newly_shown || previous_layout != Some(placement.layout) || refresh_layout {
+                    let script = format!("window.scrcpyControls?.setLayout('{}'); window.scrcpyControls?.sync()", placement.layout.css_name());
+                    if toolbar.eval(script).is_ok() {
+                        previous_layout = Some(placement.layout);
+                        layout_synced_at = Some(Instant::now());
                     }
-                } else {
-                    controls_visible = false;
                 }
             }
         } else {
             if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
             controls_rect = None;
             controls_y_offset = None;
+            previous_layout = None;
+            layout_synced_at = None;
         }
     }
 

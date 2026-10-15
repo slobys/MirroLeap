@@ -12,14 +12,17 @@
       background: transparent !important; color: #e4e7ee;
       -webkit-user-select: none; user-select: none;
     }
+    .controls-root { position: relative; width: 100%; height: 100%; overflow: hidden; }
     .rail {
-      width: 100%; height: 100%; padding: 7px 6px;
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-      overflow: hidden;
+      position: absolute; left: 0; top: 0; width: 62px; height: 270px;
+      padding: 7px 6px; display: flex; flex-direction: column;
+      align-items: center; gap: 4px; overflow: hidden;
       border-radius: 15px; background: rgba(13, 17, 24, .96);
       border: 1px solid rgba(160, 168, 180, .29);
       box-shadow: 0 6px 20px rgba(0, 0, 0, .34), inset 1px 0 rgba(255,255,255,.07);
     }
+    body[data-layout="side-left"] .rail,
+    body[data-layout="stack-left"] .rail { left: auto; right: 0; }
     button {
       display: grid; place-items: center;
       min-height: 44px; height: 44px; width: 46px; padding: 0;
@@ -52,22 +55,47 @@
     #restore:hover { background: rgba(27,148,131,.33); }
     #drag { cursor: grab; }
     #drag:active { cursor: grabbing; }
+    /* Separate, non-scrolling flyout. A narrow desktop margin uses stack-*
+       and docks this palette beneath the unchanged session-control rail. */
     #ink-tools {
-      width: 100%; display: none; flex-direction: column; gap: 4px;
-      align-items: center; border-top: 1px solid #323942; padding-top: 5px;
-      min-height: 0; flex: 1 1 auto; overflow-y: auto; overflow-x: hidden;
-      scrollbar-width: thin; scrollbar-color: #515967 transparent;
+      display: none; position: absolute; top: 10px; left: 68px;
+      width: 200px; height: 202px; padding: 9px;
+      overflow: hidden; border-radius: 15px;
+      background: rgba(13, 17, 24, .97);
+      border: 1px solid rgba(160, 168, 180, .32);
+      box-shadow: 0 6px 20px rgba(0,0,0,.35);
+      flex-direction: column; gap: 6px;
     }
     body.inking #ink-tools { display: flex; }
-    #ink-tools button { height: 36px; min-height: 36px; width: 44px; }
-    #ink-tools button svg { width: 20px; height: 20px; }
-    .swatches { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; width: 46px; }
-    .swatches button {
-      width: 20px !important; height: 20px !important; min-height: 20px !important;
-      border-radius: 50%; border: 2px solid rgba(240, 240, 255, .2);
+    body[data-layout="side-left"] #ink-tools { left: auto; right: 68px; }
+    body[data-layout="stack-right"] #ink-tools,
+    body[data-layout="stack-left"] #ink-tools {
+      width: 168px; height: 202px; top: 276px; left: 0; right: auto; padding: 8px;
     }
-    .swatches button.selected { outline: 2px solid white; outline-offset: 1px; }
-    #size { font-size: 10px; font-weight: 700; }
+    .palette-heading {
+      font-size: 11px; line-height: 15px; font-weight: 600; letter-spacing: .04em;
+      color: #b7c3d2; flex: none;
+    }
+    .palette-actions, .swatches, .sizes {
+      display: grid; align-items: center; gap: 4px; width: 100%;
+      grid-template-columns: repeat(4, minmax(0, 1fr)); flex: none;
+    }
+    .palette-actions button {
+      width: 100%; height: 36px; min-height: 36px; border-radius: 9px;
+    }
+    .palette-actions button svg { width: 20px; height: 20px; }
+    .swatches { justify-items: center; }
+    .swatches button {
+      width: 28px; height: 28px; min-height: 28px;
+      border-radius: 50%; border: 2px solid rgba(240, 240, 255, .23);
+    }
+    .swatches button.selected { outline: 2px solid #fff; outline-offset: 1px; }
+    .sizes { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .sizes button {
+      font-size: 12px; font-weight: 600; width: 100%; height: 31px; min-height: 31px;
+      background: rgba(113,129,147,.14);
+    }
+    .sizes button.active { background: rgba(40,177,157,.35); color: #9af3e5; }
     /* A visible red warning dot, with full diagnostic in the tooltip.
        Only shown on native/JS activation failures; ordinary use stays tidy. */
     #status {
@@ -80,8 +108,9 @@
     #ink-toggle[disabled] { opacity: .52; cursor: wait; }
   </style>
 </head>
-<body>
-  <div class="rail" role="toolbar" aria-label="投屏控制和标注">
+<body data-layout="compact">
+  <div class="controls-root" role="toolbar" aria-label="投屏控制和标注">
+  <div class="rail">
     <!-- Window controls always remain adjacent and ABOVE drawing tools. -->
     <div class="session-actions" role="group" aria-label="窗口移动、最小化和关闭">
     <button id="drag" aria-label="按住拖动投屏窗口" title="按住拖动 / Drag">
@@ -102,33 +131,59 @@
     </div>
     <!-- Quick restore is always available: clear ink AND return phone input. -->
     <div class="annotation-actions" role="group" aria-label="画笔与快速恢复">
-    <button id="ink-toggle" aria-label="画笔标注开关" title="画笔：开启后在投屏画面上书写 / Pen">
+    <button id="ink-toggle" aria-label="画笔标注开关" title="画笔标注">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 20h9M15.5 3.5l5 5-12 12H3.5v-5zM14 5l5 5"/>
       </svg>
     </button>
 
 
-    <button id="restore" aria-label="一键恢复原始画面" title="一键恢复：清除所有标注并恢复手机触控 / Reset">
+    <button id="restore" aria-label="一键恢复原始画面和手机触控" title="一键恢复画面和手机触控">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M3 11a9 9 0 1 1 2.6 6.4M3 4v7h7"/>
       </svg>
     </button>
     </div>
+  </div>
 
     <div id="ink-tools" role="group" aria-label="画笔工具">
+      <div class="palette-heading">画笔操作</div>
+      <div class="palette-actions">
+      <button id="pen" aria-label="画笔" aria-pressed="true" class="active" title="画笔">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 20h9M15.5 3.5l5 5-12 12H3.5v-5zM14 5l5 5"/>
+        </svg>
+      </button>
+      <button id="eraser" aria-label="橡皮擦" aria-pressed="false" title="橡皮擦">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m20 8-5-5a3 3 0 0 0-4.2 0l-8 8a3 3 0 0 0 0 4.2L8 20h4l8-8a3 3 0 0 0 0-4zM7 9l8 8M12 20h9"/>
+        </svg>
+      </button>
+      <button id="undo" aria-label="撤销上一笔" title="撤销上一笔">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 10h12a6 6 0 0 1 0 12h-2M3 10l6-6M3 10l6 6"/>
+        </svg>
+      </button>
+      <button id="clear" aria-label="只清空所有笔迹，保留画笔模式" title="清空笔迹">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15M10 10v7M14 10v7"/>
+        </svg>
+      </button>
+      </div>
+      <div class="palette-heading">颜色</div>
       <div class="swatches" aria-label="画笔颜色">
         <button id="yellow" class="selected" aria-label="黄色" title="黄色" style="background:#ffd54b"></button>
         <button id="red" aria-label="红色" title="红色" style="background:#ff5252"></button>
         <button id="white" aria-label="白色" title="白色" style="background:#fff"></button>
         <button id="cyan" aria-label="青色" title="青色" style="background:#40e0d0"></button>
       </div>
-      <button id="pen" aria-label="画笔" class="active" title="画笔 / Pen">✎</button>
-      <button id="eraser" aria-label="橡皮擦" title="橡皮擦 / Eraser">⌫</button>
-      <button id="size" aria-label="笔刷粗细" title="点击切换笔刷粗细">5px</button>
-      <button id="undo" aria-label="撤销上一笔" title="撤销 / Undo">↶</button>
-      <button id="clear" aria-label="清空所有标注" title="清空 / Clear">⌧</button>
+      <div class="palette-heading">笔触粗细</div>
+      <div class="sizes" aria-label="画笔粗细">
+        <button id="size-3" aria-label="细笔 3 像素" aria-pressed="false" title="细笔 3px">细</button>
+        <button id="size-5" class="active" aria-label="中笔 5 像素" aria-pressed="true" title="中笔 5px">中</button>
+        <button id="size-9" aria-label="粗笔 9 像素" aria-pressed="false" title="粗笔 9px">粗</button>
+      </div>
     </div>
   </div>
   <div id="status" role="status" aria-live="assertive" title=""></div>
@@ -154,8 +209,8 @@
         inkButton.classList.toggle('active', enabled);
         inkButton.setAttribute('aria-pressed', String(enabled));
         inkButton.title = enabled
-          ? '画笔已开启：直接在手机画面上书写；再次点击恢复手机触控'
-          : '开启画笔：在投屏画面上标注';
+          ? '退出画笔'
+          : '开启画笔';
       }
 
       function report(error, showDialog = false) {
@@ -178,6 +233,26 @@
           displayInkState(await invoke('ink_status'));
         } catch (error) {
           report(error);
+        }
+      }
+
+      // Native placement chooses the side or vertically docked palette.
+      // Only allow known styles; the controller is never a navigable page.
+      window.scrcpyControls = Object.freeze({
+        setLayout(layout) {
+          if (['compact', 'side-right', 'side-left', 'stack-right', 'stack-left'].includes(layout)) {
+            document.body.dataset.layout = layout;
+          }
+        },
+        sync: syncInkState,
+      });
+
+      function chooseTool(which) {
+        for (const name of ['pen', 'eraser']) {
+          const button = document.getElementById(name);
+          const active = name === which;
+          button.classList.toggle('active', active);
+          button.setAttribute('aria-pressed', String(active));
         }
       }
 
@@ -226,45 +301,38 @@
       document.getElementById('close').addEventListener('click', () => void act('close'));
 
       document.getElementById('pen').addEventListener('click', () => {
-        void act('ink_pen', () => {
-          document.getElementById('pen').classList.add('active');
-          document.getElementById('eraser').classList.remove('active');
-        });
+        void act('ink_pen', () => chooseTool('pen'));
       });
       document.getElementById('eraser').addEventListener('click', () => {
-        void act('ink_erase', () => {
-          document.getElementById('eraser').classList.add('active');
-          document.getElementById('pen').classList.remove('active');
-        });
+        void act('ink_erase', () => chooseTool('eraser'));
       });
       for (const name of ['yellow', 'red', 'white', 'cyan']) {
         document.getElementById(name).addEventListener('click', () => {
           void act('ink_color_' + name, () => {
             document.querySelectorAll('.swatches button').forEach(el => el.classList.remove('selected'));
             document.getElementById(name).classList.add('selected');
-            document.getElementById('pen').classList.add('active');
-            document.getElementById('eraser').classList.remove('active');
+            chooseTool('pen');
           });
         });
       }
-      const sizes = [3, 5, 9];
-      let sizeIndex = 1;
-      document.getElementById('size').addEventListener('click', () => {
-        const next = (sizeIndex + 1) % sizes.length;
-        void act('ink_size_' + sizes[next], () => {
-          sizeIndex = next;
-          document.getElementById('size').textContent = sizes[next] + 'px';
+      for (const size of [3, 5, 9]) {
+        document.getElementById('size-' + size).addEventListener('click', () => {
+          void act('ink_size_' + size, () => {
+            for (const candidate of [3, 5, 9]) {
+              const button = document.getElementById('size-' + candidate);
+              const selected = candidate === size;
+              button.classList.toggle('active', selected);
+              button.setAttribute('aria-pressed', String(selected));
+            }
+          });
         });
-      });
+      }
       document.getElementById('undo').addEventListener('click', () => void act('ink_undo'));
       document.getElementById('clear').addEventListener('click', () => void act('ink_clear'));
       document.getElementById('restore').addEventListener('click', () => {
         // Single click clears temporary annotations and restores native touch,
         // regardless of whether the pen palette is currently expanded.
-        void act('ink_reset', () => {
-          document.getElementById('pen').classList.add('active');
-          document.getElementById('eraser').classList.remove('active');
-        });
+        void act('ink_reset', () => chooseTool('pen'));
       });
 
       // Recover UI after WebView2 reload, minimize/restore or focus changes.

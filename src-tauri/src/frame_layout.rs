@@ -79,8 +79,102 @@ pub fn expand_screen(screen: ScreenRect) -> Option<FrameRect> {
 
 pub const TOOLBAR_WIDTH: i32 = 62;
 pub const TOOLBAR_HEIGHT: i32 = 270;
-pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 540;
+/// In landscape/portrait alike the session controls keep their own 62px rail.
+/// The small palette opens to the side when there is room; on narrow desktop
+/// margins it docks BELOW the rail rather than obscuring the Android screen.
+pub const ANNOTATION_TOOLBAR_WIDTH: i32 = 268;
+pub const ANNOTATION_STACK_WIDTH: i32 = 168;
+pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 486;
 pub const TOOLBAR_GAP: i32 = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolbarLayout {
+    Compact,
+    SideRight,
+    SideLeft,
+    StackRight,
+    StackLeft,
+}
+
+impl ToolbarLayout {
+    pub fn css_name(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::SideRight => "side-right",
+            Self::SideLeft => "side-left",
+            Self::StackRight => "stack-right",
+            Self::StackLeft => "stack-left",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToolbarPlacement {
+    pub rect: ScreenRect,
+    pub layout: ToolbarLayout,
+}
+
+/// All desktop/frame coordinates are Win32 PHYSICAL pixels, but WebView CSS
+/// sizes are DIPs. Multiply the control geometry by the video window DPI so
+/// that e.g. a 62 CSS-pixel rail is not clipped to 41 CSS pixels at 150%.
+fn dip(dip: i32, dpi: u32) -> i32 {
+    ((dip as i64 * (dpi.clamp(72, 480)) as i64 + 48) / 96) as i32
+}
+
+/// `top` is the saved top edge of the compact toolbar (not the mouse position).
+/// Prefer fitting the FULL flyout outside the phone. When the desktop margin
+/// cannot fit the flyout horizontally, use a 168 DIP vertically stacked palette.
+/// The narrow fallback still remains within the visible virtual desktop.
+pub fn toolbar_placement(
+    frame: FrameRect, top: i32, desktop: ScreenRect, inking: bool, dpi: u32,
+) -> ToolbarPlacement {
+    let right = frame.x.saturating_add(frame.width).saturating_add(dip(TOOLBAR_GAP, dpi));
+    let left = frame.x.saturating_sub(dip(TOOLBAR_GAP, dpi));
+    let desktop_right = desktop.x.saturating_add(desktop.width);
+    let desktop_bottom = desktop.y.saturating_add(desktop.height);
+    let right_room = desktop_right.saturating_sub(right);
+    let left_room = left.saturating_sub(desktop.x);
+    let narrow = dip(TOOLBAR_WIDTH, dpi);
+    let wide = dip(ANNOTATION_TOOLBAR_WIDTH, dpi);
+    let stacked = dip(ANNOTATION_STACK_WIDTH, dpi);
+    let stacked_height = dip(ANNOTATION_TOOLBAR_HEIGHT, dpi);
+    let compact_height = dip(TOOLBAR_HEIGHT, dpi);
+    let can_stack = desktop.height >= stacked_height;
+
+    let (layout, requested_x, requested_width, height) = if !inking {
+        if right_room >= narrow {
+            (ToolbarLayout::Compact, right, narrow, compact_height)
+        } else {
+            (ToolbarLayout::Compact, left - narrow, narrow, compact_height)
+        }
+    } else if right_room >= wide {
+        (ToolbarLayout::SideRight, right, wide, compact_height)
+    } else if left_room >= wide {
+        (ToolbarLayout::SideLeft, left - wide, wide, compact_height)
+    } else if can_stack && right_room >= stacked {
+        (ToolbarLayout::StackRight, right, stacked, stacked_height)
+    } else if can_stack && left_room >= stacked {
+        (ToolbarLayout::StackLeft, left - stacked, stacked, stacked_height)
+    } else if right_room >= left_room {
+        // Ultra-narrow desktop margins: prefer a fully visible palette even
+        // if it must temporarily float over a corner of the phone itself.
+        (ToolbarLayout::SideRight, right, wide, compact_height)
+    } else {
+        (ToolbarLayout::SideLeft, left - wide, wide, compact_height)
+    };
+
+    let width = requested_width.min(desktop.width.max(1));
+    let height = height.min(desktop.height.max(1));
+    ToolbarPlacement {
+        rect: ScreenRect {
+            x: requested_x.clamp(desktop.x, (desktop_right - width).max(desktop.x)),
+            y: top.clamp(desktop.y, (desktop_bottom - height).max(desktop.y)),
+            width,
+            height,
+        },
+        layout,
+    }
+}
 
 /// Ellipse radii for the REAL SDL client region, in physical screen pixels.
 ///
@@ -205,13 +299,63 @@ mod tests {
     fn annotation_palette_fits_on_a_typical_monitor() {
         let frame = expand_screen(ScreenRect { x: 240, y: 10, width: 410, height: 850 }).unwrap();
         let desktop = ScreenRect { x: 0, y: 0, width: 1920, height: 1080 };
-        let mut ctrl = toolbar_position(frame, frame.y + 30, desktop);
-        ctrl.height = ANNOTATION_TOOLBAR_HEIGHT;
-        ctrl.y = ctrl.y.clamp(desktop.y, desktop.y + desktop.height - ctrl.height);
-        assert!(ctrl.height > TOOLBAR_HEIGHT);
-        assert!(ctrl.y >= desktop.y);
-        assert!(ctrl.y + ctrl.height <= 1080);
-        assert!(ctrl.x > frame.x + frame.width);
+        let placement = toolbar_placement(frame, frame.y, desktop, true, 96);
+        assert_eq!(placement.layout, ToolbarLayout::SideRight);
+        assert_eq!(placement.rect.width, ANNOTATION_TOOLBAR_WIDTH);
+        assert_eq!(placement.rect.height, TOOLBAR_HEIGHT);
+        assert!(placement.rect.y >= desktop.y);
+        assert!(placement.rect.y + placement.rect.height <= 1080);
+        assert!(placement.rect.x > frame.x + frame.width);
+    }
+
+    #[test]
+    fn flyout_flips_left_instead_of_running_off_right_desktop_edge() {
+        let desktop = ScreenRect { x: 0, y: 0, width: 1920, height: 1080 };
+        let frame = FrameRect { x: 1170, y: 150, width: 680, height: 800, inset_x: 7, inset_y: 7 };
+        let placement = toolbar_placement(frame, 200, desktop, true, 96);
+        assert_eq!(placement.layout, ToolbarLayout::SideLeft);
+        assert!(placement.rect.x + placement.rect.width < frame.x);
+        assert!(placement.rect.x >= desktop.x);
+    }
+
+    #[test]
+    fn narrow_outer_margin_stacks_palette_below_rail_without_covering_phone() {
+        let desktop = ScreenRect { x: 0, y: 0, width: 810, height: 1440 };
+        let right_frame = FrameRect { x: 40, y: 45, width: 590, height: 1250, inset_x: 7, inset_y: 7 };
+        let right = toolbar_placement(right_frame, 620, desktop, true, 96);
+        assert_eq!(right.layout, ToolbarLayout::StackRight);
+        assert_eq!(right.rect.width, ANNOTATION_STACK_WIDTH);
+        assert_eq!(right.rect.height, ANNOTATION_TOOLBAR_HEIGHT);
+        assert!(right.rect.x >= right_frame.x + right_frame.width);
+        assert!(right.rect.y + right.rect.height <= desktop.height);
+
+        let left_frame = FrameRect { x: 185, y: 50, width: 600, height: 1200, inset_x: 7, inset_y: 7 };
+        let left = toolbar_placement(left_frame, 680, desktop, true, 96);
+        assert_eq!(left.layout, ToolbarLayout::StackLeft);
+        assert!(left.rect.x + left.rect.width < left_frame.x);
+    }
+
+    #[test]
+    fn placement_uses_physical_pixels_on_scaled_and_negative_origin_displays() {
+        let desktop = ScreenRect { x: -2560, y: -150, width: 5120, height: 1800 };
+        let frame = FrameRect { x: -1200, y: -100, width: 690, height: 1100, inset_x: 12, inset_y: 12 };
+        let placement = toolbar_placement(frame, -200, desktop, true, 144);
+        assert_eq!(placement.layout, ToolbarLayout::SideRight);
+        assert_eq!(placement.rect.width, ANNOTATION_TOOLBAR_WIDTH * 3 / 2);
+        assert_eq!(placement.rect.height, TOOLBAR_HEIGHT * 3 / 2);
+        assert!(placement.rect.x >= desktop.x);
+        assert!(placement.rect.y >= desktop.y);
+        assert!(placement.rect.x + placement.rect.width <= desktop.x + desktop.width);
+        assert!(placement.rect.y + placement.rect.height <= desktop.y + desktop.height);
+    }
+
+    #[test]
+    fn stacked_layout_never_clips_below_bottom_of_the_desktop() {
+        let desktop = ScreenRect { x: 0, y: 0, width: 810, height: 720 };
+        let frame = FrameRect { x: 40, y: 20, width: 590, height: 680, inset_x: 7, inset_y: 7 };
+        let placement = toolbar_placement(frame, 690, desktop, true, 96);
+        assert_eq!(placement.layout, ToolbarLayout::StackRight);
+        assert!(placement.rect.y + placement.rect.height <= 720);
     }
 
     #[test]
