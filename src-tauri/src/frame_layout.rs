@@ -66,15 +66,30 @@ pub const TOOLBAR_WIDTH: i32 = 48;
 pub const TOOLBAR_HEIGHT: i32 = 146;
 pub const TOOLBAR_GAP: i32 = 8;
 
-/// Test-only geometry reference for the SVG's antialiased inner corner.
-/// Native Win32 clipping has been removed because its pixel-staircase edges
-/// leaked blue desktop colors through the independently rasterized SVG edge.
-#[cfg(test)]
-pub fn round_clip_radius(video_width: i32, video_height: i32) -> Option<(i32, i32)> {
+/// Ellipse radii for the REAL SDL client region, in physical screen pixels.
+///
+/// The antialiased SVG aperture uses a 57-unit rounded corner. The GDI region
+/// MUST be deliberately **less rounded** by 3 physical pixels in both axes:
+/// this makes every SVG-transparent screen pixel backed by live video, while
+/// the dark bezel/gasket hides the invisible hard GDI boundary underneath.
+///
+/// v4.3.2 matched the radii exactly and exposed cyan wallpaper-colored seams.
+/// v4.3.3 removed the native region and introduced square black corners.
+/// Never match radii exactly or use a square overpainting rectangle again.
+pub const NATIVE_CORNER_OVERSCAN_PX: i32 = 3;
+pub fn native_clip_radius(video_width: i32, video_height: i32) -> Option<(i32, i32)> {
     if video_width < 80 || video_height < 80 { return None; }
     let rx = ((video_width as f64) * 57.0 / INNER_WIDTH).round() as i32;
     let ry = ((video_height as f64) * 57.0 / INNER_HEIGHT).round() as i32;
-    Some((rx.clamp(4, video_width / 3), ry.clamp(4, video_height / 3)))
+    Some(((rx - NATIVE_CORNER_OVERSCAN_PX).clamp(2, video_width / 3),
+          (ry - NATIVE_CORNER_OVERSCAN_PX).clamp(2, video_height / 3)))
+}
+
+#[cfg(test)]
+fn svg_aperture_radius(video_width: i32, video_height: i32) -> Option<(f64, f64)> {
+    if video_width < 80 || video_height < 80 { return None; }
+    Some((video_width as f64 * 57.0 / INNER_WIDTH,
+          video_height as f64 * 57.0 / INNER_HEIGHT))
 }
 
 /// Hover near the right/left bezel, or the top edge; the controller never
@@ -113,11 +128,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn svg_aperture_corner_reference_matches_physical_pixels() {
-        let (rx, ry) = round_clip_radius(540, 1200).unwrap();
-        assert!(rx >= 30 && rx <= 35);
-        assert!(ry >= 30 && ry <= 35);
-        assert!(round_clip_radius(0, 100).is_none());
+    fn clipped_video_covers_the_transparent_svg_aperture() {
+        let samples = [
+            (400, 880), (540, 1280), (720, 1600), (500, 1050),
+            (800, 1760), (390, 844), (130, 260)
+        ];
+        for (width, height) in samples {
+            let (native_x, native_y) = native_clip_radius(width, height).unwrap();
+            let (svg_x, svg_y) = svg_aperture_radius(width, height).unwrap();
+            assert!(native_x as f64 < svg_x, "GDI must overlap into masked bezel");
+            assert!(native_y as f64 < svg_y, "GDI must overlap into masked bezel");
+            // At every Y through the corner, GDI cannot clip the exposed
+            // aperture: the native rounded shape includes the SVG hole.
+            for pixel_y in 0..height {
+                let arc_x = |rx: f64, ry: f64| {
+                    if pixel_y as f64 >= ry { 0.0 } else {
+                        let normalized = (pixel_y as f64 - ry) / ry;
+                        rx * (1.0 - (1.0 - normalized.powi(2)).max(0.0).sqrt())
+                    }
+                };
+                let native_edge = arc_x(native_x as f64, native_y as f64);
+                let svg_edge = arc_x(svg_x, svg_y);
+                assert!(native_edge <= svg_edge + 0.01,
+                    "GDI edge intrudes into visible Android pixels at Y={pixel_y} for {width}x{height}");
+            }
+        }
+        assert!(native_clip_radius(0, 100).is_none());
+    }
+
+    #[test]
+    fn native_corner_stays_within_outer_iphone_silhouette() {
+        // At the top-left client pixel the phone's outer metallic contour is
+        // several physical pixels further left than the underscanned region,
+        // so scrcpy does not protrude outside the rounded handset.
+        for (width, height) in [(400,880), (540,1280), (720,1600)] {
+            let f = expand_screen(ScreenRect { x: 0,y: 0,width,height }).unwrap();
+            let (clip_x, _) = native_clip_radius(width,height).unwrap();
+            let sx = f.width as f64 / ARTBOARD_WIDTH;
+            let sy = f.height as f64 / ARTBOARD_HEIGHT;
+            let outer_rx = 76.0 * sx;
+            let outer_ry = 76.0 * sy;
+            let y = f.inset_y as f64 - sy;
+            let outer_x = sx - f.inset_x as f64
+              + outer_rx * (1.0 - (1.0-((y-outer_ry)/outer_ry).powi(2)).sqrt());
+            assert!(clip_x as f64 > outer_x, "SDL video may protrude outside metal casing");
+        }
     }
 
     #[test]
