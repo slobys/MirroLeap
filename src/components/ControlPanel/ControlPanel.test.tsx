@@ -53,6 +53,45 @@ async function openRendererSelect(user: ReturnType<typeof userEvent.setup>) {
     await user.click(button);
 }
 
+describe('one-click mirror resolution selector', () => {
+    it('requests automatic stream restart when choosing a new size while mirroring', async () => {
+        const user = userEvent.setup();
+        const onResolutionChange = vi.fn();
+        render(
+            <ControlPanel config={createConfig({ res: '1920' })}
+                setConfig={vi.fn()} onStart={vi.fn()} onStop={vi.fn()}
+                onResolutionChange={onResolutionChange} isSwitchingResolution={false}
+                isRunning={true} onListOptions={vi.fn()} detectedCameras={[]}
+                renderDriverSupport={supportedRenderers} />
+        );
+        const label = screen.getByText('Resolution');
+        await user.click(label.parentElement?.querySelector('button') as HTMLButtonElement);
+        await user.click(screen.getByText('720p'));
+        expect(onResolutionChange).toHaveBeenCalledExactlyOnceWith('1280');
+        expect(screen.getByRole('status')).toHaveTextContent('restarts briefly');
+    });
+
+    it('disables selector while the previous stream is applying', () => {
+        render(<ControlPanel config={createConfig()} setConfig={vi.fn()}
+            onStart={vi.fn()} onStop={vi.fn()} isRunning={true}
+            isSwitchingResolution={true} onResolutionChange={vi.fn()}
+            onListOptions={vi.fn()} detectedCameras={[]}
+            renderDriverSupport={supportedRenderers} />);
+        const label = screen.getByText('Resolution');
+        expect(label.parentElement?.querySelector('button')).toBeDisabled();
+        expect(screen.getByRole('status')).toHaveTextContent('Applying resolution');
+    });
+
+    it('warns that recording must stop before switching video resolution', () => {
+        render(<ControlPanel config={createConfig({ record: true })}
+            setConfig={vi.fn()} onStart={vi.fn()} onStop={vi.fn()}
+            onResolutionChange={vi.fn()} isRunning={true}
+            onListOptions={vi.fn()} detectedCameras={[]}
+            renderDriverSupport={supportedRenderers} />);
+        expect(screen.getByRole('status')).toHaveTextContent('Stop recording');
+    });
+});
+
 describe('ControlPanel renderer selector', () => {
     describe('with supported renderers and default config', () => {
         let user: ReturnType<typeof userEvent.setup>;

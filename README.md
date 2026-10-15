@@ -14,13 +14,18 @@
 
 ScrcpyGUI v4 is a modern, feature-rich GUI for [scrcpy](https://github.com/Genymobile/scrcpy), completely rebuilt from the ground up using **Tauri v2**, **React 19**, and **Rust**. It transforms your Android device into a professional tool for gaming, development, and content creation.
 
-## 🛠️ Community Fork — v4.3.4 Rounded Phone Frame
+## 🛠️ Community Fork — v4.4 Quick Resolution + Live Pen
 
-This fork adds reliable wireless ADB diagnostics, a rollback-safe scrcpy engine updater, and a Windows live phone frame. Version **4.3.4** fixes the v4.3.3 square-black-corner regression by removing the rectangular matte and underscanning the native SDL rounded clip beneath the antialiased SVG bezel. The actual Android video and input remain scrcpy-native, while the edge hover bar offers drag, minimize and close. Windows real-device DPI verification is still required.
+This fork builds on Tauri + scrcpy with wireless ADB diagnostics, a black-titanium phone frame and optional annotation tools.
 
-**中文路线图：** [ROADMAP_CN.md](ROADMAP_CN.md)
+**New in v4.4:** Change the mirror resolution from the settings dropdown while it is running. The GUI automatically stops and relaunches the scrcpy stream using the new launch-time `--max-size` value (a brief reconnect, not in-place encoder resizing). On Windows, hover next to the phone border and click the **pen** icon to mark up the live screen with four colors, three brush sizes, an eraser, undo and clear. Turn the pen off to resume normal Android touch input. The ink is temporary and clears on stream restart.
 
-**真机窄边框使用与验收说明：** [DEVICE_FRAME_CN.md](DEVICE_FRAME_CN.md) — Windows only; portrait-first; normal scrcpy in landscape.
+**中文功能说明与验收清单：** [ANNOTATION_RESOLUTION_CN.md](ANNOTATION_RESOLUTION_CN.md)
+
+**真机外框与圆角调试：** [DEVICE_FRAME_CN.md](DEVICE_FRAME_CN.md)
+
+**开发路线图：** [ROADMAP_CN.md](ROADMAP_CN.md)
+
 ---
 
 ## 🚀 Key Features

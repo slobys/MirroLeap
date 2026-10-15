@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useI18n } from '../i18n';
 import { adbHistoryHost, reconnectDelayMs } from '../utils/reconnect';
+import { canQuickSwitchResolution } from '../utils/resolutionSwitch';
 
 export interface RenderDriverOption {
     id: string;
@@ -126,6 +127,8 @@ export function useScrcpy() {
     const [scrcpyStatus, setScrcpyStatus] = useState<{ found: boolean, message: string }>({ found: false, message: t('common.loading') });
     const [isInitialized, setIsInitialized] = useState(false);
     const [runningDevices, setRunningDevices] = useState<string[]>([]);
+    const [isSwitchingResolution, setIsSwitchingResolution] = useState(false);
+    const resolutionSwitchLock = useRef(false);
     const [defaultRecordPath, setDefaultRecordPath] = useState<string>("");
     const [detectedCameras, setDetectedCameras] = useState<{ id: string, name: string }[]>([]);
     const [renderDriverSupport, setRenderDriverSupport] = useState<RenderDriverSupport>({
@@ -181,6 +184,12 @@ export function useScrcpy() {
     const mdnsDevicesRef = useRef<MdnsDevice[]>([]);
     const reconnectAttemptsRef = useRef(new Map<string, { failures: number; retryAfter: number; pending: boolean }>());
     const rememberWindowPositionRef = useRef(true);
+    const liveConfigRef = useRef(config);
+    const liveRunningDevicesRef = useRef(runningDevices);
+    const livePositionsRef = useRef(windowPositions);
+    useEffect(() => { liveConfigRef.current = config; }, [config]);
+    useEffect(() => { liveRunningDevicesRef.current = runningDevices; }, [runningDevices]);
+    useEffect(() => { livePositionsRef.current = windowPositions; }, [windowPositions]);
     // Serials already queried for a friendly name this session (success or
     // failure) -- guards against re-querying the same device on every 5s
     // background poll. A failed attempt is not retried until the app restarts;
@@ -352,6 +361,11 @@ export function useScrcpy() {
             (event) => {
                 if (!rememberWindowPositionRef.current) return;
                 const { device, x, y } = event.payload;
+                // Update the ref synchronously: quick resolution restart may
+                // relaunch before React's next render commits the position.
+                livePositionsRef.current = {
+                    ...livePositionsRef.current, [device]: { x, y }
+                };
                 setWindowPositions(prev => ({ ...prev, [device]: { x, y } }));
             }
         );
@@ -669,6 +683,113 @@ export function useScrcpy() {
         }
     };
 
+
+    /** Apply a resolution preset immediately from the user's perspective.
+     * scrcpy's --max-size is a launch-only option, so an active mirror must
+     * briefly restart its video stream. Wait for the prior monitor's stopped
+     * notification BEFORE launching the replacement; launching earlier would
+     * race with its old process monitor and may remove the new session.
+     *
+     * This never calls 'adb shell wm size': it does not change Android's own
+     * display resolution, DPI, or accessibility settings.
+     */
+    const changeMirrorResolution = async (device: string, nextSize: string): Promise<boolean> => {
+        if (resolutionSwitchLock.current) return false;
+        const oldConfig = liveConfigRef.current;
+        const wasRunning = liveRunningDevicesRef.current.includes(device);
+        const decision = canQuickSwitchResolution(
+            nextSize, oldConfig.res || '0', oldConfig.sessionMode,
+            wasRunning, Boolean(oldConfig.record)
+        );
+        if (!decision.allowed) {
+            setLogs(prev => [...prev.slice(-100),
+                '[RESOLUTION] ' + (decision.reason || 'Unsupported resolution')]);
+            return false;
+        }
+        if (!decision.needsRestart) {
+            const updated = { ...oldConfig, res: nextSize };
+            liveConfigRef.current = updated;
+            setConfig(prev => ({ ...prev, res: nextSize }));
+            return true;
+        }
+
+        resolutionSwitchLock.current = true;
+        setIsSwitchingResolution(true);
+        const updated = { ...oldConfig, res: nextSize, device };
+        liveConfigRef.current = updated;
+        setConfig(prev => ({ ...prev, res: nextSize }));
+        setLogs(prev => [...prev.slice(-100),
+            '[RESOLUTION] Applying ' + (nextSize === '0' ? 'Original' : nextSize)
+            + ' (automatic stream restart; Android screen settings unchanged).']);
+
+        let detach: (() => void) | undefined;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let didStop = false;
+        try {
+            let notifyStopped!: () => void;
+            let timeoutStop!: (error: Error) => void;
+            const stopped = new Promise<void>((resolve, reject) => {
+                notifyStopped = resolve;
+                timeoutStop = reject;
+            });
+            // Register first; an event can otherwise arrive while stop_scrcpy
+            // is still waiting for the previous Windows process to finish.
+            detach = await listen<{ device: string; running: boolean }>(
+                'scrcpy-status', event => {
+                    if (event.payload.device === device && event.payload.running === false) {
+                        notifyStopped();
+                    }
+                }
+            );
+            timer = setTimeout(() => timeoutStop(new Error(
+                'Previous mirroring process did not confirm shutdown within 8 seconds'
+            )), 8000);
+            await invoke('stop_scrcpy', { device });
+            await stopped;
+            didStop = true;
+
+            const pos = oldConfig.rememberWindowPosition !== false
+                ? livePositionsRef.current[device] : undefined;
+            await invoke('run_scrcpy', {
+                config: {
+                    ...updated,
+                    windowX: pos?.x,
+                    windowY: pos?.y
+                }
+            });
+            setLogs(prev => [...prev.slice(-100),
+                '[RESOLUTION] Switched to ' + (nextSize === '0' ? 'Original' : nextSize)]);
+            return true;
+        } catch (error) {
+            liveConfigRef.current = oldConfig;
+            setConfig(prev => ({ ...prev, res: oldConfig.res }));
+            setLogs(prev => [...prev.slice(-100),
+                '[RESOLUTION] Could not apply requested size: ' + String(error)]);
+            // If the old stream was definitely stopped, attempt to restore
+            // the prior preset to avoid leaving the user with a blank screen.
+            if (didStop) {
+                try {
+                    const pos = oldConfig.rememberWindowPosition !== false
+                        ? livePositionsRef.current[device] : undefined;
+                    await invoke('run_scrcpy', { config: {
+                        ...oldConfig, device, windowX: pos?.x, windowY: pos?.y
+                    } });
+                    setLogs(prev => [...prev.slice(-100),
+                        '[RESOLUTION] Previous resolution restored.']);
+                } catch (restoreError) {
+                    setLogs(prev => [...prev.slice(-100),
+                        '[RESOLUTION] Recovery failed: ' + String(restoreError)]);
+                }
+            }
+            return false;
+        } finally {
+            if (timer) clearTimeout(timer);
+            if (detach) detach();
+            resolutionSwitchLock.current = false;
+            setIsSwitchingResolution(false);
+        }
+    };
+
     const stopScrcpy = async (device: string) => {
         try {
             await invoke('stop_scrcpy', { device });
@@ -964,6 +1085,7 @@ export function useScrcpy() {
         refreshDevicesUntilSettled,
         runScrcpy,
         stopScrcpy,
+        changeMirrorResolution,
         recenterMirrorWindow,
         downloadScrcpy,
         activeDevice,
@@ -977,6 +1099,7 @@ export function useScrcpy() {
         listScrcpyOptions,
         runTerminalCommand,
         runningDevices,
+        isSwitchingResolution,
         defaultRecordPath,
         detectedCameras,
         renderDriverSupport,

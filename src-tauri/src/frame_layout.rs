@@ -63,7 +63,8 @@ pub fn expand_screen(screen: ScreenRect) -> Option<FrameRect> {
 
 
 pub const TOOLBAR_WIDTH: i32 = 48;
-pub const TOOLBAR_HEIGHT: i32 = 146;
+pub const TOOLBAR_HEIGHT: i32 = 194;
+pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 434;
 pub const TOOLBAR_GAP: i32 = 8;
 
 /// Ellipse radii for the REAL SDL client region, in physical screen pixels.
@@ -173,6 +174,19 @@ mod tests {
               + outer_rx * (1.0 - (1.0-((y-outer_ry)/outer_ry).powi(2)).sqrt());
             assert!(clip_x as f64 > outer_x, "SDL video may protrude outside metal casing");
         }
+    }
+
+    #[test]
+    fn annotation_palette_fits_on_a_typical_monitor() {
+        let frame = expand_screen(ScreenRect { x: 240, y: 10, width: 410, height: 850 }).unwrap();
+        let desktop = ScreenRect { x: 0, y: 0, width: 1920, height: 1080 };
+        let mut ctrl = toolbar_position(frame, frame.y + 30, desktop);
+        ctrl.height = ANNOTATION_TOOLBAR_HEIGHT;
+        ctrl.y = ctrl.y.clamp(desktop.y, desktop.y + desktop.height - ctrl.height);
+        assert!(ctrl.height > TOOLBAR_HEIGHT);
+        assert!(ctrl.y >= desktop.y);
+        assert!(ctrl.y + ctrl.height <= 1080);
+        assert!(ctrl.x > frame.x + frame.width);
     }
 
     #[test]

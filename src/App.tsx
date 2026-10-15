@@ -29,6 +29,7 @@ function App() {
     refreshDevicesUntilSettled,
     runScrcpy,
     stopScrcpy,
+    changeMirrorResolution,
     downloadScrcpy,
     checkScrcpy,
     scrcpyStatus,
@@ -42,6 +43,7 @@ function App() {
     listScrcpyOptions,
     runTerminalCommand,
     runningDevices,
+    isSwitchingResolution,
     isRefreshing,
     sessionRunning,
     clearLogs,
@@ -366,6 +368,8 @@ function App() {
                     onStart={handleStart}
                     onStop={handleStop}
                     isRunning={sessionRunning}
+                    onResolutionChange={(size) => void changeMirrorResolution(activeDevice || config.device, size)}
+                    isSwitchingResolution={isSwitchingResolution}
                     detectedCameras={detectedCameras}
                     renderDriverSupport={renderDriverSupport}
                     onListOptions={(arg) => {

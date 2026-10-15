@@ -4,55 +4,157 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>ScrcpyGUI - 透明真机外框</title>
+  <title>ScrcpyGUI - 透明机身和屏幕标注</title>
   <style>
     /*
-     * This entire Tauri window is a pointer-transparent visual overlay. The
-     * live screen belongs to the separate scrcpy SDL window beneath us.
+     * The live Android picture is always the native scrcpy SDL window below.
+     * SVG and ink are drawn inside a transparent WebView2 overlay; no video
+     * re-encoding or fake Android status bar is involved.
      *
-     * Do not add fake iPhone status bars, notch, island or an opaque panel.
-     * The SVG has a punched-out 964x2114 screen aperture at (18,18) in its
-     * 1000x2150 viewBox. src-tauri/src/frame_layout.rs uses those SAME
-     * geometric constants, with independent X/Y scaling for Android devices.
-     *
-     * object-fit: fill intentionally scales the outer vector to match the
-     * actual SDL client rect; no cropping or letterbox is allowed.
+     * The SVG screen hole is x=18,y=18,w=964,h=2114 in a 1000x2150 viewBox.
+     * These independent percentages match src-tauri/src/frame_layout.rs.
      */
-    :root { color-scheme: dark; }
     *, *::before, *::after { box-sizing: border-box; }
     html, body {
-      position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
+      position: fixed; inset: 0; width: 100%; height: 100%;
+      margin: 0; padding: 0; overflow: hidden;
       background: transparent !important;
-      border: 0;
-      pointer-events: none !important;
+      border: 0; pointer-events: none; user-select: none;
       -webkit-user-select: none;
-      user-select: none;
     }
     #device-frame {
-      position: absolute;
-      inset: 0;
-      display: block;
-      width: 100%;
-      height: 100%;
-      object-fit: fill;
-      background: transparent;
-      pointer-events: none !important;
-      -webkit-user-drag: none;
-      user-select: none;
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: fill; display: block; pointer-events: none;
+      background: transparent; -webkit-user-drag: none;
     }
+    #annotation {
+      position: absolute;
+      left: 1.8%;
+      top: .8372093023255814%;
+      width: 96.4%;
+      height: 98.32558139534883%;
+      display: block;
+      z-index: 2;
+      background: transparent;
+      pointer-events: none;
+      cursor: crosshair;
+      touch-action: none;
+    }
+    body.inking #annotation { pointer-events: auto; }
   </style>
 </head>
 <body aria-hidden="true">
   <img id="device-frame"
        src="/device-frame/iphone-black-portrait.svg"
-       alt=""
-       draggable="false"
-       decoding="sync">
+       alt="" draggable="false" decoding="sync">
+  <canvas id="annotation" aria-label="手机投屏标注画布"></canvas>
+  <script>
+  (() => {
+    'use strict';
+    const canvas = document.getElementById('annotation');
+    const ctx = canvas.getContext('2d', { alpha: true });
+    let enabled = false;
+    let tool = 'pen';
+    let color = '#ffd54b';
+    let size = 5;
+    let drawing = null;
+    const strokes = [];
+    const bound = value => Math.max(0, Math.min(1, value));
+    const currentPoint = event => {
+      const r = canvas.getBoundingClientRect();
+      return {
+        x: bound((event.clientX - r.left) / Math.max(1, r.width)),
+        y: bound((event.clientY - r.top) / Math.max(1, r.height))
+      };
+    };
+
+    // Normalized stroke geometry survives user-driven mirror-window resizing
+    // without losing alignment or collecting subpixel errors.
+    function renderStroke(stroke) {
+      const w = canvas.width, h = canvas.height;
+      ctx.save();
+      ctx.globalCompositeOperation =
+        stroke.tool === 'erase' ? 'destination-out' : 'source-over';
+      ctx.strokeStyle = stroke.tool === 'erase' ? '#000' : stroke.color;
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.lineWidth = stroke.size * Math.min(w, h) / 400;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      const first = stroke.points[0];
+      if (!first) { ctx.restore(); return; }
+      ctx.moveTo(first.x * w, first.y * h);
+      for (const point of stroke.points.slice(1)) ctx.lineTo(point.x * w, point.y * h);
+      if (stroke.points.length === 1) {
+        ctx.arc(first.x * w, first.y * h, Math.max(1, ctx.lineWidth / 2), 0, 2 * Math.PI);
+        ctx.fill();
+      } else {
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function redraw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const stroke of strokes) renderStroke(stroke);
+      if (drawing) renderStroke(drawing);
+    }
+
+    function fit() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      const width = Math.max(1, Math.round(rect.width * dpr));
+      const height = Math.max(1, Math.round(rect.height * dpr));
+      if (canvas.width === width && canvas.height === height) return;
+      canvas.width = width;
+      canvas.height = height;
+      redraw();
+    }
+    window.addEventListener('resize', fit);
+    new ResizeObserver(fit).observe(canvas);
+    fit();
+
+    canvas.addEventListener('pointerdown', event => {
+      if (!enabled || event.button !== 0) return;
+      event.preventDefault();
+      canvas.setPointerCapture(event.pointerId);
+      drawing = { tool, color, size: tool === 'erase' ? size * 4 : size, points: [currentPoint(event)] };
+      redraw();
+    });
+    canvas.addEventListener('pointermove', event => {
+      if (!enabled || !drawing) return;
+      drawing.points.push(currentPoint(event));
+      redraw();
+    });
+    function finish(event) {
+      if (!drawing) return;
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      strokes.push(drawing);
+      drawing = null;
+      redraw();
+    }
+    canvas.addEventListener('pointerup', finish);
+    canvas.addEventListener('pointercancel', finish);
+
+    // Native toolbar controls this API via WebviewWindow.eval(), so the
+    // click-through drawing overlay needs no additional Tauri capabilities.
+    window.scrcpyInk = Object.freeze({
+      setEnabled(value) {
+        enabled = Boolean(value);
+        document.body.classList.toggle('inking', enabled);
+        if (!enabled) { drawing = null; redraw(); }
+      },
+      setTool(value) { if (value === 'pen' || value === 'erase') tool = value; },
+      setColor(value) {
+        if (['#ffd54b', '#ff5252', '#ffffff', '#40e0d0'].includes(value)) {
+          color = value; tool = 'pen';
+        }
+      },
+      setSize(value) { if ([3, 5, 9].includes(value)) size = value; },
+      undo() { if (drawing) drawing = null; else strokes.pop(); redraw(); },
+      clear() { drawing = null; strokes.length = 0; redraw(); }
+    });
+  })();
+  </script>
 </body>
 </html>

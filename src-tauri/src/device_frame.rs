@@ -28,11 +28,19 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::frame_layout::{
     expand_screen, is_frame_edge_hover, native_clip_radius, toolbar_position,
-    FrameRect, ScreenRect, TOOLBAR_HEIGHT, TOOLBAR_WIDTH,
+    FrameRect, ScreenRect, TOOLBAR_HEIGHT, ANNOTATION_TOOLBAR_HEIGHT, TOOLBAR_WIDTH,
 };
 use crate::ScrcpyState;
 
 static ACTIVE_DRAGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn ink_sessions() -> &'static Mutex<HashSet<String>> {
+    INK_ENABLED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+fn is_inking(device: &str) -> bool {
+    ink_sessions().lock().map(|set| set.contains(device)).unwrap_or(false)
+}
 
 fn drags() -> &'static Mutex<HashSet<String>> {
     ACTIVE_DRAGS.get_or_init(|| Mutex::new(HashSet::new()))
@@ -227,15 +235,19 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // then show ONLY a small interactive popover to the right of the phone.
         let cursor = pointer();
         let toolbar_hwnd = toolbar.hwnd().ok();
+        let overlay_hwnd = overlay.hwnd().ok();
         let foreground = unsafe { GetForegroundWindow() };
-        let active = foreground == hwnd || toolbar_hwnd == Some(foreground);
+        let active = foreground == hwnd
+            || toolbar_hwnd == Some(foreground)
+            || overlay_hwnd == Some(foreground);
         let dragging = is_dragging(&device);
+        let inking = is_inking(&device);
         let close_to_edge = cursor.map(|(x,y)| is_frame_edge_hover(x,y,frame)).unwrap_or(false);
         let inside_controls = match (cursor, controls_rect) {
             (Some((x,y)), Some(r)) => inside(x,y,r,12),
             _ => false,
         };
-        let wanted = active && (close_to_edge || inside_controls || dragging);
+        let wanted = active && (close_to_edge || inside_controls || dragging || inking);
         if wanted { last_nearby = Some(Instant::now()); }
         let lingering = last_nearby.map(|t| t.elapsed() < Duration::from_millis(420))
             .unwrap_or(false);
@@ -245,7 +257,10 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             if controls_rect.is_none() {
                 let desktop = virtual_desktop();
                 let y = cursor.map(|(_,y)| y).unwrap_or(frame.y + 80);
-                let rect = toolbar_position(frame, y, desktop);
+                let mut rect = toolbar_position(frame, y, desktop);
+                rect.height = if inking { ANNOTATION_TOOLBAR_HEIGHT } else { TOOLBAR_HEIGHT };
+                rect.y = rect.y.clamp(desktop.y,
+                    (desktop.y + desktop.height - rect.height).max(desktop.y));
                 controls_y_offset = Some(rect.y - frame.y);
                 controls_rect = Some(rect);
             }
@@ -253,6 +268,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             // pointer vertically while the user tries to press a button.
             if let Some(mut rect) = controls_rect {
                 let desktop = virtual_desktop();
+                rect.height = if inking { ANNOTATION_TOOLBAR_HEIGHT } else { TOOLBAR_HEIGHT };
                 let left_gap = frame.x - 8 - TOOLBAR_WIDTH;
                 let right_gap = frame.x + frame.width + 8;
                 let prefer_right = right_gap + TOOLBAR_WIDTH <= desktop.x + desktop.width;
@@ -274,6 +290,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         }
     }
 
+    if let Ok(mut set) = ink_sessions().lock() { set.remove(&device); }
+    let _ = overlay.set_ignore_cursor_events(true);
     if let Some(pid) = clipped_pid {
         if let Some(hwnd) = crate::commands::find_window_by_pid(pid) {
             reset_native_corner_clip(hwnd);
@@ -294,6 +312,63 @@ fn device_for_controls(app: &AppHandle, caller: &tauri::Window) -> Result<String
 
 /// Called only by the dedicated phone-controls-* toolbar window.
 /// The full-screen visual overlay cannot receive pointer events by design.
+fn ink_action_script(action: &str) -> Option<&'static str> {
+    match action {
+        "ink_pen" => Some("window.scrcpyInk?.setTool('pen')"),
+        "ink_erase" => Some("window.scrcpyInk?.setTool('erase')"),
+        "ink_color_yellow" => Some("window.scrcpyInk?.setColor('#ffd54b')"),
+        "ink_color_red" => Some("window.scrcpyInk?.setColor('#ff5252')"),
+        "ink_color_white" => Some("window.scrcpyInk?.setColor('#ffffff')"),
+        "ink_color_cyan" => Some("window.scrcpyInk?.setColor('#40e0d0')"),
+        "ink_size_3" => Some("window.scrcpyInk?.setSize(3)"),
+        "ink_size_5" => Some("window.scrcpyInk?.setSize(5)"),
+        "ink_size_9" => Some("window.scrcpyInk?.setSize(9)"),
+        "ink_undo" => Some("window.scrcpyInk?.undo()"),
+        "ink_clear" => Some("window.scrcpyInk?.clear()"),
+        _ => None,
+    }
+}
+
+fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<(), String> {
+    let overlay = app.get_webview_window(&label(device))
+        .ok_or("Live phone frame is not available for annotation")?;
+    if action == "ink_toggle" {
+        let turn_on = !is_inking(device);
+        if turn_on {
+            // Turn on hit testing only in drawing mode; outside this mode the
+            // entire visual overlay remains click-through to the SDL window.
+            overlay.eval("window.scrcpyInk?.setEnabled(true)")
+                .map_err(|e| format!("Cannot activate drawing surface: {e}"))?;
+            overlay.set_ignore_cursor_events(false)
+                .map_err(|e| format!("Cannot enable drawing pointer input: {e}"))?;
+            ink_sessions().lock().map_err(|e| e.to_string())?.insert(device.to_owned());
+        } else {
+            overlay.eval("window.scrcpyInk?.setEnabled(false)")
+                .map_err(|e| format!("Cannot close drawing surface: {e}"))?;
+            overlay.set_ignore_cursor_events(true)
+                .map_err(|e| format!("Cannot restore scrcpy touch input: {e}"))?;
+            ink_sessions().lock().map_err(|e| e.to_string())?.remove(device);
+            // Return keyboard/mouse focus to native scrcpy after pen mode.
+            if let Some(pid) = app.state::<ScrcpyState>()
+                .processes.lock().ok()
+                .and_then(|map| map.get(device).and_then(|child| child.id()))
+            {
+                if let Some(video) = crate::commands::find_window_by_pid(pid) {
+                    let _ = unsafe { SetForegroundWindow(video) };
+                }
+            }
+        }
+        return Ok(());
+    }
+    if !is_inking(device) {
+        return Err("Enable the annotation pen before using drawing tools".into());
+    }
+    let code = ink_action_script(action).ok_or("Unsupported annotation action")?;
+    overlay.eval(code).map_err(|e| format!("Cannot apply annotation tool: {e}"))
+}
+
+/// Called only by the dedicated phone-controls-* toolbar window.
+/// The full-screen visual overlay receives mouse input only while annotating.
 pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<(), String> {
     let device = device_for_controls(app, caller)?;
     let pid = app.state::<ScrcpyState>().processes.lock()
@@ -302,6 +377,9 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         .ok_or("scrcpy session has ended")?;
     let hwnd = crate::commands::find_window_by_pid(pid).ok_or("scrcpy window is not visible")?;
 
+    if action.starts_with("ink_") {
+        return control_ink(app, &device, action);
+    }
     match action {
         "minimize" => {
             unsafe { ShowWindow(hwnd, SW_MINIMIZE); }
@@ -367,7 +445,9 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
         .resizable(false)
         .skip_taskbar(true)
         .always_on_top(always_on_top)
-        .focusable(false)
+        // Remain mouse-through at rest, but allow real pointer capture after
+        // the user explicitly enables annotation in the separate tool rail.
+        .focusable(true)
         .focused(false)
         .visible(false)
         .inner_size(430.0, 900.0)
@@ -412,6 +492,15 @@ pub fn close(app: &AppHandle, device: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn annotation_scripts_allow_only_fixed_palette_and_edit_commands() {
+        assert_eq!(ink_action_script("ink_color_red"), Some("window.scrcpyInk?.setColor('#ff5252')"));
+        assert!(ink_action_script("ink_clear").is_some());
+        assert!(ink_action_script("ink_size_9").is_some());
+        assert!(ink_action_script("ink_color_' + alert(1)").is_none());
+        assert!(ink_action_script("exit").is_none());
+    }
 
     #[test]
     fn both_window_labels_are_stable_and_unique() {
