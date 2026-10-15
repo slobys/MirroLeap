@@ -227,7 +227,7 @@ export const en = {
         borderless: 'Borderless',
         borderlessTooltip: 'Launch scrcpy without window borders. Position is remembered between sessions. To move the window: Ctrl+Alt+Shift+W on Windows, Super/Meta+drag on GNOME/KDE. If it ever ends up off-screen, press Ctrl+Alt+Shift+C to snap it back to the centre.',
         deviceFrame: 'iPhone-style slim titanium bezel',
-        deviceFrameTooltip: 'Windows only. Slim black-titanium metal shell around the live Android screen. No fake notch, island or iOS status bar. Portrait first; landscape uses normal scrcpy. Move with Ctrl+Alt+Shift+W; center with Ctrl+Alt+Shift+C.',
+        deviceFrameTooltip: 'Windows only: the actual scrcpy video is clipped to the rounded screen corners. Move the pointer to the phone edge for hidden drag / minimize / close buttons. Hold the four-arrow icon to drag, release to stop. Alt+Tab or the taskbar restores a minimized mirror. Ctrl+Alt+Shift+W / C remain available.',
         rememberWindowPosition: 'Remember Window Position',
         rememberWindowPositionTooltip: 'Reopen the mirror window at the same spot it was last placed. Turn this off if you often change resolution -- it can throw off the saved spot. If it ever ends up off-screen, press Ctrl+Alt+Shift+C to snap it back to the centre.',
         recordFeed: 'Record Feed',
