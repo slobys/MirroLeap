@@ -1,7 +1,7 @@
 import React from 'react';
 import { Smartphone, RefreshCw, Usb, Wifi, UploadCloud, Zap, X } from 'lucide-react';
 import { useI18n } from '../i18n';
-import { MdnsDevice, WirelessDiagnosis, isMdnsDeviceConnected } from '../hooks/useScrcpy';
+import { MdnsDevice, PendingAdbDevice, WirelessDiagnosis, isMdnsDeviceConnected } from '../hooks/useScrcpy';
 
 // mDNS wireless-debugging serials look like
 // "adb-<serial>-<random>._adb-tls-connect._tcp" (optionally with an mDNS
@@ -22,6 +22,7 @@ function formatMdnsName(name: string): string {
 
 export interface SidebarProps {
     devices: string[];
+    pendingDevices?: PendingAdbDevice[];
     // Best-effort, display-only device model per serial; falls back to
     // formatDeviceLabel(d) when a serial has no known model yet.
     deviceModels?: Record<string, string>;
@@ -47,6 +48,7 @@ export interface SidebarProps {
 
 export default function Sidebar({
     devices,
+    pendingDevices = [],
     deviceModels = {},
     deviceFriendlyNames = {},
     runningDevices,
@@ -234,6 +236,18 @@ export default function Sidebar({
                             })
                         )}
                     </div>
+
+                    {pendingDevices.length > 0 && (
+                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 space-y-1" role="region" aria-label={t('sidebar.devicesNeedAttention')}>
+                            <p className="text-xs font-bold text-amber-400">{t('sidebar.devicesNeedAttention')}</p>
+                            {pendingDevices.map(device => (
+                                <p key={device.serial} className="text-[11px] text-zinc-400 break-all">
+                                    {device.serial} — {device.state === 'unauthorized' ? t('sidebar.unauthorizedDevice') :
+                                        device.state === 'offline' ? t('sidebar.offlineDevice') : device.state}
+                                </p>
+                            ))}
+                        </div>
+                    )}
 
                     <div className="bg-black/40 p-1 rounded-lg flex gap-1 border border-zinc-800/50">
                         <button
