@@ -2419,7 +2419,7 @@ pub async fn device_frame_control(
     window: Window,
     app_handle: tauri::AppHandle,
     action: String,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     #[cfg(target_os = "windows")]
     {
         crate::device_frame::control(&app_handle, &window, &action).await
