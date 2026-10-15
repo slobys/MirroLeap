@@ -20,6 +20,7 @@ function App() {
   const {
     devices,
     deviceModels,
+    pendingDevices,
     deviceFriendlyNames,
     logs,
     activeDevice,
@@ -336,6 +337,7 @@ function App() {
                 <div className="transition-all duration-700">
                   <Sidebar
                     devices={devices}
+                    pendingDevices={pendingDevices}
                     deviceModels={deviceModels}
                     deviceFriendlyNames={deviceFriendlyNames}
                     runningDevices={runningDevices}
