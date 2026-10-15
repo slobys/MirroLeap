@@ -18,7 +18,8 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindo
 use tauri::webview::PageLoadEvent;
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn,
+    ClientToScreen, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
+    MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, SetWindowRgn,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
@@ -215,6 +216,31 @@ fn virtual_desktop() -> ScreenRect {
     }
 }
 
+/// Use the current monitor's WORK AREA, not the virtual desktop (which
+/// includes the Windows taskbar). Also supports side-mounted taskbars and
+/// separate usable areas for multiple monitors.
+fn monitor_work_area(video: HWND) -> ScreenRect {
+    let monitor = unsafe { MonitorFromWindow(video, MONITOR_DEFAULTTONEAREST) };
+    if !monitor.0.is_null() {
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+            let area = info.rcWork;
+            if area.right > area.left && area.bottom > area.top {
+                return ScreenRect {
+                    x: area.left,
+                    y: area.top,
+                    width: area.right - area.left,
+                    height: area.bottom - area.top,
+                };
+            }
+        }
+    }
+    virtual_desktop()
+}
+
 fn inside(x: i32, y: i32, rect: ScreenRect, margin: i32) -> bool {
     x >= rect.x - margin && x < rect.x + rect.width + margin
         && y >= rect.y - margin && y < rect.y + rect.height + margin
@@ -268,6 +294,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut video_was_unavailable = true;
     let mut restored_at: Option<Instant> = None;
     let mut previous_layout: Option<ToolbarLayout> = None;
+    let mut previous_zoom: Option<u32> = None;
     let mut layout_synced_at: Option<Instant> = None;
     let mut clip_retry_reported = false;
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
@@ -299,6 +326,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             last_nearby = None;
             applied_orientation = None;
             previous_layout = None;
+            previous_zoom = None;
             layout_synced_at = None;
             video_was_unavailable = true;
             continue;
@@ -411,7 +439,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let show_controls = wanted || (active && lingering);
 
         if show_controls {
-            let desktop = virtual_desktop();
+            let desktop = monitor_work_area(hwnd);
             // WebView is laid out in CSS DIPs. Use the SDL monitor's physical
             // DPI to size the native window (DPI can change when dragging to
             // a different monitor).
@@ -421,13 +449,23 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                     .map(|(_, y)| y).unwrap_or(frame.y + 100);
                 let narrow_height = (TOOLBAR_HEIGHT as i64 * dpi as i64 / 96) as i32;
                 let top = mouse_y - narrow_height / 2;
-                let compact = toolbar_placement(frame, top, desktop, false, dpi);
-                controls_y_offset = Some(compact.rect.y - frame.y);
+                if let Some(compact) = toolbar_placement(frame, top, desktop, false, dpi) {
+                    controls_y_offset = Some(compact.rect.y - frame.y);
+                }
             }
             // The top of the compact rail is stable as the phone moves; the
             // expanded flyout is allowed to move UP to fit within the desktop.
             let top = frame.y + controls_y_offset.unwrap_or(0);
-            let placement = toolbar_placement(frame, top, desktop, inking, dpi);
+            let Some(placement) = toolbar_placement(frame, top, desktop, inking, dpi) else {
+                // If scrcpy has no visible intersection with the monitor's
+                // work area, hide controls rather than show a floating ghost.
+                if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
+                controls_rect = None;
+                controls_y_offset = None;
+                previous_layout = None;
+                previous_zoom = None;
+                continue;
+            };
             let rect = placement.rect;
             let actually_visible = toolbar.hwnd().ok()
                 .map(|h| unsafe { IsWindowVisible(h).as_bool() }).unwrap_or(false);
@@ -453,10 +491,16 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 }
                 let refresh_layout = layout_synced_at.map(|t| t.elapsed() > Duration::from_secs(2))
                     .unwrap_or(true);
-                if newly_shown || previous_layout != Some(placement.layout) || refresh_layout {
-                    let script = format!("window.scrcpyControls?.setLayout('{}'); window.scrcpyControls?.sync()", placement.layout.css_name());
+                if newly_shown || previous_layout != Some(placement.layout)
+                    || previous_zoom != Some(placement.zoom_percent) || refresh_layout
+                {
+                    let script = format!(
+                        "window.scrcpyControls?.setLayout('{}', {}); window.scrcpyControls?.sync()",
+                        placement.layout.css_name(), placement.zoom_percent
+                    );
                     if toolbar.eval(script).is_ok() {
                         previous_layout = Some(placement.layout);
+                        previous_zoom = Some(placement.zoom_percent);
                         layout_synced_at = Some(Instant::now());
                     }
                 }
@@ -466,6 +510,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             controls_rect = None;
             controls_y_offset = None;
             previous_layout = None;
+            previous_zoom = None;
             layout_synced_at = None;
         }
     }

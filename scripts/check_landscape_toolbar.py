@@ -72,6 +72,13 @@ assert "pub const ANNOTATION_TOOLBAR_WIDTH: i32 = 268;" in layout
 assert "pub const ANNOTATION_STACK_WIDTH: i32 = 168;" in layout
 assert "pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 486;" in layout
 assert "pub fn toolbar_placement(" in layout and "ToolbarLayout::StackRight" in layout
+assert "visible_top = frame.y.max(desktop.y)" in layout
+assert "visible_bottom = frame.y.saturating_add(frame.height).min(desktop_bottom)" in layout
+assert "pub const TOOLBAR_SAFE_MARGIN: i32 = 12;" in layout
+assert "ToolbarLayout::ShortRight" in layout and "ToolbarLayout::TightInkRight" in layout
+assert "monitor_work_area(hwnd)" in native and "GetMonitorInfoW" in native
+assert "MONITOR_DEFAULTTONEAREST" in native and "info.rcWork" in native
+assert "placement.zoom_percent" in native and "document.documentElement.style.zoom" in toolbar
 assert "GetWindow(hwnd, GW_HWNDPREV)" in native, "Toolbar must keep SDL-relative stacking"
 assert "recent_restore" in native and "video_was_unavailable" in native
 assert "window.scrcpyControls?.setLayout" in native
