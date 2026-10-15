@@ -287,7 +287,6 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
             controls_rect = None;
             controls_y_offset = None;
-            last_toolbar_size = TOOLBAR_HEIGHT;
         }
         let _ = last_toolbar_size; // tracks current width/height when palette opens
     }
