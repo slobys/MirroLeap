@@ -288,7 +288,6 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             controls_rect = None;
             controls_y_offset = None;
         }
-        let _ = last_toolbar_size; // tracks current width/height when palette opens
     }
 
     if let Ok(mut set) = ink_sessions().lock() { set.remove(&device); }
