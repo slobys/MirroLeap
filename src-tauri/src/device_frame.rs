@@ -50,6 +50,106 @@ fn ink_acks() -> &'static Mutex<HashMap<u64, (String, tokio::sync::oneshot::Send
     INK_ACKS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// One-use ink bitmap response channel. Only the specific phone-frame window
+/// that Rust addressed may return the transparent drawing for compositing.
+pub(crate) struct InkImageSnapshot {
+    pub png_data_url: String,
+    pub orientation: String,
+    pub stroke_count: usize,
+}
+type CaptureReply = Result<InkImageSnapshot, String>;
+type CaptureSender = tokio::sync::oneshot::Sender<CaptureReply>;
+static CAPTURE_ACK_NONCE: AtomicU64 = AtomicU64::new(1);
+static CAPTURE_ACKS: OnceLock<Mutex<HashMap<u64, (String, CaptureSender)>>> = OnceLock::new();
+fn capture_acks() -> &'static Mutex<HashMap<u64, (String, CaptureSender)>> {
+    CAPTURE_ACKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn acknowledge_ink_capture(
+    caller: &tauri::Window,
+    token: u64,
+    png: String,
+    orientation: String,
+    strokes: usize,
+    error: Option<String>,
+) -> Result<(), String> {
+    if !caller.label().starts_with("phone-frame-") {
+        return Err("Only the active phone frame can export its drawing".into());
+    }
+    if png.len() > 12 * 1024 * 1024 || strokes > 20_000 || error.as_deref().unwrap_or("").len() > 240 {
+        return Err("Annotation export exceeds safe capture limits".into());
+    }
+    let sender = {
+        let mut replies = capture_acks().lock().map_err(|e| e.to_string())?;
+        match replies.get(&token) {
+            Some((expected, _)) if expected == caller.label() => {},
+            Some(_) => return Err("Annotation response came from another phone".into()),
+            None => return Err("Annotation capture token is not active".into()),
+        }
+        replies.remove(&token).map(|(_, tx)| tx)
+    }.ok_or("Annotation capture has expired")?;
+    let result = if let Some(reason) = error.filter(|s| !s.is_empty()) {
+        Err(reason)
+    } else if !png.starts_with("data:image/png;base64,") || strokes == 0 ||
+        !matches!(orientation.as_str(), "portrait" | "landscape")
+    {
+        Err("No drawing is ready to export. Add a pen stroke and try again.".into())
+    } else {
+        Ok(InkImageSnapshot { png_data_url: png, orientation, stroke_count: strokes })
+    };
+    let _ = sender.send(result);
+    Ok(())
+}
+
+/// Capture existing WebView2 canvas pixels (including eraser transparency),
+/// not a desktop screenshot that could contain unrelated foreground windows.
+pub(crate) async fn capture_ink_snapshot(
+    app: &AppHandle,
+    device: &str,
+) -> Result<InkImageSnapshot, String> {
+    let pid = app.state::<ScrcpyState>().processes.lock()
+        .map_err(|e| e.to_string())?
+        .get(device).and_then(|process| process.id())
+        .ok_or("Start mirroring before exporting the annotated picture")?;
+    if capture_screen(pid).is_none() {
+        return Err("Restore the phone projection before saving the annotated picture".into());
+    }
+    if !ready_to_ink(device) {
+        return Err("Annotation canvas has not finished loading".into());
+    }
+    let overlay = app.get_webview_window(&label(device))
+        .ok_or("Annotation frame for this phone does not exist")?;
+    let token = CAPTURE_ACK_NONCE.fetch_add(1, Ordering::Relaxed);
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    capture_acks().lock().map_err(|e| e.to_string())?
+        .insert(token, (overlay.label().to_string(), sender));
+    let script = format!(r#"(() => {{
+      let snapshot = null, error = '';
+      try {{
+        snapshot = window.scrcpyInk?.captureSnapshot();
+        if (!snapshot) throw new Error('Annotation canvas is not ready');
+      }} catch (reason) {{
+        error = String(reason?.message || reason).slice(0, 200);
+      }}
+      const invoke = window.__TAURI__?.core?.invoke;
+      if (invoke) {{
+        void invoke('device_frame_capture_ack', {{
+          token: {token}, png: snapshot?.png || '',
+          orientation: snapshot?.orientation || '',
+          strokes: snapshot?.strokes || 0, error,
+        }}).catch(e => console.error('[MirroCapture] Drawing export failed', e));
+      }}
+    }})()"#);
+    if let Err(reason) = overlay.eval(script) {
+        capture_acks().lock().map_err(|e| e.to_string())?.remove(&token);
+        return Err(format!("Could not request the drawing from the phone frame: {reason}"));
+    }
+    let result = tokio::time::timeout(Duration::from_secs(5), receiver).await;
+    capture_acks().lock().map_err(|e| e.to_string())?.remove(&token);
+    result.map_err(|_| "Timed out retrieving the pen drawing. Retry in a moment.".to_string())?
+        .map_err(|_| "Phone frame was closed during drawing capture".to_string())?
+}
+
 /// Invoked by the phone-frame-* view only. The caller's trusted Tauri label
 /// must match the nonce's outstanding overlay; never trust a JS-supplied serial.
 pub(crate) fn acknowledge_ink(
