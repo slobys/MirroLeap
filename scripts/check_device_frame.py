@@ -63,36 +63,43 @@ capability = (root / "src-tauri/capabilities/default.json").read_text(encoding="
 assert all(f'id="{key}"' in controls_page for key in ("drag", "minimize", "close"))
 assert all(f"act('{key}')" in controls_page for key in ("drag", "minimize", "close"))
 assert 'phone-controls-*' in capability
-# Do NOT reintroduce Win32 region clipping: it is a hard-pixel mask,
-# incompatible with WebView2 antialiasing and creates wallpaper-colored seams.
-assert not re.search(r"\bSetWindowRgn\s*\(", backend), (
-    "Win32 SetWindowRgn reintroduced: it leaks cyan wallpaper behind rounded SVG edges"
-)
-assert not re.search(r"\bCreateRoundRectRgn\s*\(", backend), (
-    "GDI hard rounded mask must not be used under SVG antialiasing"
-)
+# The v4.3.3 SVG corner matte was a SHARP SQUARE RECTANGLE, which itself
+# protruded beyond the handset's rounded outer silhouette. Do not bring it back.
 seal = top.find('.//svg:g[@id="screen-seam-seal"]', ns)
-assert seal is not None, "Screen corner matte / pixel seam seal is missing"
-matte = next((n for n in seal if n.attrib.get("mask") == "url(#transparentScreen)"), None)
-assert matte is not None and matte.attrib.get("fill") == "#06080b", (
-    "The four client corner wedges must have an opaque dark matte"
-)
+assert seal is not None, "Rounded seam gasket is missing"
+assert not any(
+    n.attrib.get("mask") == "url(#transparentScreen)" for n in seal
+), "Square masked corner matte would protrude beyond the phone silhouette"
+assert all(not (
+    n.tag.endswith("rect") and n.attrib.get("fill") in ("#06080b", "#000000")
+) for n in seal), "Opaque rectangular matte detected"
+
 gasket = seal.find('svg:rect[@id="video-edge-gasket"]', ns)
-assert gasket is not None, "SVG must cover subpixel seams on inner video perimeter"
+assert gasket is not None, "Antialiased gasket is missing"
 for attr, expected in {
     "x": "18", "y": "18", "width": "964", "height": "2114", "rx": "57",
-    "stroke": "#06080b", "stroke-width": "9", "fill": "none",
+    "stroke": "#06080b", "stroke-width": "7", "fill": "none"
 }.items():
     assert gasket.attrib.get(attr) == expected, f"Screen gasket {attr} drifted"
-# Gasket extends at least 3 physical pixels over a common 720px scrcpy
-# video; this conceals the observed 1-2px high-DPI bleed without a thick bezel.
-assert (9 / 2) * 720 / 964 > 3.0, "Insufficient screen-edge overdraw"
+# Overscanned native GDI clip is required: its hard edge must be INSIDE the
+# metal bezel, not coincident with the antialiased aperture and not absent.
+assert "CreateRoundRectRgn" in backend and "SetWindowRgn" in backend
+assert "native_clip_radius" in backend and "reset_native_corner_clip" in backend
+assert "NATIVE_CORNER_OVERSCAN_PX: i32 = 3" in rust
+assert "round_clip_radius" not in backend, (
+    "Using exact SVG radius for native mask causes wallpaper-colored seams"
+)
+# A thin gasket (3.5 SVG units per side) is enough to smooth underscanned GDI
+# edges without introducing a thick, square, black overlay.
+assert (7 / 2) * 720 / 964 > 2.5, "Insufficient gasket overdraw"
+assert (7 / 2) * 720 / 964 < 4.0, "Gasket would visibly thicken the bezel"
+
 assert "set_ignore_cursor_events(true)" in backend, "Main overlay must stay click-through"
 assert "GetAsyncKeyState" in backend, "Dragging must end when left mouse button is released"
 assert "is_frame_edge_hover" in backend, "Controls must auto-appear only at the bezel edge"
-assert "TOOLBAR_HEIGHT" in rust and "round_clip_radius" in rust
+assert "TOOLBAR_HEIGHT" in rust and "native_clip_radius" in rust
 assert 'stroke="#d3d5d6"' not in svg.read_text(encoding="utf-8"), (
     "Bright white perimeter outline must not be reintroduced"
 )
 
-print("Phone frame: SVG corner matte, dark seam gasket and click-through controls verified")
+print("Phone frame: no square matte, overscanned native clip and narrow anti-aliased gasket verified")
