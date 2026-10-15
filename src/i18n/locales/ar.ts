@@ -228,6 +228,8 @@ export const ar: Translations = {
         fullScreenTooltip: 'تشغيل Scrcpy في وضع ملء الشاشة.',
         borderless: 'بدون إطار',
         borderlessTooltip: 'تشغيل Scrcpy بدون حدود للنافذة.',
+        deviceFrame: 'إطار هاتف بأسلوب iPhone',
+        deviceFrameTooltip: 'لنظام Windows فقط: يضيف إطارًا معدنيًا وجزيرة كاميرا حول عرض scrcpy الحي والقابل للتحكم. استخدم Ctrl+Alt+Shift+W للتحريك ثم انقر للإفلات، وCtrl+Alt+Shift+C للتوسيط. لا يعمل في وضع ملء الشاشة أو الكاميرا أو سطح المكتب أو OTG فقط.',
         recordFeed: 'تسجيل البث',
         recordFeedTooltip: 'تسجيل بث الشاشة أو الكاميرا في ملف.',
         recordPath: 'مسار التسجيل',
