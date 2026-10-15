@@ -54,4 +54,24 @@ assert not any(
     element.tag.endswith("text") for element in top.iter()
 ), "The frame must not draw a fake clock, status bar or UI"
 
-print("Phone frame: SVG aperture, Rust pixel geometry and HTML transparency agree")
+# Verify the optional native tool rail and rounded screen clipping survive
+# future refactors. This is a static safety check; Windows UI still needs an
+# actual physical mouse and monitor test.
+controls_page = (root / "public/phone-controls.html").read_text(encoding="utf-8")
+backend = (root / "src-tauri/src/device_frame.rs").read_text(encoding="utf-8")
+capability = (root / "src-tauri/capabilities/default.json").read_text(encoding="utf-8")
+assert all(f'id="{key}"' in controls_page for key in ("drag", "minimize", "close"))
+assert all(f"act('{key}')" in controls_page for key in ("drag", "minimize", "close"))
+assert 'phone-controls-*' in capability
+assert "apply_native_corner_clip" in backend, "Actual SDL window corners must be clipped"
+assert "CreateRoundRectRgn" in backend and "SetWindowRgn" in backend
+assert "reset_native_corner_clip" in backend, "Landscape must restore original screen"
+assert "set_ignore_cursor_events(true)" in backend, "Main overlay must stay click-through"
+assert "GetAsyncKeyState" in backend, "Dragging must end when left mouse button is released"
+assert "is_frame_edge_hover" in backend, "Controls must auto-appear only at the bezel edge"
+assert "TOOLBAR_HEIGHT" in rust and "round_clip_radius" in rust
+assert 'stroke="#d3d5d6"' not in svg.read_text(encoding="utf-8"), (
+    "Bright white perimeter outline must not be reintroduced"
+)
+
+print("Phone frame: SVG aperture, rounded SDL mask, hidden controls and dark bezel checks pass")
