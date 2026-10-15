@@ -74,6 +74,17 @@ describe('Sidebar Component', () => {
         expect(screen.getByTitle('32c35470')).toBeDisabled();
     });
 
+    it('shows unauthorized and offline devices without claiming they are ready', () => {
+        render(<Sidebar {...mockProps} devices={[]} pendingDevices={[
+            { serial: '32c35470', state: 'unauthorized' },
+            { serial: '192.168.2.226:5555', state: 'offline' }
+        ]} />);
+        const notice = screen.getByRole('region', { name: 'Devices need attention' });
+        expect(notice).toHaveTextContent('32c35470');
+        expect(notice).toHaveTextContent('Authorization required');
+        expect(notice).toHaveTextContent('Offline');
+    });
+
     it('diagnoses a refused wireless port without attempting connection', async () => {
         const onDiagnose = vi.fn().mockResolvedValue({
             code: 'refused', address: '192.168.2.226:5555', alternatives: []
