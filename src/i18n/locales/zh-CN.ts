@@ -37,6 +37,7 @@ export const zhCN: Translations = {
             system: '系统'
         },
         languageLabel: '语言',
+        uiScale: '界面缩放',
         tagline: '轻松镜像与控制 Android 设备',
         scrcpyEngine: 'Scrcpy 引擎',
         scrcpyReady: 'Scrcpy 已就绪',
