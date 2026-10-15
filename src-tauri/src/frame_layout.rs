@@ -78,7 +78,7 @@ pub fn expand_screen(screen: ScreenRect) -> Option<FrameRect> {
 
 
 pub const TOOLBAR_WIDTH: i32 = 62;
-pub const TOOLBAR_HEIGHT: i32 = 258;
+pub const TOOLBAR_HEIGHT: i32 = 270;
 pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 540;
 pub const TOOLBAR_GAP: i32 = 8;
 
