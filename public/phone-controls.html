@@ -13,15 +13,16 @@
       -webkit-user-select: none; user-select: none;
     }
     .rail {
-      width: 100%; height: 100%; padding: 5px 4px;
-      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      width: 100%; height: 100%; padding: 7px 6px;
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      overflow: hidden;
       border-radius: 15px; background: rgba(13, 17, 24, .96);
       border: 1px solid rgba(160, 168, 180, .29);
       box-shadow: 0 6px 20px rgba(0, 0, 0, .34), inset 1px 0 rgba(255,255,255,.07);
     }
     button {
       display: grid; place-items: center;
-      min-height: 34px; height: 38px; width: 38px; padding: 0;
+      min-height: 44px; height: 44px; width: 46px; padding: 0;
       background: transparent; color: #c6cbd5;
       border: 0; border-radius: 10px; cursor: pointer;
       touch-action: none; flex: 0 0 auto;
@@ -35,19 +36,34 @@
     button:active { background: rgba(155, 175, 200, .4); }
     button.active { background: rgba(40, 177, 157, .35); color: #9af3e5; }
     button.danger:hover { background: rgba(190,55,65,.45); }
-    button svg { height: 19px; width: 19px; stroke-width: 1.8; }
+    button svg { height: 22px; width: 22px; stroke-width: 1.9; }
+    .session-actions, .annotation-actions {
+      display: flex; flex-direction: column; align-items: center;
+      width: 100%; gap: 4px; flex: 0 0 auto;
+    }
+    .session-actions {
+      padding-bottom: 5px;
+      border-bottom: 1px solid rgba(177,188,204,.23);
+    }
+    .annotation-actions {
+      padding-bottom: 4px;
+    }
+    #restore { color: #83e3d1; }
+    #restore:hover { background: rgba(27,148,131,.33); }
     #drag { cursor: grab; }
     #drag:active { cursor: grabbing; }
     #ink-tools {
-      width: 100%; display: none; flex-direction: column; gap: 3px;
+      width: 100%; display: none; flex-direction: column; gap: 4px;
       align-items: center; border-top: 1px solid #323942; padding-top: 5px;
+      min-height: 0; flex: 1 1 auto; overflow-y: auto; overflow-x: hidden;
+      scrollbar-width: thin; scrollbar-color: #515967 transparent;
     }
     body.inking #ink-tools { display: flex; }
-    #ink-tools button { height: 29px; min-height: 29px; width: 36px; }
-    #ink-tools button svg { width: 17px; height: 17px; }
-    .swatches { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; width: 34px; }
+    #ink-tools button { height: 36px; min-height: 36px; width: 44px; }
+    #ink-tools button svg { width: 20px; height: 20px; }
+    .swatches { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; width: 46px; }
     .swatches button {
-      width: 16px !important; height: 16px !important; min-height: 16px !important;
+      width: 20px !important; height: 20px !important; min-height: 20px !important;
       border-radius: 50%; border: 2px solid rgba(240, 240, 255, .2);
     }
     .swatches button.selected { outline: 2px solid white; outline-offset: 1px; }
@@ -66,14 +82,11 @@
 </head>
 <body>
   <div class="rail" role="toolbar" aria-label="投屏控制和标注">
+    <!-- Window controls always remain adjacent and ABOVE drawing tools. -->
+    <div class="session-actions" role="group" aria-label="窗口移动、最小化和关闭">
     <button id="drag" aria-label="按住拖动投屏窗口" title="按住拖动 / Drag">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 2v20M2 12h20M9 5l3-3 3 3M9 19l3 3 3-3M5 9l-3 3 3 3M19 9l3 3-3 3"/>
-      </svg>
-    </button>
-    <button id="ink-toggle" aria-label="画笔标注开关" title="画笔：开启后在投屏画面上书写 / Pen">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 20h9M15.5 3.5l5 5-12 12H3.5v-5zM14 5l5 5"/>
       </svg>
     </button>
     <button id="minimize" aria-label="最小化投屏窗口" title="最小化 / Minimize">
@@ -86,6 +99,23 @@
         <path d="M6 6l12 12M18 6L6 18"/>
       </svg>
     </button>
+    </div>
+    <!-- Quick restore is always available: clear ink AND return phone input. -->
+    <div class="annotation-actions" role="group" aria-label="画笔与快速恢复">
+    <button id="ink-toggle" aria-label="画笔标注开关" title="画笔：开启后在投屏画面上书写 / Pen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 20h9M15.5 3.5l5 5-12 12H3.5v-5zM14 5l5 5"/>
+      </svg>
+    </button>
+
+
+    <button id="restore" aria-label="一键恢复原始画面" title="一键恢复：清除所有标注并恢复手机触控 / Reset">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 11a9 9 0 1 1 2.6 6.4M3 4v7h7"/>
+      </svg>
+    </button>
+    </div>
 
     <div id="ink-tools" role="group" aria-label="画笔工具">
       <div class="swatches" aria-label="画笔颜色">
@@ -228,6 +258,14 @@
       });
       document.getElementById('undo').addEventListener('click', () => void act('ink_undo'));
       document.getElementById('clear').addEventListener('click', () => void act('ink_clear'));
+      document.getElementById('restore').addEventListener('click', () => {
+        // Single click clears temporary annotations and restores native touch,
+        // regardless of whether the pen palette is currently expanded.
+        void act('ink_reset', () => {
+          document.getElementById('pen').classList.add('active');
+          document.getElementById('eraser').classList.remove('active');
+        });
+      });
 
       // Recover UI after WebView2 reload, minimize/restore or focus changes.
       // A switch in flight never competes with the following state query.
