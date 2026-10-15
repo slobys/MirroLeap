@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, FolderOpen, RefreshCcw, Palette, HelpCircle, X, ExternalLink, Languages, ChevronDown, Sun, Moon, Monitor } from 'lucide-react';
 import { SUPPORTED_LOCALES, useI18n, type Locale } from '../i18n';
+import UiScaleControl from './UiScaleControl';
 
 interface HeaderProps {
     onThemeChange: (theme: string) => void;
@@ -134,6 +135,8 @@ export default function Header({ onThemeChange, currentTheme, colorMode, onColor
                         ))}
                     </div>
                 </div>
+
+                <UiScaleControl />
 
                 {/* Language Switcher */}
                 <div className="relative" ref={langMenuRef}>
