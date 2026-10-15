@@ -2,7 +2,7 @@ name: Desktop CI
 
 on:
   push:
-    branches: [main, feat/v4.2-stability]
+    branches: [main, 'feat/v4.3-iphone-device-frame']
   workflow_dispatch:
 
 permissions:
@@ -78,7 +78,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: scrcpygui-v4.2.0-preview.${{ github.run_number }}
+          RELEASE_TAG: scrcpygui-v4.3.0-preview.${{ github.run_number }}
         run: |
           set -euo pipefail
           mapfile -d '' installers < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' \) -print0)
@@ -86,23 +86,21 @@ jobs:
             echo "No Windows installers found"; exit 1
           fi
           cat > release-notes.md <<'NOTES'
-          ## ScrcpyGUI v4.2.0 — 稳定性与连接体验预览版
+          ## ScrcpyGUI v4.3.0 — 真机外框投屏预览版（Windows）
 
-          本版本基于 kil0bit-kb/scrcpy-gui 二次开发。
+          首个 Windows 真机外框版本。沿用稳定的 scrcpy 视频和控制引擎。
 
-          - **无线连接诊断**：可识别端口拒绝、网络不可达、超时、未授权及 mDNS 动态端口变化，并直接选择发现的新端口。
-          - **后台重连优化**：按 IP 去重、限制同时重连、失败后指数退避，减少对离线设备的无效请求。
-          - **核心安全更新**：先下载解压和校验新 scrcpy，成功后才替换；保留旧版备份，失败尝试自动回滚，并显示实时下载进度。
-          - **界面体验**：主窗口支持调整大小，增加 90%–150% 缩放，缩放设置会保存。
-          - **多语言提示与测试**：含简体中文诊断说明、UI 及 Rust 回归测试。
+          - **实时真机外框**：深空灰 iPhone 风格金属边框、灵动岛造型、侧边硬件按键，直接包裹实时、可操控的 Android 投屏窗口，并非静态图片。
+          - **保持原生低延迟**：只增加一个透明、可鼠标穿透的装饰窗口，不重编码、不截屏、不修改手机系统 UI。
+          - **自动跟随**：与 scrcpy 窗口同步移动、尺寸改变和旋转，最小化/最大化时自动隐藏；投屏退出时关闭。
+          - **设置开关**：Windows 默认启用，软件“行为设置”可关闭；非镜像、全屏和纯 OTG 模式自动禁用。
+          - **兼容旧版**：保留 v4.2 的无线连接诊断、安全核心更新和 UI 缩放功能。
 
-          **Windows 安装：** 在 Assets 里选 EXE 或 MSI。这是 Windows 桌面投屏应用，不是 Android APK。
-
-          **使用建议：** 升级后先在 USB 已授权状态下测试“一键转无线”，并在输入 IP 后使用“诊断连接”。核心更新前先关闭正在运行的投屏窗口。无线 ADB 仅用于可信局域网。
-
-          这是预览版；通过自动化测试不代表已经覆盖所有真机。
+          **移动真机窗口：** Ctrl+Alt+Shift+W（点击结束拖动），Ctrl+Alt+Shift+C（居中）。
+          **下载安装：** 选择下方 Assets 内的 Windows EXE 或 MSI。Android 视频由 scrcpy 实时绘制，外框本身不拦截触摸。
+          **注意：** 此特性只在 Windows 下实现并通过构建检查，透明覆盖层的实际视觉与触控仍须在你的电脑上进行真机验证。不是 Android APK。
           NOTES
           gh release create "$RELEASE_TAG" "${installers[@]}" \
             --target "$GITHUB_SHA" \
-            --title "ScrcpyGUI v4.2.0 · Stability Preview #${{ github.run_number }} (Windows)" \
+            --title "ScrcpyGUI v4.3.0 · iPhone Frame Preview #${{ github.run_number }} (Windows)" \
             --notes-file release-notes.md --prerelease --latest=false
