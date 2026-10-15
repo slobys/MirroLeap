@@ -67,7 +67,7 @@ assert "let actually_visible = toolbar.hwnd().ok()" in native
 assert "Repositioning toolbar on next tick" in native
 assert "let wanted = close_to_edge ||" in native
 assert "pub const TOOLBAR_WIDTH: i32 = 62;" in layout
-assert "pub const TOOLBAR_HEIGHT: i32 = 258;" in layout
+assert "pub const TOOLBAR_HEIGHT: i32 = 270;" in layout
 assert "pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 540;" in layout
 
 # Release integrity and optional authentic code signing do not disable any
