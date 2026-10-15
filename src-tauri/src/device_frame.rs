@@ -177,7 +177,6 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut controls_rect: Option<ScreenRect> = None;
     let mut controls_y_offset: Option<i32> = None;
     let mut last_nearby: Option<Instant> = None;
-    let mut last_toolbar_size = TOOLBAR_HEIGHT;
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
