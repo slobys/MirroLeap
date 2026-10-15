@@ -2414,6 +2414,26 @@ pub async fn download_scrcpy(
 }
 
 
+/// Narrow acknowledgement channel from the local transparent phone-frame
+/// page. Only the currently active phone-frame-* view with the matching nonce
+/// can mark its Canvas command as executed.
+#[tauri::command]
+pub fn device_frame_ack(
+    window: Window,
+    token: u64,
+    success: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        crate::device_frame::acknowledge_ink(&window, token, success)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, token, success);
+        Err("Annotation acknowledgements are Windows-only".into())
+    }
+}
+
 #[tauri::command]
 pub async fn device_frame_control(
     window: Window,
