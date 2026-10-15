@@ -79,12 +79,23 @@ pub fn expand_screen(screen: ScreenRect) -> Option<FrameRect> {
 
 pub const TOOLBAR_WIDTH: i32 = 62;
 pub const TOOLBAR_HEIGHT: i32 = 270;
+/// Breathing room both below the display's top edge and above the taskbar,
+/// AND inside the visible top/bottom edge of the mirrored phone.
+pub const TOOLBAR_SAFE_MARGIN: i32 = 12;
 /// In landscape/portrait alike the session controls keep their own 62px rail.
 /// The small palette opens to the side when there is room; on narrow desktop
 /// margins it docks BELOW the rail rather than obscuring the Android screen.
 pub const ANNOTATION_TOOLBAR_WIDTH: i32 = 268;
 pub const ANNOTATION_STACK_WIDTH: i32 = 168;
 pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 486;
+/// A short (or partly off-screen) landscape video does not have enough
+/// vertical space for the usual 270px rail. Keep the five actions in two ROWS
+/// rather than cropping the last buttons or overlapping the Windows taskbar.
+pub const SHORT_TOOLBAR_WIDTH: i32 = 168;
+pub const SHORT_TOOLBAR_HEIGHT: i32 = 118;
+pub const SHORT_INK_TOOLBAR_WIDTH: i32 = 374;
+pub const SHORT_INK_TOOLBAR_HEIGHT: i32 = 212;
+pub const TIGHT_INK_TOOLBAR_HEIGHT: i32 = 136;
 pub const TOOLBAR_GAP: i32 = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +105,12 @@ pub enum ToolbarLayout {
     SideLeft,
     StackRight,
     StackLeft,
+    ShortRight,
+    ShortLeft,
+    ShortInkRight,
+    ShortInkLeft,
+    TightInkRight,
+    TightInkLeft,
 }
 
 impl ToolbarLayout {
@@ -104,6 +121,12 @@ impl ToolbarLayout {
             Self::SideLeft => "side-left",
             Self::StackRight => "stack-right",
             Self::StackLeft => "stack-left",
+            Self::ShortRight => "short-right",
+            Self::ShortLeft => "short-left",
+            Self::ShortInkRight => "short-ink-right",
+            Self::ShortInkLeft => "short-ink-left",
+            Self::TightInkRight => "tight-ink-right",
+            Self::TightInkLeft => "tight-ink-left",
         }
     }
 }
@@ -112,6 +135,10 @@ impl ToolbarLayout {
 pub struct ToolbarPlacement {
     pub rect: ScreenRect,
     pub layout: ToolbarLayout,
+    /// CSS zoom is adjusted with the native HWND rectangle when even the
+    /// horizontal rail cannot fit the visible part of the phone. Never just
+    /// shrink the HWND and leave WebView buttons clipped underneath.
+    pub zoom_percent: u32,
 }
 
 /// All desktop/frame coordinates are Win32 PHYSICAL pixels, but WebView CSS
@@ -121,17 +148,34 @@ fn dip(dip: i32, dpi: u32) -> i32 {
     ((dip as i64 * (dpi.clamp(72, 480)) as i64 + 48) / 96) as i32
 }
 
-/// `top` is the saved top edge of the compact toolbar (not the mouse position).
-/// Prefer fitting the FULL flyout outside the phone. When the desktop margin
-/// cannot fit the flyout horizontally, use a 168 DIP vertically stacked palette.
-/// The narrow fallback still remains within the visible virtual desktop.
+/// `top` is the saved top edge of the toolbar (not the mouse position).
+///
+/// `desktop` MUST be the current monitor's WORK AREA (rcWork), rather than
+/// SM_*VIRTUALSCREEN or rcMonitor: the latter includes the Windows taskbar.
+/// A toolbar is shown ONLY in the intersection with the visible phone frame,
+/// with 12 DIP padding on both ends. The short landscape rail preserves
+/// accessible 44 DIP targets. When even that can't fit, scale the entire
+/// WebView + native HWND together instead of silently clipping a button.
 pub fn toolbar_placement(
     frame: FrameRect, top: i32, desktop: ScreenRect, inking: bool, dpi: u32,
-) -> ToolbarPlacement {
+) -> Option<ToolbarPlacement> {
+    if desktop.width <= 0 || desktop.height <= 0 || frame.width <= 0 || frame.height <= 0 {
+        return None;
+    }
     let right = frame.x.saturating_add(frame.width).saturating_add(dip(TOOLBAR_GAP, dpi));
     let left = frame.x.saturating_sub(dip(TOOLBAR_GAP, dpi));
     let desktop_right = desktop.x.saturating_add(desktop.width);
     let desktop_bottom = desktop.y.saturating_add(desktop.height);
+    let visible_top = frame.y.max(desktop.y);
+    let visible_bottom = frame.y.saturating_add(frame.height).min(desktop_bottom);
+    if visible_bottom <= visible_top {
+        return None;
+    }
+    let visible_height = visible_bottom - visible_top;
+    let margin = dip(TOOLBAR_SAFE_MARGIN, dpi).min((visible_height - 1) / 4);
+    let safe_top = visible_top.saturating_add(margin);
+    let safe_bottom = visible_bottom.saturating_sub(margin);
+    let usable_height = safe_bottom.saturating_sub(safe_top).max(1);
     let right_room = desktop_right.saturating_sub(right);
     let left_room = left.saturating_sub(desktop.x);
     let narrow = dip(TOOLBAR_WIDTH, dpi);
@@ -139,41 +183,82 @@ pub fn toolbar_placement(
     let stacked = dip(ANNOTATION_STACK_WIDTH, dpi);
     let stacked_height = dip(ANNOTATION_TOOLBAR_HEIGHT, dpi);
     let compact_height = dip(TOOLBAR_HEIGHT, dpi);
-    let can_stack = desktop.height >= stacked_height;
-
-    let (layout, requested_x, requested_width, height) = if !inking {
-        if right_room >= narrow {
-            (ToolbarLayout::Compact, right, narrow, compact_height)
+    let can_stack = usable_height >= stacked_height;
+    let enough_for_rail = usable_height >= compact_height;
+    let enough_for_short_ink = usable_height >= dip(SHORT_INK_TOOLBAR_HEIGHT, dpi);
+    let short_width = dip(SHORT_TOOLBAR_WIDTH, dpi);
+    let short_ink_width = dip(SHORT_INK_TOOLBAR_WIDTH, dpi);
+    let (layout, _requested_x, base_width, base_height) = if !enough_for_rail {
+        // Compact *horizontal* rail is much easier to click than five tiny
+        // vertical targets. It also makes minimized/partially off-screen
+        // windows recover without controls protruding from the desktop.
+        if !inking {
+            if right_room >= short_width || right_room >= left_room {
+                (ToolbarLayout::ShortRight, right, SHORT_TOOLBAR_WIDTH, SHORT_TOOLBAR_HEIGHT)
+            } else {
+                (ToolbarLayout::ShortLeft, left - short_width, SHORT_TOOLBAR_WIDTH, SHORT_TOOLBAR_HEIGHT)
+            }
         } else {
-            (ToolbarLayout::Compact, left - narrow, narrow, compact_height)
+            let right_side = right_room >= short_ink_width || right_room >= left_room;
+            let height = if enough_for_short_ink {
+                SHORT_INK_TOOLBAR_HEIGHT
+            } else {
+                TIGHT_INK_TOOLBAR_HEIGHT
+            };
+            let layout = match (right_side, enough_for_short_ink) {
+                (true, true) => ToolbarLayout::ShortInkRight,
+                (false, true) => ToolbarLayout::ShortInkLeft,
+                (true, false) => ToolbarLayout::TightInkRight,
+                (false, false) => ToolbarLayout::TightInkLeft,
+            };
+            (layout, if right_side { right } else { left - short_ink_width },
+                SHORT_INK_TOOLBAR_WIDTH, height)
+        }
+    } else if !inking {
+        if right_room >= narrow {
+            (ToolbarLayout::Compact, right, TOOLBAR_WIDTH, TOOLBAR_HEIGHT)
+        } else {
+            (ToolbarLayout::Compact, left - narrow, TOOLBAR_WIDTH, TOOLBAR_HEIGHT)
         }
     } else if right_room >= wide {
-        (ToolbarLayout::SideRight, right, wide, compact_height)
+        (ToolbarLayout::SideRight, right, ANNOTATION_TOOLBAR_WIDTH, TOOLBAR_HEIGHT)
     } else if left_room >= wide {
-        (ToolbarLayout::SideLeft, left - wide, wide, compact_height)
+        (ToolbarLayout::SideLeft, left - wide, ANNOTATION_TOOLBAR_WIDTH, TOOLBAR_HEIGHT)
     } else if can_stack && right_room >= stacked {
-        (ToolbarLayout::StackRight, right, stacked, stacked_height)
+        (ToolbarLayout::StackRight, right, ANNOTATION_STACK_WIDTH, ANNOTATION_TOOLBAR_HEIGHT)
     } else if can_stack && left_room >= stacked {
-        (ToolbarLayout::StackLeft, left - stacked, stacked, stacked_height)
+        (ToolbarLayout::StackLeft, left - stacked, ANNOTATION_STACK_WIDTH, ANNOTATION_TOOLBAR_HEIGHT)
     } else if right_room >= left_room {
-        // Ultra-narrow desktop margins: prefer a fully visible palette even
-        // if it must temporarily float over a corner of the phone itself.
-        (ToolbarLayout::SideRight, right, wide, compact_height)
+        (ToolbarLayout::SideRight, right, ANNOTATION_TOOLBAR_WIDTH, TOOLBAR_HEIGHT)
     } else {
-        (ToolbarLayout::SideLeft, left - wide, wide, compact_height)
+        (ToolbarLayout::SideLeft, left - wide, ANNOTATION_TOOLBAR_WIDTH, TOOLBAR_HEIGHT)
     };
-
-    let width = requested_width.min(desktop.width.max(1));
-    let height = height.min(desktop.height.max(1));
-    ToolbarPlacement {
+    let requested_height = dip(base_height, dpi);
+    let requested_width = dip(base_width, dpi);
+    let height_scale = usable_height as i64 * 100 / requested_height.max(1) as i64;
+    let width_scale = desktop.width as i64 * 100 / requested_width.max(1) as i64;
+    let zoom_percent = height_scale.min(width_scale).clamp(1, 100) as u32;
+    let width = ((requested_width as i64 * zoom_percent as i64) / 100)
+        .max(1).min(desktop.width as i64) as i32;
+    let height = ((requested_height as i64 * zoom_percent as i64) / 100)
+        .max(1).min(usable_height as i64) as i32;
+    // The CSS zoom shrinks the toolbar width too. Re-evaluate which side fits
+    // after scaling before allowing a rail to overlap the mirrored screen.
+    let is_left = (layout == ToolbarLayout::Compact && right_room < narrow)
+        || matches!(layout, ToolbarLayout::SideLeft | ToolbarLayout::StackLeft |
+            ToolbarLayout::ShortLeft | ToolbarLayout::ShortInkLeft | ToolbarLayout::TightInkLeft);
+    let x = if is_left { left.saturating_sub(width) } else { right };
+    // Tiny viewports must not cause a panic or a coordinate beyond rcWork.
+    Some(ToolbarPlacement {
         rect: ScreenRect {
-            x: requested_x.clamp(desktop.x, (desktop_right - width).max(desktop.x)),
-            y: top.clamp(desktop.y, (desktop_bottom - height).max(desktop.y)),
+            x: x.clamp(desktop.x, (desktop_right - width).max(desktop.x)),
+            y: top.clamp(safe_top, (safe_bottom - height).max(safe_top)),
             width,
             height,
         },
         layout,
-    }
+        zoom_percent,
+    })
 }
 
 /// Ellipse radii for the REAL SDL client region, in physical screen pixels.
@@ -299,7 +384,7 @@ mod tests {
     fn annotation_palette_fits_on_a_typical_monitor() {
         let frame = expand_screen(ScreenRect { x: 240, y: 10, width: 410, height: 850 }).unwrap();
         let desktop = ScreenRect { x: 0, y: 0, width: 1920, height: 1080 };
-        let placement = toolbar_placement(frame, frame.y, desktop, true, 96);
+        let placement = toolbar_placement(frame, frame.y, desktop, true, 96).unwrap();
         assert_eq!(placement.layout, ToolbarLayout::SideRight);
         assert_eq!(placement.rect.width, ANNOTATION_TOOLBAR_WIDTH);
         assert_eq!(placement.rect.height, TOOLBAR_HEIGHT);
@@ -312,7 +397,7 @@ mod tests {
     fn flyout_flips_left_instead_of_running_off_right_desktop_edge() {
         let desktop = ScreenRect { x: 0, y: 0, width: 1920, height: 1080 };
         let frame = FrameRect { x: 1170, y: 150, width: 680, height: 800, inset_x: 7, inset_y: 7 };
-        let placement = toolbar_placement(frame, 200, desktop, true, 96);
+        let placement = toolbar_placement(frame, 200, desktop, true, 96).unwrap();
         assert_eq!(placement.layout, ToolbarLayout::SideLeft);
         assert!(placement.rect.x + placement.rect.width < frame.x);
         assert!(placement.rect.x >= desktop.x);
@@ -322,7 +407,7 @@ mod tests {
     fn narrow_outer_margin_stacks_palette_below_rail_without_covering_phone() {
         let desktop = ScreenRect { x: 0, y: 0, width: 810, height: 1440 };
         let right_frame = FrameRect { x: 40, y: 45, width: 590, height: 1250, inset_x: 7, inset_y: 7 };
-        let right = toolbar_placement(right_frame, 620, desktop, true, 96);
+        let right = toolbar_placement(right_frame, 620, desktop, true, 96).unwrap();
         assert_eq!(right.layout, ToolbarLayout::StackRight);
         assert_eq!(right.rect.width, ANNOTATION_STACK_WIDTH);
         assert_eq!(right.rect.height, ANNOTATION_TOOLBAR_HEIGHT);
@@ -330,7 +415,7 @@ mod tests {
         assert!(right.rect.y + right.rect.height <= desktop.height);
 
         let left_frame = FrameRect { x: 185, y: 50, width: 600, height: 1200, inset_x: 7, inset_y: 7 };
-        let left = toolbar_placement(left_frame, 680, desktop, true, 96);
+        let left = toolbar_placement(left_frame, 680, desktop, true, 96).unwrap();
         assert_eq!(left.layout, ToolbarLayout::StackLeft);
         assert!(left.rect.x + left.rect.width < left_frame.x);
     }
@@ -339,7 +424,7 @@ mod tests {
     fn placement_uses_physical_pixels_on_scaled_and_negative_origin_displays() {
         let desktop = ScreenRect { x: -2560, y: -150, width: 5120, height: 1800 };
         let frame = FrameRect { x: -1200, y: -100, width: 690, height: 1100, inset_x: 12, inset_y: 12 };
-        let placement = toolbar_placement(frame, -200, desktop, true, 144);
+        let placement = toolbar_placement(frame, -200, desktop, true, 144).unwrap();
         assert_eq!(placement.layout, ToolbarLayout::SideRight);
         assert_eq!(placement.rect.width, ANNOTATION_TOOLBAR_WIDTH * 3 / 2);
         assert_eq!(placement.rect.height, TOOLBAR_HEIGHT * 3 / 2);
@@ -353,9 +438,103 @@ mod tests {
     fn stacked_layout_never_clips_below_bottom_of_the_desktop() {
         let desktop = ScreenRect { x: 0, y: 0, width: 810, height: 720 };
         let frame = FrameRect { x: 40, y: 20, width: 590, height: 680, inset_x: 7, inset_y: 7 };
-        let placement = toolbar_placement(frame, 690, desktop, true, 96);
+        let placement = toolbar_placement(frame, 690, desktop, true, 96).unwrap();
         assert_eq!(placement.layout, ToolbarLayout::StackRight);
         assert!(placement.rect.y + placement.rect.height <= 720);
+    }
+
+    /// Regression for user's screenshot: phone is taller than the monitor,
+    /// desktop has a bottom taskbar, and the cursor starts near the taskbar.
+    #[test]
+    fn oversize_portrait_rail_never_goes_below_taskbar_or_above_phone() {
+        let work = ScreenRect { x: 0, y: 0, width: 1920, height: 1030 };
+        let phone = FrameRect { x: 45, y: 25, width: 700, height: 1560, inset_x: 7, inset_y: 7 };
+        for initial_top in [-1000, 0, 180, 975, 1600, 10000] {
+            for ink in [false, true] {
+                let p = toolbar_placement(phone, initial_top, work, ink, 96).unwrap();
+                assert_eq!(p.zoom_percent, 100);
+                assert!(p.rect.y >= phone.y + TOOLBAR_SAFE_MARGIN);
+                assert!(p.rect.y >= work.y + TOOLBAR_SAFE_MARGIN);
+                assert!(p.rect.y + p.rect.height <= work.y + work.height - TOOLBAR_SAFE_MARGIN);
+                assert!(p.rect.y + p.rect.height <= phone.y + phone.height - TOOLBAR_SAFE_MARGIN);
+            }
+        }
+    }
+
+    /// User's browser screenshot: phone begins below the top of a maximized
+    /// browser, but the toolbar formerly drifted to Y=0 above the phone.
+    #[test]
+    fn rail_does_not_cross_the_top_of_the_phone() {
+        let work = ScreenRect { x: 0, y: 0, width: 1920, height: 1040 };
+        let phone = FrameRect { x: 38, y: 65, width: 880, height: 1100, inset_x: 8, inset_y: 8 };
+        let p = toolbar_placement(phone, -1200, work, false, 96).unwrap();
+        assert_eq!(p.rect.y, 65 + TOOLBAR_SAFE_MARGIN);
+        assert_eq!(p.rect.height, TOOLBAR_HEIGHT);
+    }
+
+    #[test]
+    fn short_landscape_uses_a_wide_two_row_rail_instead_of_clipped_buttons() {
+        let work = ScreenRect { x: 0, y: 0, width: 1920, height: 1020 };
+        let phone = FrameRect { x: 200, y: 370, width: 1180, height: 250, inset_x: 7, inset_y: 7 };
+        let p = toolbar_placement(phone, 615, work, false, 96).unwrap();
+        assert_eq!(p.layout, ToolbarLayout::ShortRight);
+        assert_eq!(p.rect.width, SHORT_TOOLBAR_WIDTH);
+        assert_eq!(p.rect.height, SHORT_TOOLBAR_HEIGHT);
+        assert!(p.rect.y >= phone.y);
+        assert!(p.rect.y + p.rect.height <= phone.y + phone.height);
+
+        let ink = toolbar_placement(phone, 615, work, true, 96).unwrap();
+        assert_eq!(ink.layout, ToolbarLayout::ShortInkRight);
+        assert_eq!(ink.rect.height, SHORT_INK_TOOLBAR_HEIGHT);
+        assert!(ink.rect.y + ink.rect.height <= phone.y + phone.height);
+    }
+
+    #[test]
+    fn small_landscape_palette_keeps_all_tools_with_condensed_layout() {
+        let work = ScreenRect { x: 0, y: 0, width: 1600, height: 900 };
+        let phone = FrameRect { x: 120, y: 250, width: 1190, height: 180, inset_x: 6, inset_y: 6 };
+        let p = toolbar_placement(phone, 0, work, true, 96).unwrap();
+        assert_eq!(p.layout, ToolbarLayout::TightInkRight);
+        assert_eq!(p.rect.height, TIGHT_INK_TOOLBAR_HEIGHT);
+        assert_eq!(p.zoom_percent, 100);
+        assert!(p.rect.y >= 262);
+        assert!(p.rect.y + p.rect.height <= 418);
+    }
+
+    #[test]
+    fn partly_offscreen_video_scales_the_entire_webview_and_stays_visible() {
+        let work = ScreenRect { x: 0, y: 0, width: 1920, height: 1010 };
+        let phone = FrameRect { x: 100, y: 950, width: 900, height: 500, inset_x: 8, inset_y: 8 };
+        for inking in [false, true] {
+            let p = toolbar_placement(phone, 5000, work, inking, 96).unwrap();
+            assert!(p.zoom_percent < 100);
+            assert!(p.zoom_percent >= 1);
+            assert!(p.rect.y >= 950);
+            assert!(p.rect.y + p.rect.height <= 1010);
+            assert!(p.rect.width > 0 && p.rect.height > 0);
+            assert!(p.rect.x >= 0 && p.rect.x + p.rect.width <= 1920);
+        }
+    }
+
+    #[test]
+    fn secondary_monitor_and_high_dpi_have_safe_margins() {
+        let work = ScreenRect { x: -2400, y: -120, width: 2400, height: 1310 };
+        let phone = FrameRect { x: -510, y: -70, width: 490, height: 1470, inset_x: 9, inset_y: 9 };
+        let p = toolbar_placement(phone, -9999, work, true, 144).unwrap();
+        assert_eq!(p.layout, ToolbarLayout::SideLeft);
+        assert_eq!(p.rect.height, TOOLBAR_HEIGHT * 3 / 2);
+        assert_eq!(p.rect.y, -70 + 18);
+        assert!(p.rect.x >= work.x && p.rect.x + p.rect.width <= 0);
+        assert!(p.rect.y + p.rect.height <= work.y + work.height - 18);
+    }
+
+    #[test]
+    fn fully_invisible_phone_or_invalid_work_area_never_spawns_ghost_toolbar() {
+        let work = ScreenRect { x: 0, y: 0, width: 1920, height: 1040 };
+        let phone = FrameRect { x: 100, y: 1400, width: 700, height: 700, inset_x: 8, inset_y: 8 };
+        assert!(toolbar_placement(phone, 1400, work, false, 96).is_none());
+        let invalid = ScreenRect { x: 0, y: 0, width: 1920, height: 0 };
+        assert!(toolbar_placement(phone, 1400, invalid, true, 96).is_none());
     }
 
     #[test]

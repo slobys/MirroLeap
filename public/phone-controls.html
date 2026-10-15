@@ -72,6 +72,45 @@
     body[data-layout="stack-left"] #ink-tools {
       width: 168px; height: 202px; top: 276px; left: 0; right: auto; padding: 8px;
     }
+    /* A landscape window or a partly off-screen phone may have less than
+       270px of vertical space. Preserve large 44px button targets by
+       switching the rail from a tall column into TWO short horizontal rows.
+       Never add scrolling or hide minimize/close/reset under the taskbar. */
+    body[data-layout^="short"] .rail,
+    body[data-layout^="tight"] .rail {
+      width: 168px; height: 118px; padding: 7px 9px; gap: 4px;
+    }
+    body[data-layout^="short"] .session-actions,
+    body[data-layout^="tight"] .session-actions {
+      flex-direction: row; justify-content: space-between;
+      gap: 4px; padding-bottom: 3px;
+    }
+    body[data-layout^="short"] .annotation-actions,
+    body[data-layout^="tight"] .annotation-actions {
+      flex-direction: row; justify-content: center;
+      gap: 12px; padding-bottom: 0;
+    }
+    body[data-layout="short-left"] .rail,
+    body[data-layout="short-ink-left"] .rail,
+    body[data-layout="tight-ink-left"] .rail { left: auto; right: 0; }
+    body[data-layout^="short-ink"] #ink-tools,
+    body[data-layout^="tight-ink"] #ink-tools {
+      left: 174px; top: 0; width: 200px; height: 202px;
+    }
+    body[data-layout="short-ink-left"] #ink-tools,
+    body[data-layout="tight-ink-left"] #ink-tools {
+      left: auto; right: 174px;
+    }
+    /* Smaller videos still get ALL palette actions simultaneously. A narrow
+       condensed palette hides headings, never controls or colors. The native
+       code only applies whole-window CSS zoom below this height. */
+    body[data-layout^="tight-ink"] #ink-tools { height: 136px; padding: 8px; gap: 6px; }
+    body[data-layout^="tight-ink"] .palette-heading { display: none; }
+    body[data-layout^="tight-ink"] .palette-actions button {
+      height: 33px; min-height: 33px;
+    }
+    body[data-layout^="tight-ink"] .swatches button { height: 26px; min-height: 26px; }
+    body[data-layout^="tight-ink"] .sizes button { height: 27px; min-height: 27px; }
     .palette-heading {
       font-size: 11px; line-height: 15px; font-weight: 600; letter-spacing: .04em;
       color: #b7c3d2; flex: none;
@@ -239,9 +278,19 @@
       // Native placement chooses the side or vertically docked palette.
       // Only allow known styles; the controller is never a navigable page.
       window.scrcpyControls = Object.freeze({
-        setLayout(layout) {
-          if (['compact', 'side-right', 'side-left', 'stack-right', 'stack-left'].includes(layout)) {
+        setLayout(layout, zoomPercent = 100) {
+          if ([
+            'compact', 'side-right', 'side-left', 'stack-right', 'stack-left',
+            'short-right', 'short-left', 'short-ink-right', 'short-ink-left',
+            'tight-ink-right', 'tight-ink-left'
+          ].includes(layout)) {
             document.body.dataset.layout = layout;
+            // Match WebView pixel content to the *physical* scaled HWND.
+            // Shrinking HWND without zoom would clip buttons at screen edges.
+            const percent = Number(zoomPercent);
+            if (Number.isFinite(percent) && percent >= 1 && percent <= 100) {
+              document.documentElement.style.zoom = String(percent / 100);
+            }
           }
         },
         sync: syncInkState,

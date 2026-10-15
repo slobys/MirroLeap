@@ -15,6 +15,7 @@
 - **精简首页**：连接手机、选择分辨率、开关声音与真机边框、一键开始/停止投屏。
 - **无线与 USB**：支持 USB 投屏、无线调试配对、设备记忆与重连。
 - **手机外观与画笔**：竖屏/横屏真机边框、悬浮控制栏、标注画笔、橡皮擦、撤销、一键恢复。
+- **悬浮栏防越界（v4.6.1）**：始终约束在手机投屏的可见上下范围、当前显示器工作区内，避开 Windows 任务栏；短横屏时自动切换双排按钮，避免画笔和关闭键被遮挡。
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
@@ -24,9 +25,9 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_4.6.0_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_4.6.0_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_4.6.0_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_4.6.1_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_4.6.1_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_4.6.1_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
 从 **[GitHub Releases](https://github.com/slobys/scrcpy-gui/releases/latest)** 的 Assets 下载，不要从 Tags 页面下载源码 ZIP 当作安装包。
 

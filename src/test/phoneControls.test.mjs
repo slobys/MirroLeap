@@ -49,13 +49,27 @@ describe('real Tauri phone-controls HTML', () => {
     expect(document.querySelectorAll('.swatches button')).toHaveLength(4);
     expect(document.querySelectorAll('.sizes button')).toHaveLength(3);
     expect(dom.window.getComputedStyle(document.querySelector('#ink-tools')).overflow).toBe('hidden');
-    for (const layout of ['side-right', 'side-left', 'stack-left', 'stack-right']) {
+    for (const layout of [
+      'side-right', 'side-left', 'stack-left', 'stack-right',
+      'short-right', 'short-left', 'short-ink-right', 'short-ink-left',
+      'tight-ink-right', 'tight-ink-left',
+    ]) {
       dom.window.scrcpyControls.setLayout(layout);
       expect(document.body.dataset.layout).toBe(layout);
       expect(dom.window.getComputedStyle(document.querySelector('#ink-tools')).display).toBe('flex');
     }
+    dom.window.scrcpyControls.setLayout('tight-ink-right', 65);
+    expect(document.documentElement.style.zoom).toBe('0.65');
+    expect(document.querySelectorAll('.palette-actions button')).toHaveLength(4);
+    expect(document.querySelectorAll('.swatches button')).toHaveLength(4);
+    expect(document.querySelectorAll('.sizes button')).toHaveLength(3);
+    dom.window.scrcpyControls.setLayout('short-ink-left', 100);
+    expect(document.documentElement.style.zoom).toBe('1');
+    dom.window.scrcpyControls.setLayout('short-ink-left', -9);
+    expect(document.documentElement.style.zoom).toBe('1');
     dom.window.scrcpyControls.setLayout('invalid-layout');
-    expect(document.body.dataset.layout).toBe('stack-right');
+    expect(document.body.dataset.layout).toBe('short-ink-left');
+    expect(document.documentElement.style.zoom).toBe('1');
     dom.window.close();
   });
 
