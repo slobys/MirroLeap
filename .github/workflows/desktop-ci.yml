@@ -2,7 +2,7 @@ name: Desktop CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/v4.2-stability]
   workflow_dispatch:
 
 permissions:
@@ -55,47 +55,48 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
 
   publish-release:
-    name: Publish Windows GitHub Release
+    name: Publish validated Windows release
     needs: [checks, windows]
-    if: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[publish release]') }}
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[publish release]') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download validated Windows installers
+      - name: Download validated installers
         uses: actions/download-artifact@v4
         with:
           name: ScrcpyGUI-Windows-Installer
           path: release-assets
-      - name: Publish downloadable release
+      - name: Publish versioned preview
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: wireless-v4.1.0-preview.1
+          RELEASE_TAG: scrcpygui-v4.2.0-preview.${{ github.run_number }}
         run: |
           set -euo pipefail
           mapfile -d '' installers < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' \) -print0)
           if (( ${#installers[@]} == 0 )); then
-            echo "No Windows installer found in the artifact"; exit 1
+            echo "No Windows installers found"; exit 1
           fi
           cat > release-notes.md <<'NOTES'
-          ## ScrcpyGUI 无线连接优化预览版（Windows）
+          ## ScrcpyGUI v4.2.0 — 稳定性与连接体验预览版
 
-          从 kil0bit-kb/scrcpy-gui v4.1.0 Fork 后的二次开发版本。
+          本版本基于 kil0bit-kb/scrcpy-gui 二次开发。
 
-          - 新增 **USB 一键转无线**：检测 USB 已授权设备，获取手机的 Wi-Fi IPv4 地址，启用 `adb tcpip 5555` 并自动连接。
-          - 改进 Android 11+ 无线调试：尝试根据 mDNS 服务找回变化后的 TLS 连接端口，区分配对端口。
-          - 修复 mDNS 发现列表的两列或三列、空格分隔格式兼容问题。
-          - 记住实际成功连接的无线端口，并增加回归测试。
+          - **无线连接诊断**：可识别端口拒绝、网络不可达、超时、未授权及 mDNS 动态端口变化，并直接选择发现的新端口。
+          - **后台重连优化**：按 IP 去重、限制同时重连、失败后指数退避，减少对离线设备的无效请求。
+          - **核心安全更新**：先下载解压和校验新 scrcpy，成功后才替换；保留旧版备份，失败尝试自动回滚，并显示实时下载进度。
+          - **界面体验**：主窗口支持调整大小，增加 90%–150% 缩放，缩放设置会保存。
+          - **多语言提示与测试**：含简体中文诊断说明、UI 及 Rust 回归测试。
 
-          **下载：** 选择下方 Assets 内的 Windows `.exe` 或 `.msi` 安装包。
+          **Windows 安装：** 在 Assets 里选 EXE 或 MSI。这是 Windows 桌面投屏应用，不是 Android APK。
 
-          注意：这是 **Windows 桌面应用安装包，不是 Android APK**。USB 转无线要求已通过 USB 调试授权、手机开启 Wi-Fi，并能从电脑访问其局域网 IP。虽然已经通过自动化测试，连接功能仍需要在实际手机上验证。仅建议在可信网络中开启 ADB TCP/IP 调试。
+          **使用建议：** 升级后先在 USB 已授权状态下测试“一键转无线”，并在输入 IP 后使用“诊断连接”。核心更新前先关闭正在运行的投屏窗口。无线 ADB 仅用于可信局域网。
+
+          这是预览版；通过自动化测试不代表已经覆盖所有真机。
           NOTES
           gh release create "$RELEASE_TAG" "${installers[@]}" \
             --target "$GITHUB_SHA" \
-            --title "ScrcpyGUI v4.1.0 · Wireless Preview 1 (Windows)" \
-            --notes-file release-notes.md \
-            --prerelease \
-            --latest=false
+            --title "ScrcpyGUI v4.2.0 · Stability Preview #${{ github.run_number }} (Windows)" \
+            --notes-file release-notes.md --prerelease --latest=false
