@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useI18n } from '../i18n';
+import { adbHistoryHost, reconnectDelayMs } from '../utils/reconnect';
 
 export interface RenderDriverOption {
     id: string;
@@ -18,6 +19,18 @@ export interface MdnsDevice {
     name: string;
     service: string;
     address: string;
+}
+
+export interface WirelessDiagnosis {
+    code: string;
+    address: string;
+    alternatives: string[];
+    adbError?: string | null;
+}
+
+export interface PendingAdbDevice {
+    serial: string;
+    state: string;
 }
 
 /** Whether an mDNS-discovered device is already present in `devices`.
@@ -97,6 +110,7 @@ export function useScrcpy() {
     // -l`'s own `model:` field). Never used for identity/comparisons -- `d`
     // (the serial) remains the source of truth everywhere else.
     const [deviceModels, setDeviceModels] = useState<Record<string, string>>({});
+    const [pendingDevices, setPendingDevices] = useState<PendingAdbDevice[]>([]);
     // Nicer than deviceModels when available (e.g. "Galaxy S23" instead of
     // "SM S911B"), fetched lazily per device via one extra `adb shell
     // getprop` round-trip -- see the effect below for the once-per-serial
@@ -160,6 +174,7 @@ export function useScrcpy() {
     const [windowPositions, setWindowPositions] = useState<WindowPositions>({});
     const prevDevicesRef = useRef<string[]>([]);
     const mdnsDevicesRef = useRef<MdnsDevice[]>([]);
+    const reconnectAttemptsRef = useRef(new Map<string, { failures: number; retryAfter: number; pending: boolean }>());
     const rememberWindowPositionRef = useRef(true);
     // Serials already queried for a friendly name this session (success or
     // failure) -- guards against re-querying the same device on every 5s
@@ -295,18 +310,28 @@ export function useScrcpy() {
             } else if (data.type === 'downloading') {
                 setIsDownloading(true);
                 setStatus(data.message);
-            } else if (data.type === 'download-progress') {
-                setDownloadProgress(data.percent);
             } else if (data.type === 'download-complete') {
                 setIsDownloading(false);
+                setDownloadProgress(100);
                 setStatus(t('logs.downloadComplete'));
-                // adb didn't exist at all until this just finished, so the
-                // settle-poll from mount had nothing to find yet and gave up
-                // early -- this is the first real chance to detect anything,
-                // and a single refresh can still miss a device that's mid
-                // reconnect, same as at mount or right after pairing.
-                refreshDevicesUntilSettled(data.message);
-                checkScrcpy(); // Re-check binary status
+                // Persist the *verified* path only after a successful update.
+                // Do not lose the previous custom path when an update fails.
+                const installedPath = String(data.message);
+                setConfig(prev => ({ ...prev, scrcpyPath: installedPath }));
+                refreshDevicesUntilSettled(installedPath);
+                checkScrcpy(installedPath);
+            } else if (data.type === 'download-error') {
+                setIsDownloading(false);
+                setStatus(String(data.message || 'Engine update failed'));
+            }
+        });
+
+        // The backend emits progress on a separate Tauri event, not a status
+        // object. Earlier versions listened to the wrong event and stayed at 0%.
+        const unlistenProgress = listen<{ percent: number }>('download-progress', (event) => {
+            const percent = event.payload?.percent;
+            if (typeof percent === 'number' && Number.isFinite(percent)) {
+                setDownloadProgress(Math.max(0, Math.min(100, percent)));
             }
         });
 
@@ -329,6 +354,7 @@ export function useScrcpy() {
         return () => {
             unlistenLog.then(f => f());
             unlistenStatus.then(f => f());
+            unlistenProgress.then(f => f());
             unlistenWindowPos.then(f => f());
         };
     }, [t]);
@@ -350,13 +376,17 @@ export function useScrcpy() {
     const addToHistory = (ip: string) => {
         if (!ip.includes(':')) return; // Only add valid IP:Port combos
         setHistoryDevices(prev => {
-            const next = [ip, ...prev.filter(d => d !== ip)].slice(0, 10); // Keep last 10 unique
+            // A device with a new dynamic port replaces its older IP:port
+            // history entry. Otherwise a single phone could be retried repeatedly.
+            const host = adbHistoryHost(ip);
+            const next = [ip, ...prev.filter(d => d !== ip && (!host || adbHistoryHost(d) !== host))].slice(0, 10);
             localStorage.setItem('scrcpy_history', JSON.stringify(next));
             return next;
         });
     };
 
     const clearHistory = () => {
+        reconnectAttemptsRef.current.clear();
         setHistoryDevices([]);
         localStorage.removeItem('scrcpy_history');
     };
@@ -373,6 +403,7 @@ export function useScrcpy() {
 
             if (!res.error) {
                 newDevices = res.devices as string[];
+                setPendingDevices(Array.isArray(res.pendingDevices) ? res.pendingDevices : []);
                 if (res.deviceModels) {
                     setDeviceModels(res.deviceModels as Record<string, string>);
                 }
@@ -566,31 +597,54 @@ export function useScrcpy() {
         });
     }, [devices, config.scrcpyPath]);
 
-    // Legacy ADB-over-network devices (a plain ip:port from the manual "IP
-    // Connect" field, e.g. an Android TV/set-top box on `adb tcpip`) have no
-    // persistent trust the way wireless debugging's TLS pairing does -- adb
-    // doesn't remember them at all once its server restarts or the
-    // connection drops, so nothing reconnects them the way a paired phone
-    // reconnects on its own over mDNS. Retry anything already in "Recent
-    // Devices" but not currently in the hub, quietly, once on mount and then
-    // every 25s. Unlike the removed client-side auto-connect, this only ever
-    // targets addresses the user has already connected to themselves before,
-    // never anything freshly discovered -- and it calls adb_connect directly
-    // rather than through connectDevice(), so a device that's simply offline
-    // doesn't spam the log with a failure every 25 seconds; a successful
-    // reconnect still surfaces normally through the next device-list poll.
+    // Reconnect only user-approved addresses, silently and with backoff. A
+    // single in-flight attempt per endpoint prevents flooding ADB every 25s
+    // when a phone is powered off or its Wi-Fi IP has changed.
     useEffect(() => {
+        let disposed = false;
         const tryReconnectHistory = () => {
-            if (document.visibilityState === 'hidden') return;
-            historyDevices.forEach(ip => {
-                if (!prevDevicesRef.current.includes(ip)) {
-                    invoke('adb_connect', { ip, customPath: config.scrcpyPath, silent: true }).catch(() => { });
+            if (document.visibilityState === 'hidden' || isRefreshingRef.current) return;
+            const now = Date.now();
+            const seenHosts = new Set<string>();
+            for (const address of historyDevices) {
+                const host = adbHistoryHost(address);
+                if (!host || seenHosts.has(host)) continue;
+                seenHosts.add(host);
+                if (prevDevicesRef.current.includes(address)) continue;
+
+                let attempt = reconnectAttemptsRef.current.get(address);
+                if (!attempt) {
+                    attempt = { failures: 0, retryAfter: 0, pending: false };
+                    reconnectAttemptsRef.current.set(address, attempt);
                 }
-            });
+                if (attempt.pending || now < attempt.retryAfter) continue;
+
+                attempt.pending = true;
+                const current = attempt;
+                invoke<{ success: boolean; address?: string }>('adb_connect', {
+                    ip: address, customPath: config.scrcpyPath, silent: true
+                }).then(res => {
+                    if (res.success) {
+                        reconnectAttemptsRef.current.delete(address);
+                        if (disposed) return;
+                        if (res.address && res.address !== address) addToHistory(res.address);
+                        void fetchDevicesOnceRef.current(config.scrcpyPath, true);
+                    } else {
+                        current.failures += 1;
+                        current.retryAfter = Date.now() + reconnectDelayMs(current.failures);
+                    }
+                }).catch(() => {
+                    current.failures += 1;
+                    current.retryAfter = Date.now() + reconnectDelayMs(current.failures);
+                }).finally(() => { current.pending = false; });
+            }
         };
         tryReconnectHistory();
-        const interval = setInterval(tryReconnectHistory, 25000);
-        return () => clearInterval(interval);
+        const interval = setInterval(tryReconnectHistory, 10000);
+        return () => {
+            disposed = true;
+            clearInterval(interval);
+        };
     }, [historyDevices, config.scrcpyPath]);
 
     const runScrcpy = async (config: ScrcpyConfig) => {
@@ -632,12 +686,14 @@ export function useScrcpy() {
     };
 
     const downloadScrcpy = async () => {
+        setDownloadProgress(0);
         try {
             setIsDownloading(true);
             await invoke('download_scrcpy');
         } catch (e: any) {
             setIsDownloading(false);
-            setLogs(prev => [...prev, t('logs.downloadError', { error: String(e) })]);
+            setStatus(String(e));
+            setLogs(prev => [...prev.slice(-100), t('logs.downloadError', { error: String(e) })]);
         }
     };
 
@@ -734,6 +790,12 @@ export function useScrcpy() {
         }
     };
 
+    const diagnoseConnection = async (ip: string, customPath?: string): Promise<WirelessDiagnosis> => {
+        return invoke<WirelessDiagnosis>('diagnose_adb_connection', {
+            ip, customPath: customPath || config.scrcpyPath
+        });
+    };
+
     const connectDevice = async (ip: string, customPath?: string) => {
         setIsRefreshing(true);
         try {
@@ -753,6 +815,14 @@ export function useScrcpy() {
                 setIsRefreshing(false); // Enable refreshDevices to run
                 await refreshDevices(customPath || config.scrcpyPath, true);
             } else {
+                // Diagnose failures automatically; the explicit diagnostics
+                // button offers the same check without first attempting ADB.
+                try {
+                    const report = await diagnoseConnection(ip, customPath);
+                    setLogs(prev => [...prev.slice(-100), t('sidebar.diagnostics.' + report.code)]);
+                } catch {
+                    // Do not hide the original ADB error if diagnostics fails.
+                }
                 setLogs(prev => {
                     const msgs = [t('logs.connectionFailed', { message: String(res.message) })];
                     // Smart tip for stale ports
@@ -877,6 +947,7 @@ export function useScrcpy() {
     return {
         devices,
         deviceModels,
+        pendingDevices,
         deviceFriendlyNames,
         logs,
         setLogs,
@@ -897,6 +968,7 @@ export function useScrcpy() {
         pairDevice,
         connectDevice,
         enableWirelessFromUsb,
+        diagnoseConnection,
         listScrcpyOptions,
         runTerminalCommand,
         runningDevices,

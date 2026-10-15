@@ -11,8 +11,6 @@ use tokio::process::Command as TokioCommand;
 use tokio::io::{BufReader, AsyncBufReadExt};
 use tokio::time::{timeout, Duration};
 use serde::Deserialize;
-use flate2::read::GzDecoder;
-use tar::Archive;
 
 const AUDIO_FALLBACK_CHAIN: &[&str] = &["aac", "flac", "raw"];
 
@@ -236,11 +234,14 @@ pub async fn get_devices(custom_path: Option<String>) -> serde_json::Value {
              if o.status.success() {
                  let out_str = String::from_utf8_lossy(&o.stdout);
                  let mut devices: Vec<String> = Vec::new();
+                 let mut pending = Vec::new();
                  let mut device_models = serde_json::Map::new();
                  for line in out_str.lines().skip(1) {
-                     // Skip "List of devices attached"
                      let Some((serial, state)) = parse_adb_device_line(line) else { continue };
                      if state != "device" {
+                         // Keep these visible for troubleshooting, but never send
+                         // them to scrcpy as usable targets.
+                         pending.push(json!({ "serial": serial, "state": state }));
                          continue;
                      }
                      if let Some(model) = extract_device_model(line) {
@@ -249,7 +250,7 @@ pub async fn get_devices(custom_path: Option<String>) -> serde_json::Value {
                      devices.push(serial);
                  }
 
-                 json!({ "error": false, "devices": devices, "deviceModels": device_models })
+                 json!({ "error": false, "devices": devices, "pendingDevices": pending, "deviceModels": device_models })
              } else {
                  json!({ "error": true, "message": "ADB returned error" })
              }
@@ -564,6 +565,92 @@ mod usb_wireless_tests {
         assert_eq!(valid_wifi_ip("127.0.0.1"), None);
         assert_eq!(valid_wifi_ip("999.1.1.1"), None);
         assert_eq!(valid_wifi_ip("192.168.2.226/24"), Some("192.168.2.226".to_owned()));
+    }
+}
+
+/// Only probe the explicitly requested IPv4 endpoint; never scan the LAN.
+fn parse_diagnostic_endpoint(raw: &str) -> Option<std::net::SocketAddrV4> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() { return None; }
+    let (host, port) = match trimmed.rsplit_once(':') {
+        Some((host, port)) => (host, port.parse::<u16>().ok()?),
+        None => (trimmed, 5555),
+    };
+    if port == 0 { return None; }
+    let ip = host.parse::<std::net::Ipv4Addr>().ok()?;
+    if ip.is_unspecified() || ip.is_multicast() || ip.is_broadcast() {
+        return None;
+    }
+    Some(std::net::SocketAddrV4::new(ip, port))
+}
+
+/// Classify the failure rather than asking users to retry a dead 5555 port.
+/// A TCP probe checks reachability, not ADB authorization or successful pairing.
+#[tauri::command]
+pub async fn diagnose_adb_connection(
+    ip: String,
+    custom_path: Option<String>,
+) -> serde_json::Value {
+    let Some(endpoint) = parse_diagnostic_endpoint(&ip) else {
+        return json!({"code": "invalid", "address": ip, "alternatives": []});
+    };
+    let address = endpoint.to_string();
+    let adb_path = get_binary_path("adb", custom_path);
+    let mut adb_error = None;
+    let mut current_state: Option<String> = None;
+    match adb_output(&adb_path, &["devices", "-l"]).await {
+        Ok((true, listing)) => {
+            for line in listing.lines().skip(1) {
+                if let Some((serial, state)) = parse_adb_device_line(line) {
+                    if serial == address { current_state = Some(state); break; }
+                }
+            }
+        }
+        Ok((false, message)) => adb_error = Some(message),
+        Err(message) => adb_error = Some(message),
+    }
+    if let Some(state) = current_state {
+        let code = if state == "device" { "connected" }
+            else if state == "unauthorized" { "unauthorized" } else { "offline" };
+        return json!({"code": code, "address": address, "alternatives": [], "adbError": adb_error});
+    }
+
+    let mut alternatives = Vec::<String>::new();
+    if let Ok((true, listing)) = adb_output(&adb_path, &["mdns", "services"]).await {
+        alternatives = mdns_connect_candidates(&listing, &address);
+    }
+
+    // Do not perform a UDP or broad port scan. This is one user-requested TCP
+    // attempt, with a tight timeout.
+    let probe = timeout(Duration::from_secs(2), tokio::net::TcpStream::connect(endpoint)).await;
+    let code = match probe {
+        Ok(Ok(_)) => "port_open",
+        Ok(Err(ref error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => "refused",
+        Ok(Err(ref error)) if error.kind() == std::io::ErrorKind::TimedOut => "timeout",
+        Ok(Err(_)) => "unreachable",
+        Err(_) => "timeout",
+    };
+    let code = if !alternatives.is_empty() { "port_changed" } else { code };
+    json!({"code": code, "address": address, "alternatives": alternatives, "adbError": adb_error})
+}
+
+#[cfg(test)]
+mod connection_diagnostics_tests {
+    use super::parse_diagnostic_endpoint;
+
+    #[test]
+    fn defaults_plain_ipv4_to_legacy_port() {
+        assert_eq!(parse_diagnostic_endpoint("192.168.2.226").unwrap().to_string(), "192.168.2.226:5555");
+    }
+    #[test]
+    fn preserves_explicit_wireless_debugging_port() {
+        assert_eq!(parse_diagnostic_endpoint("192.168.2.226:42783").unwrap().to_string(), "192.168.2.226:42783");
+    }
+    #[test]
+    fn rejects_invalid_inputs() {
+        for invalid in ["", "10.0.0.1:0", "10.0.0.1:99999", "example.com:5555", "256.0.0.1:5", "0.0.0.0:5555"] {
+            assert!(parse_diagnostic_endpoint(invalid).is_none(), "{invalid}");
+        }
     }
 }
 
@@ -2266,156 +2353,14 @@ pub async fn stop_scrcpy(state: State<'_, ScrcpyState>, device: String) -> Resul
 }
 
 #[tauri::command]
-pub async fn download_scrcpy(window: Window) -> Result<(), String> {
-    use std::io::Write;
-    
-    let (os_tag, arch_tag, extension) = if cfg!(target_os = "windows") {
-        let arch = if cfg!(target_arch = "x86_64") { "win64" } else { "win32" };
-        (arch, arch, ".zip")
-    } else if cfg!(target_os = "linux") {
-        ("linux", "linux-x86_64", ".tar.gz")
-    } else if cfg!(target_os = "macos") {
-        let arch = if cfg!(target_arch = "aarch64") { "macos-aarch64" } else { "macos-x86_64" };
-        ("macos", arch, ".tar.gz")
-    } else {
-        return Err("Unsupported OS for auto-download".to_string());
-    };
-
-    window.emit("scrcpy-log", format!("[SYSTEM] Detecting platform: {} ({})", os_tag, arch_tag)).unwrap();
-    window.emit("scrcpy-status", json!({ "type": "downloading", "success": true, "message": format!("Fetching latest {} release...", arch_tag) })).unwrap();
-
-    let client = reqwest::Client::builder().user_agent("ScrcpyGui-Downloader").build().map_err(|e| e.to_string())?;
-    
-    // Attempt to get the latest release via API, but fallback to redirect scraping if rate limited
-    let mut download_url = String::new();
-    let mut filename = String::new();
-
-    let api_url = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest";
-    let api_resp = client.get(api_url).send().await;
-
-    let mut used_fallback = false;
-
-    if let Ok(resp) = api_resp {
-        if resp.status().is_success() {
-            if let Ok(json) = resp.json::<serde_json::Value>().await {
-                if let Some(assets) = json["assets"].as_array() {
-                    for asset in assets {
-                        let name = asset["name"].as_str().unwrap_or("");
-                        if name.contains(arch_tag) && name.ends_with(extension) {
-                            download_url = asset["browser_download_url"].as_str().unwrap_or("").to_string();
-                            filename = name.to_string();
-                            break;
-                        }
-                    }
-                }
-            }
-        } else if resp.status() == reqwest::StatusCode::FORBIDDEN {
-            window.emit("scrcpy-log", "[SYSTEM] API rate limited, attempting fallback discovery...").unwrap();
-            used_fallback = true;
-        }
-    } else {
-        used_fallback = true;
+pub async fn download_scrcpy(
+    window: Window,
+    state: State<'_, ScrcpyState>,
+) -> Result<(), String> {
+    if !state.processes.lock().unwrap().is_empty() {
+        return Err("Stop all running scrcpy sessions before updating the engine.".into());
     }
-
-    if used_fallback || download_url.is_empty() {
-        // Fallback: Follow redirect of /releases/latest to get the tag name
-        let redirect_res = client.get("https://github.com/Genymobile/scrcpy/releases/latest")
-            .send().await.map_err(|e| format!("Fallback failed: {}", e))?;
-        
-        let final_url = redirect_res.url().as_str();
-        // URL is like https://github.com/Genymobile/scrcpy/releases/tag/v2.7
-        if let Some(tag) = final_url.split('/').next_back() {
-            if tag.starts_with('v') {
-                filename = format!("scrcpy-{}-{}{}", arch_tag, tag, extension);
-                download_url = format!("https://github.com/Genymobile/scrcpy/releases/download/{}/{}", tag, filename);
-                window.emit("scrcpy-log", format!("[SYSTEM] Discovered latest tag via fallback: {}", tag)).unwrap();
-            }
-        }
-    }
-    
-    if download_url.is_empty() {
-        return Err(format!("Could not find {} binary. (API rate limit might be active)", arch_tag));
-    }
-
-    window.emit("scrcpy-log", format!("[SYSTEM] Found asset: {}", filename)).unwrap();
-    
-    let current_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| std::env::current_dir().unwrap());
-        
-    let temp_archive_path = current_dir.join(format!("scrcpy_temp{}", extension));
-    let extract_path = current_dir.join("scrcpy-bin");
-    
-    {
-        let mut file = std::fs::File::create(&temp_archive_path).map_err(|e| format!("Failed to create archive file: {}", e))?;
-        let mut download_resp = client.get(&download_url).send().await.map_err(|e| format!("Failed to connect to download URL: {}", e))?;
-        let total_size = download_resp.content_length().unwrap_or(0);
-        
-        window.emit("scrcpy-log", format!("[SYSTEM] Downloading: {} MB", total_size / 1024 / 1024)).unwrap();
-
-        let mut downloaded: u64 = 0;
-        while let Some(chunk) = download_resp.chunk().await.map_err(|e| e.to_string())? {
-            file.write_all(&chunk).map_err(|e| format!("Failed to write chunk: {}", e))?;
-            downloaded += chunk.len() as u64;
-            if total_size > 0 {
-                let percent = (downloaded * 100) / total_size;
-                let _ = window.emit("download-progress", json!({ "percent": percent }));
-            }
-        }
-    }
-    
-    window.emit("scrcpy-log", "[SYSTEM] Download finished. Starting extraction...").unwrap();
-    window.emit("scrcpy-status", json!({ "type": "downloading", "success": true, "message": "Extracting binaries..." })).unwrap();
-
-    if extract_path.exists() {
-        let _ = std::fs::remove_dir_all(&extract_path);
-    }
-    
-    let temp_extract_dir = current_dir.join("temp_extract");
-    if temp_extract_dir.exists() {
-        let _ = std::fs::remove_dir_all(&temp_extract_dir);
-    }
-    std::fs::create_dir_all(&temp_extract_dir).map_err(|e| e.to_string())?;
-
-    if extension == ".zip" {
-        window.emit("scrcpy-log", "[SYSTEM] Decompressing ZIP archive...").unwrap();
-        let file = std::fs::File::open(&temp_archive_path).map_err(|e| format!("Failed to open zip: {}", e))?;
-        let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Failed to read zip archive: {}", e))?;
-        archive.extract(&temp_extract_dir).map_err(|e| format!("Failed to extract: {}", e))?;
-    } else {
-        window.emit("scrcpy-log", "[SYSTEM] Decompressing TAR.GZ archive...").unwrap();
-        let file = std::fs::File::open(&temp_archive_path).map_err(|e| format!("Failed to open tar.gz: {}", e))?;
-        let tar = GzDecoder::new(file);
-        let mut archive = Archive::new(tar);
-        archive.unpack(&temp_extract_dir).map_err(|e| format!("Failed to extract tar: {}", e))?;
-    }
-    
-    // Verify entries and move to scrcpy-bin
-    let mut entries = std::fs::read_dir(&temp_extract_dir).map_err(|e| e.to_string())?;
-    if let Some(entry) = entries.next() {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        
-        if path.is_dir() {
-            // Usually scrcpy archives contain a single root folder
-            let _ = std::fs::rename(&path, &extract_path).or_else(|_| {
-                copy_dir_all(&path, &extract_path)
-            });
-        } else {
-            // If files are in root, rename the whole temp dir
-            let _ = std::fs::rename(&temp_extract_dir, &extract_path).or_else(|_| {
-                copy_dir_all(&temp_extract_dir, &extract_path)
-            });
-        }
-    }
-    
-    // Cleanup
-    if temp_extract_dir.exists() { let _ = std::fs::remove_dir_all(&temp_extract_dir); }
-    if temp_archive_path.exists() { let _ = std::fs::remove_file(&temp_archive_path); }
-
-    window.emit("scrcpy-status", json!({ "type": "download-complete", "success": true, "message": extract_path.to_string_lossy() })).unwrap();
-    Ok(())
+    crate::core_manager::install_latest(&window).await
 }
 
 #[tauri::command]

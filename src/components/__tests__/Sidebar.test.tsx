@@ -13,6 +13,7 @@ describe('Sidebar Component', () => {
         onPair: vi.fn(),
         onConnect: vi.fn(),
         onUsbToWireless: vi.fn(),
+        onDiagnose: vi.fn(),
         historyDevices: [],
         onFilePush: vi.fn(),
         isRefreshing: false
@@ -71,6 +72,49 @@ describe('Sidebar Component', () => {
         render(<Sidebar {...mockProps} devices={['32c35470']} isRefreshing={true} />);
         fireEvent.click(screen.getByText('Wireless'));
         expect(screen.getByTitle('32c35470')).toBeDisabled();
+    });
+
+    it('shows unauthorized and offline devices without claiming they are ready', () => {
+        render(<Sidebar {...mockProps} devices={[]} pendingDevices={[
+            { serial: '32c35470', state: 'unauthorized' },
+            { serial: '192.168.2.226:5555', state: 'offline' }
+        ]} />);
+        const notice = screen.getByRole('region', { name: 'Devices need attention' });
+        expect(notice).toHaveTextContent('32c35470');
+        expect(notice).toHaveTextContent('Authorization required');
+        expect(notice).toHaveTextContent('Offline');
+    });
+
+    it('diagnoses a refused wireless port without attempting connection', async () => {
+        const onDiagnose = vi.fn().mockResolvedValue({
+            code: 'refused', address: '192.168.2.226:5555', alternatives: []
+        });
+        const onConnect = vi.fn();
+        render(<Sidebar {...mockProps} devices={[]} onDiagnose={onDiagnose} onConnect={onConnect} />);
+        fireEvent.click(screen.getByText('Wireless'));
+        fireEvent.change(screen.getByPlaceholderText('192.168.x.x:5555'), {
+            target: { value: '192.168.2.226:5555' }
+        });
+        fireEvent.click(screen.getByText('Diagnose connection'));
+        await waitFor(() => expect(onDiagnose).toHaveBeenCalledWith('192.168.2.226:5555'));
+        expect(screen.getByRole('status')).toHaveTextContent('refused this TCP port');
+        expect(onConnect).not.toHaveBeenCalled();
+    });
+
+    it('applies a newly discovered dynamic port from diagnostics', async () => {
+        const onDiagnose = vi.fn().mockResolvedValue({
+            code: 'port_changed', address: '192.168.2.226:5555',
+            alternatives: ['192.168.2.226:45231']
+        });
+        render(<Sidebar {...mockProps} devices={[]} onDiagnose={onDiagnose} />);
+        fireEvent.click(screen.getByText('Wireless'));
+        fireEvent.change(screen.getByPlaceholderText('192.168.x.x:5555'), {
+            target: { value: '192.168.2.226:5555' }
+        });
+        fireEvent.click(screen.getByText('Diagnose connection'));
+        const suggestion = await screen.findByText(/Use detected port: 192.168.2.226:45231/);
+        fireEvent.click(suggestion);
+        expect(screen.getByPlaceholderText('192.168.x.x:5555')).toHaveValue('192.168.2.226:45231');
     });
 
     it('opens a pairing modal for a discovered device on the pairing screen, and submits the code', async () => {

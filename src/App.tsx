@@ -20,6 +20,7 @@ function App() {
   const {
     devices,
     deviceModels,
+    pendingDevices,
     deviceFriendlyNames,
     logs,
     activeDevice,
@@ -37,6 +38,7 @@ function App() {
     pairDevice,
     connectDevice,
     enableWirelessFromUsb,
+    diagnoseConnection,
     listScrcpyOptions,
     runTerminalCommand,
     runningDevices,
@@ -151,9 +153,7 @@ function App() {
               'info',
               t('alerts.updateBtn'),
               async () => {
-                if (config.scrcpyPath) {
-                  setConfig(prev => ({ ...prev, scrcpyPath: undefined }));
-                }
+                // Preserve the current working core if download or validation fails.
                 await downloadScrcpy();
               },
               true,
@@ -337,6 +337,7 @@ function App() {
                 <div className="transition-all duration-700">
                   <Sidebar
                     devices={devices}
+                    pendingDevices={pendingDevices}
                     deviceModels={deviceModels}
                     deviceFriendlyNames={deviceFriendlyNames}
                     runningDevices={runningDevices}
@@ -347,6 +348,7 @@ function App() {
                     onPair={pairDevice}
                     onConnect={connectDevice}
                     onUsbToWireless={enableWirelessFromUsb}
+                    onDiagnose={diagnoseConnection}
                     isRefreshing={isRefreshing}
                     onFilePush={handleFileBrowse}
                     historyDevices={historyDevices}

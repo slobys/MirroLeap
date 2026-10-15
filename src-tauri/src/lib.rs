@@ -1,4 +1,5 @@
 mod commands;
+mod core_manager;
 // Windows-only: drag the borderless scrcpy window with the mouse
 // (Ctrl+Alt+Shift+W).
 #[cfg(target_os = "windows")]
@@ -110,6 +111,7 @@ pub fn run() {
             commands::get_devices,
             commands::adb_connect,
             commands::adb_usb_to_wireless,
+            commands::diagnose_adb_connection,
             commands::get_mdns_devices,
             commands::adb_pair,
             commands::adb_shell,

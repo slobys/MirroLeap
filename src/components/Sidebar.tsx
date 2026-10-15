@@ -1,7 +1,7 @@
 import React from 'react';
 import { Smartphone, RefreshCw, Usb, Wifi, UploadCloud, Zap, X } from 'lucide-react';
 import { useI18n } from '../i18n';
-import { MdnsDevice, isMdnsDeviceConnected } from '../hooks/useScrcpy';
+import { MdnsDevice, PendingAdbDevice, WirelessDiagnosis, isMdnsDeviceConnected } from '../hooks/useScrcpy';
 
 // mDNS wireless-debugging serials look like
 // "adb-<serial>-<random>._adb-tls-connect._tcp" (optionally with an mDNS
@@ -22,6 +22,7 @@ function formatMdnsName(name: string): string {
 
 export interface SidebarProps {
     devices: string[];
+    pendingDevices?: PendingAdbDevice[];
     // Best-effort, display-only device model per serial; falls back to
     // formatDeviceLabel(d) when a serial has no known model yet.
     deviceModels?: Record<string, string>;
@@ -36,6 +37,7 @@ export interface SidebarProps {
     onPair: (ip: string, code: string) => Promise<any>;
     onConnect: (ip: string) => Promise<any>;
     onUsbToWireless: (serial: string) => Promise<any>;
+    onDiagnose: (ip: string) => Promise<WirelessDiagnosis>;
     isRefreshing?: boolean;
     onFilePush: () => void;
     // History props
@@ -46,6 +48,7 @@ export interface SidebarProps {
 
 export default function Sidebar({
     devices,
+    pendingDevices = [],
     deviceModels = {},
     deviceFriendlyNames = {},
     runningDevices,
@@ -56,6 +59,7 @@ export default function Sidebar({
     onPair,
     onConnect,
     onUsbToWireless,
+    onDiagnose,
     isRefreshing,
     onFilePush,
     historyDevices = [],
@@ -65,6 +69,8 @@ export default function Sidebar({
     const { t } = useI18n();
     const [activeTab, setActiveTab] = React.useState<'usb' | 'wireless'>('usb');
     const [connectIp, setConnectIp] = React.useState('');
+    const [diagnosis, setDiagnosis] = React.useState<WirelessDiagnosis | null>(null);
+    const [isDiagnosing, setIsDiagnosing] = React.useState(false);
     const [pairIp, setPairIp] = React.useState('');
     const [pairCode, setPairCode] = React.useState('');
     const pairCodeRef = React.useRef<HTMLInputElement>(null);
@@ -81,7 +87,21 @@ export default function Sidebar({
 
     const handleConnect = async (ip: string) => {
         if (!ip) return;
+        setDiagnosis(null);
         await onConnect(ip);
+    };
+
+    const handleDiagnose = async () => {
+        if (!connectIp.trim() || isDiagnosing) return;
+        setIsDiagnosing(true);
+        setDiagnosis(null);
+        try {
+            setDiagnosis(await onDiagnose(connectIp.trim()));
+        } catch {
+            setDiagnosis({ code: 'error', address: connectIp.trim(), alternatives: [] });
+        } finally {
+            setIsDiagnosing(false);
+        }
     };
 
     // The same physical device can broadcast both "_adb-tls-connect" (wireless
@@ -217,6 +237,18 @@ export default function Sidebar({
                         )}
                     </div>
 
+                    {pendingDevices.length > 0 && (
+                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 space-y-1" role="region" aria-label={t('sidebar.devicesNeedAttention')}>
+                            <p className="text-xs font-bold text-amber-400">{t('sidebar.devicesNeedAttention')}</p>
+                            {pendingDevices.map(device => (
+                                <p key={device.serial} className="text-[11px] text-zinc-400 break-all">
+                                    {device.serial} — {device.state === 'unauthorized' ? t('sidebar.unauthorizedDevice') :
+                                        device.state === 'offline' ? t('sidebar.offlineDevice') : device.state}
+                                </p>
+                            ))}
+                        </div>
+                    )}
+
                     <div className="bg-black/40 p-1 rounded-lg flex gap-1 border border-zinc-800/50">
                         <button
                             onClick={() => setActiveTab('usb')}
@@ -292,7 +324,7 @@ export default function Sidebar({
                                             type="text"
                                             placeholder={t('sidebar.ipPlaceholder')}
                                             value={connectIp}
-                                            onChange={(e) => setConnectIp(e.target.value)}
+                                            onChange={(e) => { setConnectIp(e.target.value); setDiagnosis(null); }}
                                             className="w-full bg-black/40 border border-zinc-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-zinc-200 focus:border-primary/40 focus:bg-black/60 transition-all outline-none"
                                         />
                                     </div>
@@ -304,6 +336,36 @@ export default function Sidebar({
                                         {isRefreshing ? t('sidebar.connecting') : t('sidebar.connect')}
                                     </button>
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={handleDiagnose}
+                                    disabled={!connectIp.trim() || isDiagnosing || isRefreshing}
+                                    className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg border border-zinc-700/60 text-zinc-300 text-xs hover:text-primary hover:border-primary/40 hover:bg-primary/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    <RefreshCw size={12} className={isDiagnosing ? 'animate-spin' : ''} />
+                                    {isDiagnosing ? t('sidebar.diagnosing') : t('sidebar.diagnose')}
+                                </button>
+                                {diagnosis && (
+                                    <div role="status" aria-live="polite" className="p-3 space-y-2 rounded-lg border border-primary/20 bg-primary/5">
+                                        <p className="text-xs font-bold text-zinc-200">{t('sidebar.diagnosticTitle')}</p>
+                                        <p className="text-xs leading-relaxed text-zinc-400">
+                                            {t('sidebar.diagnostics.' + diagnosis.code)}
+                                        </p>
+                                        {diagnosis.alternatives.map(address => (
+                                            <button
+                                                key={address}
+                                                type="button"
+                                                onClick={() => { setConnectIp(address); setDiagnosis(null); }}
+                                                className="w-full rounded-md border border-primary/30 px-2 py-1.5 text-xs text-primary hover:bg-primary/10 text-left break-all"
+                                            >
+                                                {t('sidebar.useDiscoveredPort')}: {address}
+                                            </button>
+                                        ))}
+                                        {diagnosis.adbError && (
+                                            <p className="text-[10px] text-zinc-500 break-all">{diagnosis.adbError}</p>
+                                        )}
+                                    </div>
+                                )}
 
                             </div>
 
