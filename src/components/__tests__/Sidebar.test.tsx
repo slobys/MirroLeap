@@ -97,7 +97,10 @@ describe('Sidebar Component', () => {
         });
         fireEvent.click(screen.getByText('Diagnose connection'));
         await waitFor(() => expect(onDiagnose).toHaveBeenCalledWith('192.168.2.226:5555'));
-        expect(screen.getByRole('status')).toHaveTextContent('refused this TCP port');
+        // Invocation can finish before React commits the async diagnosis to
+        // the status DOM. Wait for the actual user-visible result, not only
+        // for the mock service call to begin.
+        expect(await screen.findByRole('status')).toHaveTextContent('refused this TCP port');
         expect(onConnect).not.toHaveBeenCalled();
     });
 

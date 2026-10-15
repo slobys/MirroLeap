@@ -59,7 +59,9 @@ if ($pfxBase64 -and $pfxPassword) {
 # the exact binary (signed or unsigned) that was verified by SignTool.
 $portableBundle = Join-Path $bundle 'portable'
 New-Item -ItemType Directory -Force -Path $portableBundle | Out-Null
-$portableZip = Join-Path $portableBundle 'ScrcpyGUI_4.5.1_x64_Portable.zip'
+$appVersion = (Get-Content -LiteralPath (Join-Path $workspace 'package.json') -Raw | ConvertFrom-Json).version
+if ($appVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid package.json version' }
+$portableZip = Join-Path $portableBundle "ScrcpyGUI_${appVersion}_x64_Portable.zip"
 if (Test-Path -LiteralPath $portableZip) { Remove-Item $portableZip -Force }
 Compress-Archive -Path $portableStage -DestinationPath $portableZip -CompressionLevel Optimal
 if (-not (Test-Path -LiteralPath $portableZip)) {

@@ -28,10 +28,15 @@ assert all(item in frame for item in ("setEnabled", "setTool", "setColor", "setS
 
 for button in ["drag", "ink-toggle", "minimize", "close",
                "yellow", "red", "white", "cyan", "pen",
-               "eraser", "size", "undo", "clear"]:
+               "eraser", "size-3", "size-5", "size-9", "undo", "clear"]:
     assert f'id="{button}"' in bar, f"Missing annotation/control button: {button}"
 assert "'ink_toggle'" in bar and "'ink_erase'" in bar and "'ink_undo'" in bar
 assert "'ink_clear'" in bar
+assert 'overflow-y: auto' not in bar, "Annotation flyout must never require scrolling"
+assert '⌫' not in bar and 'id="eraser"' in bar and 'M7 9l8 8' in bar, "Use a visible eraser SVG"
+assert 'class="palette-actions"' in bar and 'class="sizes"' in bar
+assert 'window.scrcpyControls = Object.freeze' in bar
+assert 'side-left' in bar and 'stack-right' in bar and 'stack-left' in bar
 assert "window.__TAURI__?.core?.invoke" in bar
 assert "device_frame_control" in bar
 
@@ -52,7 +57,8 @@ assert "on_page_load" in native and "PageLoadEvent::Finished" in native
 assert "ready_to_ink(device)" in native and "InkTransitionGuard::begin(device)" in native
 assert "evaluate_ink(&overlay" in native
 assert "promote_drawing_windows" in native
-assert "drawing &&" in native and "toolbar_hwnd == Some(focused)" in native
+assert "position_above(shell, video" in native, "Overlay must layer immediately above SDL"
+assert "GW_HWNDPREV" in native and "GetDpiForWindow(hwnd)" in native
 assert "window.scrcpyInk.isEnabled() === true" in native
 assert "window.scrcpyInk.isEnabled() === false" in native
 assert "ink_status" in native
