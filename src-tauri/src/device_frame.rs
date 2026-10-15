@@ -269,7 +269,6 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             if let Some(mut rect) = controls_rect {
                 let desktop = virtual_desktop();
                 rect.height = if inking { ANNOTATION_TOOLBAR_HEIGHT } else { TOOLBAR_HEIGHT };
-                last_toolbar_size = rect.height;
                 let left_gap = frame.x - 8 - TOOLBAR_WIDTH;
                 let right_gap = frame.x + frame.width + 8;
                 let prefer_right = right_gap + TOOLBAR_WIDTH <= desktop.x + desktop.width;
