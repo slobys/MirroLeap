@@ -23,7 +23,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowRect,
-    IsIconic, IsWindowVisible, IsZoomed, SetForegroundWindow, SetWindowPos, ShowWindow,
+    IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow,
     HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
     SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
 };
@@ -131,9 +131,11 @@ struct CapturedWindow {
 
 fn capture_screen(pid: u32) -> Option<CapturedWindow> {
     let hwnd = crate::commands::find_window_by_pid(pid)?;
+    // IsIconic means the SDL HWND was really minimized. Do not reject
+    // IsZoomed: watching landscape full-screen video may maximize the native
+    // window, and the device skin should continue to follow that client.
     if !unsafe { IsWindowVisible(hwnd) }.as_bool()
         || unsafe { IsIconic(hwnd) }.as_bool()
-        || unsafe { IsZoomed(hwnd) }.as_bool()
     {
         return None;
     }
@@ -247,6 +249,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut shell_visible = false;
     let mut controls_visible = false;
     let mut previous_frame: Option<FrameRect> = None;
+    let mut applied_orientation: Option<bool> = None;
     let mut clipped_pid: Option<u32> = None;
     let mut last_client_size: Option<(u32, i32, i32)> = None;
     let mut controls_rect: Option<ScreenRect> = None;
@@ -263,7 +266,9 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let Some(pid) = pid else { break };
 
         let Some(captured) = capture_screen(pid) else {
-            // Landscape, minimized or maximized: restore the original SDL area.
+            // The underlying video is temporarily minimized or unavailable.
+            // Don't terminate the follow task: it must reattach when the user
+            // restores scrcpy via taskbar/Alt+Tab, even after several minutes.
             if clipped_pid == Some(pid) {
                 if let Some(hwnd) = crate::commands::find_window_by_pid(pid) {
                     reset_native_corner_clip(hwnd);
@@ -277,12 +282,25 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             controls_rect = None;
             controls_y_offset = None;
             last_nearby = None;
+            applied_orientation = None;
             continue;
         };
 
         let hwnd = captured.hwnd;
         let frame = captured.frame;
         let screen = captured.screen;
+        let landscape = crate::frame_layout::is_landscape(screen.width, screen.height);
+
+        // Switch the external phone skin, NOT the native video stream. Retry
+        // until the actual WebView has finished loading or reloading.
+        if !ready_to_ink(&device) {
+            applied_orientation = None;
+        } else if applied_orientation != Some(landscape) {
+            let orientation = if landscape { "landscape" } else { "portrait" };
+            if overlay.eval(format!("window.scrcpyFrame?.setOrientation('{}')", orientation)).is_ok() {
+                applied_orientation = Some(landscape);
+            }
+        }
 
         // Avoid redundant SetWindowRgn calls while the phone is stationary.
         // Re-create it after scrcpy rotation, resize, or codec-retry PID change.
@@ -304,16 +322,36 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             || toolbar_hwnd == Some(foreground)
             || overlay_hwnd == Some(foreground);
 
-        if previous_frame != Some(frame) || foreground == hwnd || (inking && active) {
-            if place_overlay(&overlay, hwnd, frame, inking, toolbar_hwnd).is_err() {
-                break;
+        // Tauri .hide/.show and a separate SDL HWND can lose z-order when
+        // minimized then restored. The old code treated an *attempted* show
+        // as proof that the overlay was visible forever, and broke the whole
+        // follow task on any transient SetWindowPos error.
+        let actual_visible = overlay.hwnd().ok()
+            .map(|h| unsafe { IsWindowVisible(h).as_bool() }).unwrap_or(false);
+        let needs_restore = !shell_visible || !actual_visible;
+        if needs_restore {
+            if overlay.show().is_ok() {
+                shell_visible = true;
+                previous_frame = None;
+                // Re-establish HWND z-order AFTER making WebView visible.
+                if let Err(error) = place_overlay(&overlay, hwnd, frame, inking, toolbar_hwnd) {
+                    let _ = app.emit("scrcpy-log", format!("[FRAME] Retrying restored shell: {error}"));
+                    shell_visible = false;
+                }
+            } else {
+                shell_visible = false;
             }
-            previous_frame = Some(frame);
         }
-        if !shell_visible {
-            if overlay.show().is_err() { break; }
-            shell_visible = true;
-            previous_frame = None;
+        if shell_visible && (previous_frame != Some(frame) || foreground == hwnd || (inking && active)) {
+            match place_overlay(&overlay, hwnd, frame, inking, toolbar_hwnd) {
+                Ok(()) => previous_frame = Some(frame),
+                Err(error) => {
+                    // Do not destroy the skin or toolbar just because Windows
+                    // temporarily refuses one native window positioning call.
+                    let _ = app.emit("scrcpy-log", format!("[FRAME] Position will retry: {error}"));
+                    previous_frame = None;
+                }
+            }
         }
 
         // Keep phone interactions native. Detect edge hover at the OS level,
