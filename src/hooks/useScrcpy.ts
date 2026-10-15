@@ -295,18 +295,28 @@ export function useScrcpy() {
             } else if (data.type === 'downloading') {
                 setIsDownloading(true);
                 setStatus(data.message);
-            } else if (data.type === 'download-progress') {
-                setDownloadProgress(data.percent);
             } else if (data.type === 'download-complete') {
                 setIsDownloading(false);
+                setDownloadProgress(100);
                 setStatus(t('logs.downloadComplete'));
-                // adb didn't exist at all until this just finished, so the
-                // settle-poll from mount had nothing to find yet and gave up
-                // early -- this is the first real chance to detect anything,
-                // and a single refresh can still miss a device that's mid
-                // reconnect, same as at mount or right after pairing.
-                refreshDevicesUntilSettled(data.message);
-                checkScrcpy(); // Re-check binary status
+                // Persist the *verified* path only after a successful update.
+                // Do not lose the previous custom path when an update fails.
+                const installedPath = String(data.message);
+                setConfig(prev => ({ ...prev, scrcpyPath: installedPath }));
+                refreshDevicesUntilSettled(installedPath);
+                checkScrcpy(installedPath);
+            } else if (data.type === 'download-error') {
+                setIsDownloading(false);
+                setStatus(String(data.message || 'Engine update failed'));
+            }
+        });
+
+        // The backend emits progress on a separate Tauri event, not a status
+        // object. Earlier versions listened to the wrong event and stayed at 0%.
+        const unlistenProgress = listen<{ percent: number }>('download-progress', (event) => {
+            const percent = event.payload?.percent;
+            if (typeof percent === 'number' && Number.isFinite(percent)) {
+                setDownloadProgress(Math.max(0, Math.min(100, percent)));
             }
         });
 
@@ -329,6 +339,7 @@ export function useScrcpy() {
         return () => {
             unlistenLog.then(f => f());
             unlistenStatus.then(f => f());
+            unlistenProgress.then(f => f());
             unlistenWindowPos.then(f => f());
         };
     }, [t]);
@@ -632,12 +643,14 @@ export function useScrcpy() {
     };
 
     const downloadScrcpy = async () => {
+        setDownloadProgress(0);
         try {
             setIsDownloading(true);
             await invoke('download_scrcpy');
         } catch (e: any) {
             setIsDownloading(false);
-            setLogs(prev => [...prev, t('logs.downloadError', { error: String(e) })]);
+            setStatus(String(e));
+            setLogs(prev => [...prev.slice(-100), t('logs.downloadError', { error: String(e) })]);
         }
     };
 
