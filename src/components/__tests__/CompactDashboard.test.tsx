@@ -98,4 +98,15 @@ describe('MirroLeap daily workspace', () => {
         });
         expect(args.onStop).not.toHaveBeenCalled();
     });
+    it('keeps the settings shortcut in a separate semantic footer when running', () => {
+        const args = props({runningDevices:[selected]});
+        const {container} = render(<CompactDashboard {...args}/>);
+        const footer = container.querySelector('footer.ml-home-footer');
+        expect(footer).toBeInTheDocument();
+        expect(footer?.contains(screen.getByRole('button', {name:/更多功能与快捷键/}))).toBe(true);
+        expect(container.querySelector('.ml-mirror-card .ml-stop-action')).toBeInTheDocument();
+        expect(footer?.contains(container.querySelector('.ml-mirror-card .ml-stop-action'))).toBe(false);
+        fireEvent.click(screen.getByRole('button', {name:/更多功能与快捷键/}));
+        expect(args.onOpenSettings).toHaveBeenCalledWith('behavior');
+    });
 });

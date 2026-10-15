@@ -79,7 +79,7 @@ export default function CompactDashboard({
                 </div>
             </header>
 
-            <div className="ml-home-body flex-1 min-h-0 w-full max-w-[1080px] mx-auto">
+            <div className="ml-home-body w-full max-w-[1080px] mx-auto">
                 <div className="ml-intro flex items-center justify-between gap-3">
                     <div>
                         <h2 className="text-xl font-bold tracking-tight">{copy('准备好投屏了吗？', 'Ready to mirror?')}</h2>
@@ -155,7 +155,7 @@ export default function CompactDashboard({
                             <MonitorPlay size={18} className="ml-primary" />
                             <h3 className="font-bold text-sm">{copy('屏幕投屏', 'Screen mirroring')}</h3>
                         </div>
-                        <div className="ml-hero flex items-center gap-3 mt-4">
+                        <div className="ml-hero flex items-center gap-3 mt-3">
                             <div className="ml-hero-icon"><Smartphone size={27} strokeWidth={1.7}/></div>
                             <div className="min-w-0 flex-1">
                                 <div className="font-semibold text-[14px] truncate">
@@ -170,7 +170,7 @@ export default function CompactDashboard({
                             <span className={'ml-running-light ' + (running ? 'ml-on' : '')} aria-hidden="true" />
                         </div>
 
-                        <div className="ml-field mt-5">
+                        <div className="ml-field mt-3">
                             <label htmlFor="ml-preset" className="ml-field-title">
                                 {copy('场景预设', 'Scenario profile')}
                             </label>
@@ -192,7 +192,7 @@ export default function CompactDashboard({
                                 {copy('场景配置下次启动投屏时生效，不会打断当前画面。', 'Profile settings apply on the next session without interrupting this mirror.')}
                             </p>}
                         </div>
-                        <div className="ml-field mt-3">
+                        <div className="ml-field mt-2">
                             <label htmlFor="ml-resolution" className="ml-field-title">{copy('分辨率', 'Resolution')}</label>
                             <select id="ml-resolution" value={config.res || '0'}
                                 disabled={isSwitchingResolution}
@@ -205,7 +205,7 @@ export default function CompactDashboard({
                                     <option value={config.res}>{config.res}</option>}
                             </select>
                         </div>
-                        <div className="ml-quick-toggles grid grid-cols-2 gap-3 mt-4">
+                        <div className="ml-quick-toggles grid grid-cols-2 gap-3 mt-3">
                             <button className={'ml-toggle-card ' + (config.deviceFrame ? 'ml-enabled' : '')}
                                 type="button" aria-pressed={Boolean(config.deviceFrame)}
                                 onClick={() => onConfigChange({...config, deviceFrame: !config.deviceFrame})}>
@@ -221,7 +221,7 @@ export default function CompactDashboard({
                                 <span className="ml-switch" aria-hidden="true"/>
                             </button>
                         </div>
-                        <div className="flex-1 min-h-4" />
+                        <div className="ml-card-spacer" aria-hidden="true" />
                         {!coreReady ? (
                             <button type="button" className="ml-primary-action flex items-center justify-center gap-2 mt-5"
                                 disabled={isDownloading} onClick={onDownloadCore}>
@@ -249,7 +249,7 @@ export default function CompactDashboard({
                         )}
                     </section>
                 </div>
-                <div className="ml-home-footer flex items-center justify-between gap-3 flex-wrap">
+                <footer className="ml-home-footer flex items-center justify-between gap-3 flex-wrap">
                     <span className="ml-muted text-[11px] flex items-center gap-1.5">
                         <ShieldCheck size={13} /> {copy('基于开源 scrcpy · 本地投屏', 'Powered by open-source scrcpy')}
                     </span>
@@ -258,7 +258,7 @@ export default function CompactDashboard({
                         <CircleHelp size={14} /> {copy('更多功能与快捷键', 'More features & shortcuts')}
                         <ArrowRight size={13}/>
                     </button>
-                </div>
+                </footer>
             </div>
         </main>
     );
