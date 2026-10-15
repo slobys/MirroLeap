@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# New commits supersede previous development branch builds; do not cancel
+# validated main-branch releases after a merge.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   checks:
     runs-on: ubuntu-22.04
