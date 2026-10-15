@@ -225,6 +225,8 @@ export const ptBR: Translations = {
         fullScreenTooltip: 'Inicia o scrcpy em modo de tela cheia.',
         borderless: 'Sem Bordas',
         borderlessTooltip: 'Inicia o scrcpy sem bordas de janela. A posição é lembrada entre sessões. Para mover a janela: Ctrl+Alt+Shift+W no Windows, Super/Meta+arrastar no GNOME/KDE. Se ela sair da tela, pressione Ctrl+Alt+Shift+C para recentralizá-la.',
+        deviceFrame: 'Moldura de celular estilo iPhone',
+        deviceFrameTooltip: 'Somente Windows: adiciona borda metálica e ilha de câmera à imagem interativa do scrcpy. Ctrl+Alt+Shift+W para mover, clique para soltar; Ctrl+Alt+Shift+C para centralizar. Desativado em tela cheia, câmera, desktop ou OTG puro.',
         rememberWindowPosition: 'Lembrar Posição da Janela',
         rememberWindowPositionTooltip: 'Reabre a janela de espelhamento no mesmo lugar em que estava. Desative se você muda de resolução com frequência -- isso pode bagunçar a posição salva. Se ela sair da tela, pressione Ctrl+Alt+Shift+C para recentralizá-la.',
         recordFeed: 'Gravar Transmissão',
