@@ -48,8 +48,15 @@ assert all(command in native for command in (
 assert "changeMirrorResolution" in hook
 assert "canQuickSwitchResolution" in hook
 assert "listen<{ device: string; running: boolean }>" in hook
-assert hook.index("detach = await listen<") < hook.index("await invoke('stop_scrcpy', { device });")
-assert hook.index("await stopped;") < hook.index("await invoke('run_scrcpy', {")
+quick_restart = hook.split("const changeMirrorResolution =", 1)[1].split(
+    "const stopScrcpy =", 1
+)[0]
+assert quick_restart.index("detach = await listen<") < quick_restart.index(
+    "await invoke('stop_scrcpy', { device });"
+)
+assert quick_restart.index("await stopped;") < quick_restart.index(
+    "await invoke('run_scrcpy', {"
+)
 assert "new Error(" in hook and "within 8 seconds" in hook
 assert "config: {" in hook
 assert "adb shell wm size" not in control, "Do not change Android's global system resolution"
