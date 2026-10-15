@@ -37,6 +37,7 @@ export const zhTW: Translations = {
             system: '系統'
         },
         languageLabel: '語言',
+        uiScale: '介面縮放',
         tagline: '輕鬆鏡像與控制 Android 裝置',
         scrcpyEngine: 'Scrcpy 引擎',
         scrcpyReady: 'Scrcpy 已就緒',
