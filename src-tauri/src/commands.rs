@@ -2010,6 +2010,31 @@ mod tests {
     }
 
     #[test]
+    fn test_device_frame_only_for_windows_windowed_mirror() {
+        let mut config = base_config("mirror");
+        config.device_frame = Some(true);
+        let args = build_scrcpy_args(&config, None, None);
+        assert_eq!(
+            args.iter().filter(|a| a.as_str() == "--window-borderless").count(),
+            if cfg!(target_os = "windows") { 1 } else { 0 },
+        );
+
+        config.fullscreen = Some(true);
+        let fullscreen_args = build_scrcpy_args(&config, None, None);
+        assert!(!fullscreen_args.contains(&"--window-borderless".to_string()));
+
+        config.fullscreen = None;
+        config.otg_pure = Some(true);
+        let otg_args = build_scrcpy_args(&config, None, None);
+        assert!(!otg_args.contains(&"--window-borderless".to_string()));
+
+        config.otg_pure = None;
+        config.session_mode = "camera".to_owned();
+        let camera_args = build_scrcpy_args(&config, None, None);
+        assert!(!camera_args.contains(&"--window-borderless".to_string()));
+    }
+
+    #[test]
     fn test_build_scrcpy_args_mirror_defaults() {
         let config = base_config("mirror");
         let args = build_scrcpy_args(&config, None, None);
