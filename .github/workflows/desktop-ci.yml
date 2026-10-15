@@ -2,7 +2,7 @@ name: Desktop CI
 
 on:
   push:
-    branches: [main, 'feat/v4.3-iphone-device-frame']
+    branches: [main, 'feat/v4.3.1-slim-svg-frame']
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: python3 scripts/check_device_frame.py
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   windows:
@@ -52,6 +53,12 @@ jobs:
           workspaces: src-tauri -> target
       - run: npm ci
       - run: npm run tauri build
+      - name: Confirm phone SVG shipped with Tauri dist
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/device-frame/iphone-black-portrait.svg")) {
+            throw "The phone frame SVG is missing from the Windows installer frontend"
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: ScrcpyGUI-Windows-Installer
@@ -78,7 +85,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: scrcpygui-v4.3.0-preview.${{ github.run_number }}
+          RELEASE_TAG: scrcpygui-v4.3.1-preview.${{ github.run_number }}
         run: |
           set -euo pipefail
           mapfile -d '' installers < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' \) -print0)
@@ -86,21 +93,24 @@ jobs:
             echo "No Windows installers found"; exit 1
           fi
           cat > release-notes.md <<'NOTES'
-          ## ScrcpyGUI v4.3.0 — 真机外框投屏预览版（Windows）
+          ## ScrcpyGUI v4.3.1 — 真机黑钛窄边框重设计（Windows）
 
-          首个 Windows 真机外框版本。沿用稳定的 scrcpy 视频和控制引擎。
+          依据真实使用截图反馈，重做 v4.3.0 的 iPhone 风格外观。
 
-          - **实时真机外框**：深空灰 iPhone 风格金属边框、灵动岛造型、侧边硬件按键，直接包裹实时、可操控的 Android 投屏窗口，并非静态图片。
-          - **保持原生低延迟**：只增加一个透明、可鼠标穿透的装饰窗口，不重编码、不截屏、不修改手机系统 UI。
-          - **自动跟随**：与 scrcpy 窗口同步移动、尺寸改变和旋转，最小化/最大化时自动隐藏；投屏退出时关闭。
-          - **设置开关**：Windows 默认启用，软件“行为设置”可关闭；非镜像、全屏和纯 OTG 模式自动禁用。
-          - **兼容旧版**：保留 v4.2 的无线连接诊断、安全核心更新和 UI 缩放功能。
+          - **取消假刘海和灵动岛**：保持 Android 原生状态栏，顶部没有任何模拟 iOS 元素。
+          - **更细的 iPhone 风格金属外框**：使用高精度 SVG 黑钛金属质感，外壳边距约为屏幕宽度的 1.9%，取代原先每侧约 4% 的厚边框。
+          - **中央真实透明屏幕**：画面始终来自原生 scrcpy SDL 视频窗口，无图片替换，无重编码；Windows 装饰层鼠标穿透。
+          - **更精确的定位**：SVG 开口尺寸和 Win32 原生像素计算严格一致；外框随画面移动和缩放自动更新。
+          - **竖屏优先**：横屏时隐藏外框但继续正常投屏；手机转回竖屏时恢复装饰外框。
+          - **可随时关闭**：行为设置中关闭“iPhone 风格·黑钛窄边框”，重新投屏即可恢复普通窗口。
 
-          **移动真机窗口：** Ctrl+Alt+Shift+W（点击结束拖动），Ctrl+Alt+Shift+C（居中）。
-          **下载安装：** 选择下方 Assets 内的 Windows EXE 或 MSI。Android 视频由 scrcpy 实时绘制，外框本身不拦截触摸。
-          **注意：** 此特性只在 Windows 下实现并通过构建检查，透明覆盖层的实际视觉与触控仍须在你的电脑上进行真机验证。不是 Android APK。
+          使用方式：选择 Android 设备，在 Windows 下启动「屏幕」镜像。按 Ctrl+Alt+Shift+W 移动投屏窗口，单击结束；Ctrl+Alt+Shift+C 居中。
+
+          **下载**：Windows 64 位用户推荐 EXE 安装包，另提供 MSI。此项目仍然是 Windows 桌面程序，不是 Android APK。
+
+          **预览版提醒**：自动化验证 SVG/Rust 几何、前端测试和 Windows 编译，不等于已在所有 DPI/显卡环境真机验证。请在 100%、125%、150% Windows 显示缩放下测试。若画面与边框错位，关闭外框不影响 scrcpy。
           NOTES
           gh release create "$RELEASE_TAG" "${installers[@]}" \
             --target "$GITHUB_SHA" \
-            --title "ScrcpyGUI v4.3.0 · iPhone Frame Preview #${{ github.run_number }} (Windows)" \
+            --title "ScrcpyGUI v4.3.1 · Slim Titanium Frame Preview #${{ github.run_number }} (Windows)" \
             --notes-file release-notes.md --prerelease --latest=false
