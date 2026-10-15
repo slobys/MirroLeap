@@ -5,7 +5,7 @@ This checks project code only: GitHub branch/Release binary parity is verified
 separately during the one-time migration and release publishing.
 """
 import json
-import tomllib
+import re
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
@@ -19,7 +19,7 @@ workflow = (root / ".github/workflows/desktop-ci.yml").read_text(encoding="utf-8
 bump = (root / ".github/workflows/bump_version.yml").read_text(encoding="utf-8")
 config = json.loads((root / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
 package = json.loads((root / "package.json").read_text(encoding="utf-8"))
-crate = tomllib.loads((root / "src-tauri/Cargo.toml").read_text(encoding="utf-8"))
+crate = (root / "src-tauri/Cargo.toml").read_text(encoding="utf-8")
 
 assert f"{url}/releases/latest" in readme, "README points at the wrong Latest"
 assert f"{url}/releases/latest" in install or f"{url}/releases" in install
@@ -33,8 +33,13 @@ assert (root / "MIGRATION_CN.md").is_file()
 assert "slobys/scrcpy-gui" in (root / "MIGRATION_CN.md").read_text(encoding="utf-8")
 assert config["productName"] == "MirroLeap"
 assert config["identifier"] == "com.kb.scrcpy-gui-v3", "Preserve user app data"
-assert crate["package"]["name"] == package["name"] == "mirroleap"
-assert crate["package"]["version"] == package["version"] == config["version"]
+crate_package = re.search(
+    r'(?m)^\[package\]\s*\nname = "mirroleap"\s*\nversion = "(\d+\.\d+\.\d+)"',
+    crate,
+)
+assert crate_package, "Missing root MirroLeap Cargo package"
+assert package["name"] == "mirroleap"
+assert crate_package.group(1) == package["version"] == config["version"]
 assert f"MirroLeap_{package['version']}_x64_Portable.zip" in readme
 assert "gh release create" in workflow and "--notes-file release-notes.md --latest" in workflow
 assert "[publish release]" in workflow and "[publish release]" in bump
