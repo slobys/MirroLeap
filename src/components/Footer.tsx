@@ -6,7 +6,7 @@ export default function Footer({ version }: { version: string }) {
     const { locale } = useI18n();
     const zh = locale.startsWith('zh');
     const links = [
-        { name: zh ? 'MirroLeap 源码' : 'MirroLeap source', href: 'https://github.com/slobys/scrcpy-gui' },
+        { name: zh ? 'MirroLeap 源码' : 'MirroLeap source', href: 'https://github.com/slobys/MirroLeap' },
         { name: zh ? '原始项目' : 'Original scrcpy-gui', href: 'https://github.com/kil0bit-kb/scrcpy-gui' },
         { name: 'scrcpy', href: 'https://github.com/Genymobile/scrcpy' },
     ];
@@ -19,7 +19,7 @@ export default function Footer({ version }: { version: string }) {
             <p className="ml-muted leading-5">
                 {zh
                     ? '基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 作为投屏核心。感谢原作者及开源贡献者。'
-                    : 'A community fork of kil0bit-kb/scrcpy-gui, powered by Genymobile/scrcpy. Credit to the original authors and open-source contributors.'}
+                    : 'An independent community-developed derivative of kil0bit-kb/scrcpy-gui, powered by Genymobile/scrcpy. Credit to the original authors and open-source contributors.'}
             </p>
             <div className="flex flex-wrap items-center gap-4">
                 {links.map(link => (

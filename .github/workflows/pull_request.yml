@@ -27,6 +27,9 @@ jobs:
       - name: Test Frontend
         run: npm test
 
+      - name: Check MirroLeap repository references
+        run: python3 scripts/check_repository_migration.py
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:

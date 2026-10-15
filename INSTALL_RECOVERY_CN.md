@@ -10,7 +10,7 @@
 ## 方案一：优先尝试保留旧版直接覆盖（无需卸载）
 
 1. 完全关闭 ScrcpyGUI 和 scrcpy 投屏窗口；如有需要，重启 Windows 后再安装。
-2. 只从 [slobys/scrcpy-gui Releases](https://github.com/slobys/scrcpy-gui/releases) 下载可信的安装包，并核对同一 Release 的 `SHA256SUMS.txt`。
+2. 只从 [MirroLeap Releases](https://github.com/slobys/MirroLeap/releases) 下载可信的安装包，并核对同一 Release 的 `SHA256SUMS.txt`。
 3. 在出现 **Already Installed** 页面时，选择 **Do not uninstall**（不要先卸载），而非默认的 **Uninstall before installing**。
 4. 继续安装到原目录，完成后打开 ScrcpyGUI 检查版本与已有配置。
 5. 如果仍显示 `Error launching installer`，停止尝试，不要添加 `/NCRC` 参数跳过校验。
@@ -19,7 +19,7 @@
 
 ## 方案二：免安装 ZIP（原 ScrcpyGUI v4.5.1 起提供，建议优先采用）
 
-MirroLeap v4.6.1 Release 选择 **`MirroLeap_4.6.1_x64_Portable.zip`**，而不是 NSIS 安装用的 setup.exe：
+MirroLeap v4.6.2 Release 选择 **`MirroLeap_4.6.2_x64_Portable.zip`**，而不是 NSIS 安装用的 setup.exe：
 
 1. 整个 ZIP 解压到可写目录，例如 `D:\Apps\MirroLeap-Portable\`。
 2. 双击 `Run-MirroLeap.cmd` 或 `mirroleap.exe`。
@@ -57,10 +57,10 @@ MirroLeap v4.6.1 Release 选择 **`MirroLeap_4.6.1_x64_Portable.zip`**，而不�
 
 ## 校验安装包是否完整
 
-v4.6.1 的 Release 同时包含 `SHA256SUMS.txt`，它列出 NSIS EXE、MSI、免安装 ZIP 的 SHA-256。Windows PowerShell 中运行：
+v4.6.2 的 Release 同时包含 `SHA256SUMS.txt`，它列出 NSIS EXE、MSI、免安装 ZIP 的 SHA-256。Windows PowerShell 中运行：
 
 ```powershell
-Get-FileHash -LiteralPath '.\MirroLeap_4.6.1_x64_Portable.zip' -Algorithm SHA256
+Get-FileHash -LiteralPath '.\MirroLeap_4.6.2_x64_Portable.zip' -Algorithm SHA256
 ```
 
 将输出与下载自同一个 Release 的 `SHA256SUMS.txt` 对应文件名的哈希对比。如果不匹配，删除文件重新从官方 GitHub 仓库下载，不要尝试跳过校验。

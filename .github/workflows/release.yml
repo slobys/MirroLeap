@@ -56,8 +56,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ # tauri-action replaces this with the app version
-          releaseName: 'MirroLeap v__VERSION__'
+          # Optional, manual multi-platform experiment. Do not overwrite the
+          # verified, public Windows release at v__VERSION__.
+          tagName: multi-platform-draft-v__VERSION__
+          releaseName: 'MirroLeap v__VERSION__ · Multi-platform Draft'
           releaseBody: 'See the assets below for the release.'
           releaseDraft: true
           prerelease: false

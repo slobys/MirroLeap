@@ -123,7 +123,7 @@
 
           meta = with pkgs.lib; {
             description = "A modern GUI for Scrcpy written in React and Rust";
-            homepage = "https://github.com/kil0bit-kb/scrcpy-gui";
+            homepage = "https://github.com/slobys/MirroLeap";
             license = licenses.mit;
             maintainers = [ "bonnjalal" ];
           };

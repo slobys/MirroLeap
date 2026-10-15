@@ -6,7 +6,7 @@
 
 基于 [scrcpy-gui](https://github.com/kil0bit-kb/scrcpy-gui) 二次开发的 Android 桌面投屏工具，使用 [scrcpy](https://github.com/Genymobile/scrcpy) 作为底层投屏引擎。
 
-[下载最新版](https://github.com/slobys/scrcpy-gui/releases/latest) · [更新日志](https://github.com/slobys/scrcpy-gui/releases) · [安装问题指南](INSTALL_RECOVERY_CN.md)
+[下载最新版](https://github.com/slobys/MirroLeap/releases/latest) · [更新日志](https://github.com/slobys/MirroLeap/releases) · [安装问题指南](INSTALL_RECOVERY_CN.md)
 
 </div>
 
@@ -25,11 +25,11 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_4.6.1_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_4.6.1_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_4.6.1_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_4.6.2_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_4.6.2_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_4.6.2_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-从 **[GitHub Releases](https://github.com/slobys/scrcpy-gui/releases/latest)** 的 Assets 下载，不要从 Tags 页面下载源码 ZIP 当作安装包。
+从 **[MirroLeap GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest)** 的 Assets 下载，不要从 Tags 页面下载源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 
@@ -39,7 +39,9 @@
 
 ## 🧩 关于二次开发
 
-MirroLeap 是基于 **[kil0bit-kb/scrcpy-gui](https://github.com/kil0bit-kb/scrcpy-gui)** 的社区二次开发分支，主要重新设计了日常交互、无线连接流程、投屏外框和标注操作，并完善 Windows 便携版与 Release 发布。
+MirroLeap 是基于 **[kil0bit-kb/scrcpy-gui](https://github.com/kil0bit-kb/scrcpy-gui)** 二次开发、现在以 **[slobys/MirroLeap](https://github.com/slobys/MirroLeap)** 独立仓库维护的开源项目。主要重新设计了日常交互、无线连接流程、投屏外框和标注操作，并完善 Windows 便携版与 Release 发布。独立仓库不改变原作者的署名或 MIT 授权。
+
+**项目迁移说明：** 原先的 [slobys/scrcpy-gui](https://github.com/slobys/scrcpy-gui) fork 已完整迁移代码历史、分支、标签以及历史 Release 安装包；原仓库仍保留，便于查阅之前的 Pull Request 和开发记录。参见 [MIGRATION_CN.md](MIGRATION_CN.md)。
 
 - 底层核心：[Genymobile/scrcpy](https://github.com/Genymobile/scrcpy)
 - 桌面框架：[Tauri](https://tauri.app/) + React + Rust
@@ -48,4 +50,4 @@ MirroLeap 是基于 **[kil0bit-kb/scrcpy-gui](https://github.com/kil0bit-kb/scrc
 感谢原项目和 scrcpy 的作者及开源贡献者。遵循仓库 [MIT License](LICENSE)。MirroLeap 与 Genymobile、Android 设备厂商没有官方关联。
 
 ---
-**Maintained as a community fork by slobys.** The original upstream project and scrcpy engine retain their respective credits and licenses.
+**Maintained as an independent community-developed derivative by slobys.** The original scrcpy-gui project and scrcpy engine retain their respective credits and licenses.

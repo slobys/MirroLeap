@@ -40,6 +40,7 @@ jobs:
       - run: python3 scripts/check_landscape_toolbar.py
       - run: python3 scripts/check_portable_release.py
       - run: python3 scripts/check_compact_home.py
+      - run: python3 scripts/check_repository_migration.py
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   windows:
@@ -151,6 +152,8 @@ jobs:
           基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 投屏核心。
 
           ### 主要更新
+          - **独立仓库**：项目已迁入 [slobys/MirroLeap](https://github.com/slobys/MirroLeap)，不再作为 GitHub fork 展示；完整保留原项目署名与开源授权。
+          - **开发历史保留**：原先 slobys/scrcpy-gui 的 14 个分支、14 个标签和历史 Release 已迁移，新版本从本独立仓库发布。
           - **v4.6.1 悬浮栏防越界**：悬浮控制栏被约束在手机投屏画面的可见上下边缘之间，并避开当前 Windows 显示器任务栏；拖动、横屏与最小化恢复时持续重新计算。
           - 横屏高度有限时自动切换双排悬浮按钮，画笔展开采用紧凑布局；极端屏幕裁切场景下，WebView 内容与窗口同步缩放，避免功能按钮消失。
           - 软件、窗口、安装包与文档全面采用 MirroLeap 品牌。

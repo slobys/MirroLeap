@@ -28,7 +28,7 @@ Before using ScrcpyGUI, ensure you have the following:
 ## 🚀 Installation Guide
 
 ### 🪟 Windows
-1. Download the latest `.exe` or `.msi` from the [Releases](https://github.com/kil0bit-kb/scrcpy-gui/releases) page.
+1. Download the latest `.exe` or `.msi` from the [MirroLeap Releases](https://github.com/slobys/MirroLeap/releases) page.
 2. Run the installer or standalone executable.
 3. **Smart Setup**: On the first launch, ScrcpyGUI will detect if you have `scrcpy` installed. If not, it will offer a one-click download.
 4. **Automated Updates**: When launched, ScrcpyGUI v4 will automatically check your installed version against Genymobile's latest official release and prompt you with a beautiful one-click update modal if a new version is available.
@@ -141,4 +141,4 @@ Renderer choices are **capability-aware**:
 
 ---
 
-*Found a bug or have a suggestion? Open an issue on [GitHub](https://github.com/kil0bit-kb/scrcpy-gui/issues)!*
+*Found a bug or have a suggestion? Open an issue on [MirroLeap GitHub](https://github.com/slobys/MirroLeap/issues)!*

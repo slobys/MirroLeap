@@ -1,4 +1,4 @@
-name: Bump Version
+name: MirroLeap · Prepare Version Update
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }} # Use a PAT to allow triggering other workflows
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -51,21 +51,42 @@ jobs:
           # Use sed to update version in Cargo.toml [package] section
           sed -i "s/^version = \".*\"/version = \"${{ env.NEW_VERSION }}\"/" src-tauri/Cargo.toml
 
+      - name: Keep Cargo lockfile and versioned documentation consistent
+        env:
+          VERSION: ${{ env.NEW_VERSION }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          version = os.environ["VERSION"]
+          lock = Path("src-tauri/Cargo.lock")
+          source = lock.read_text()
+          changed, count = re.subn(
+              r'(?m)(^name = "mirroleap"\nversion = ")\d+\.\d+\.\d+(")',
+              lambda m: m.group(1) + version + m.group(2), source
+          )
+          assert count == 1, "Missing root MirroLeap Cargo.lock package"
+          lock.write_text(changed)
+          for filename in ("README.md", "INSTALL_RECOVERY_CN.md"):
+              path = Path(filename)
+              source = path.read_text()
+              changed = re.sub(r"(MirroLeap_)\d+\.\d+\.\d+(_x64)", lambda m: m.group(1) + version + m.group(2), source)
+              path.write_text(changed)
+          PY
+
       - name: Create Pull Request
         id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: bump version to v${{ env.NEW_VERSION }}"
+          commit-message: "chore(release): bump MirroLeap to v${{ env.NEW_VERSION }} [publish release]"
           committer: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
           author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
           branch: "chore/version-bump-v${{ env.NEW_VERSION }}"
-          title: "chore: bump version to v${{ env.NEW_VERSION }}"
+          title: "chore(release): bump MirroLeap to v${{ env.NEW_VERSION }} [publish release]"
           body: |
             Bumping version to v${{ env.NEW_VERSION }}
             - Bump type: ${{ github.event.inputs.bump_type }}
-            - Updated: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
-          labels: |
-            version-bump
-            automated-pr
+            - Updated: `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`
+            - Review and merge to main; the desktop CI will produce a full Windows Release with installers instead of just creating a tag.
 
