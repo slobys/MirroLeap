@@ -14,11 +14,11 @@
 
 ScrcpyGUI v4 is a modern, feature-rich GUI for [scrcpy](https://github.com/Genymobile/scrcpy), completely rebuilt from the ground up using **Tauri v2**, **React 19**, and **Rust**. It transforms your Android device into a professional tool for gaming, development, and content creation.
 
-## 🛠️ Community Fork — v4.4 Quick Resolution + Live Pen
+## 🛠️ Community Fork — v4.4.1 Reliable Pen Hotfix
 
 This fork builds on Tauri + scrcpy with wireless ADB diagnostics, a black-titanium phone frame and optional annotation tools.
 
-**New in v4.4:** Change the mirror resolution from the settings dropdown while it is running. The GUI automatically stops and relaunches the scrcpy stream using the new launch-time `--max-size` value (a brief reconnect, not in-place encoder resizing). On Windows, hover next to the phone border and click the **pen** icon to mark up the live screen with four colors, three brush sizes, an eraser, undo and clear. Turn the pen off to resume normal Android touch input. The ink is temporary and clears on stream restart.
+**New in v4.4:** Change the mirror resolution from the settings dropdown while it is running. The GUI automatically stops and relaunches the scrcpy stream using the new launch-time `--max-size` value (a brief reconnect, not in-place encoder resizing). On Windows, hover next to the phone border and click the **pen** icon to mark up the live screen with four colors, three brush sizes, an eraser, undo and clear. Turn the pen off to resume normal Android touch input. The ink is temporary and clears on stream restart. **v4.4.1 stabilizes the pen**: the WebView2 canvas now acknowledges successful activation before native mouse capture, the overlay remains above scrcpy while drawing, and the toolbar resynchronizes its state after window focus changes.
 
 **中文功能说明与验收清单：** [ANNOTATION_RESOLUTION_CN.md](ANNOTATION_RESOLUTION_CN.md)
 
