@@ -40,6 +40,7 @@ export const ar: Translations = {
             system: 'النظام'
         },
         languageLabel: 'اللغة',
+        uiScale: 'مقياس الواجهة',
         tagline: 'اعكس شاشة Android وتحكم بها بسهولة',
         scrcpyEngine: 'محرك Scrcpy',
         scrcpyReady: 'Scrcpy جاهز',
