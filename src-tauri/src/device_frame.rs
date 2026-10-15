@@ -184,11 +184,22 @@ fn inside(x: i32, y: i32, rect: ScreenRect, margin: i32) -> bool {
         && y >= rect.y - margin && y < rect.y + rect.height + margin
 }
 
-fn place_overlay(overlay: &WebviewWindow, video: HWND, frame: FrameRect) -> Result<(), String> {
+fn place_overlay(
+    overlay: &WebviewWindow,
+    video: HWND,
+    frame: FrameRect,
+    drawing: bool,
+    toolbar_hwnd: Option<HWND>,
+) -> Result<(), String> {
     let shell = overlay.hwnd().map_err(|e| e.to_string())?;
-    let foreground = unsafe { GetForegroundWindow() } == video;
-    let order = if foreground { Some(HWND_TOP) } else { None };
-    let flags = if foreground { SWP_NOACTIVATE } else { SWP_NOACTIVATE | SWP_NOZORDER };
+    let focused = unsafe { GetForegroundWindow() };
+    // Clicking the interactive toolbar may move the transparent webview
+    // *behind* SDL in Windows z-order. Promote it while drawing, even when
+    // the tool window (rather than scrcpy) currently owns foreground focus.
+    let promote = focused == video || (drawing &&
+        (focused == shell || toolbar_hwnd == Some(focused)));
+    let order = if promote { Some(HWND_TOP) } else { None };
+    let flags = if promote { SWP_NOACTIVATE } else { SWP_NOACTIVATE | SWP_NOZORDER };
     unsafe { SetWindowPos(shell, order, frame.x, frame.y, frame.width, frame.height, flags) }
         .map_err(|e| format!("Could not position device shell: {e}"))
 }
@@ -253,8 +264,18 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             last_client_size = Some((pid, screen.width, screen.height));
         }
 
-        if previous_frame != Some(frame) || unsafe { GetForegroundWindow() } == hwnd {
-            if place_overlay(&overlay, hwnd, frame).is_err() { break; }
+        let toolbar_hwnd = toolbar.hwnd().ok();
+        let overlay_hwnd = overlay.hwnd().ok();
+        let foreground = unsafe { GetForegroundWindow() };
+        let inking = is_inking(&device);
+        let active = foreground == hwnd
+            || toolbar_hwnd == Some(foreground)
+            || overlay_hwnd == Some(foreground);
+
+        if previous_frame != Some(frame) || foreground == hwnd || (inking && active) {
+            if place_overlay(&overlay, hwnd, frame, inking, toolbar_hwnd).is_err() {
+                break;
+            }
             previous_frame = Some(frame);
         }
         if !shell_visible {
@@ -266,14 +287,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // Keep phone interactions native. Detect edge hover at the OS level,
         // then show ONLY a small interactive popover to the right of the phone.
         let cursor = pointer();
-        let toolbar_hwnd = toolbar.hwnd().ok();
-        let overlay_hwnd = overlay.hwnd().ok();
-        let foreground = unsafe { GetForegroundWindow() };
-        let active = foreground == hwnd
-            || toolbar_hwnd == Some(foreground)
-            || overlay_hwnd == Some(foreground);
         let dragging = is_dragging(&device);
-        let inking = is_inking(&device);
         let close_to_edge = cursor.map(|(x,y)| is_frame_edge_hover(x,y,frame)).unwrap_or(false);
         let inside_controls = match (cursor, controls_rect) {
             (Some((x,y)), Some(r)) => inside(x,y,r,12),
