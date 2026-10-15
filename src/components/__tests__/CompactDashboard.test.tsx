@@ -75,4 +75,27 @@ describe('MirroLeap daily workspace', () => {
         fireEvent.click(screen.getByRole('button', {name:'安装投屏引擎'}));
         expect(args.onDownloadCore).toHaveBeenCalledOnce();
     });
+    it('uses one small scenario selector while preserving device and audio settings', () => {
+        const args=props();
+        render(<CompactDashboard {...args}/>);
+        expect(screen.getByRole('combobox', {name:'场景预设'})).toHaveValue('custom');
+        fireEvent.change(screen.getByRole('combobox', {name:'场景预设'}),
+            {target:{value:'presentation'}});
+        expect(args.onConfigChange).toHaveBeenCalledWith({
+            ...config, bitrate: 8, fps: 30, res:'1920',
+        });
+        expect(args.onStart).not.toHaveBeenCalled();
+        expect(args.onStop).not.toHaveBeenCalled();
+    });
+    it('warns when preset will apply only to the next running session', () => {
+        const args=props({runningDevices:[selected]});
+        render(<CompactDashboard {...args}/>);
+        expect(screen.getByText(/下次启动投屏时生效/)).toBeInTheDocument();
+        fireEvent.change(screen.getByRole('combobox', {name:'场景预设'}),
+            {target:{value:'low-latency'}});
+        expect(args.onConfigChange).toHaveBeenCalledWith({
+            ...config, bitrate:8, fps:60, res:'1280',
+        });
+        expect(args.onStop).not.toHaveBeenCalled();
+    });
 });

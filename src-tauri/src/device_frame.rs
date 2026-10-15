@@ -733,7 +733,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             Ok(is_inking(&device))
         }
         "close" => {
-            crate::commands::stop_scrcpy(app.state::<ScrcpyState>(), device).await?;
+            crate::commands::stop_scrcpy_impl(app.state::<ScrcpyState>(), device).await?;
             Ok(false)
         }
         "drag" => {

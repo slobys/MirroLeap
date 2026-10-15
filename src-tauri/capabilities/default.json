@@ -1,16 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Device administration and file dialogs limited to the main UI; no shell plugin execution.",
   "windows": [
-    "main",
-    "splashscreen",
-    "phone-controls-*"
+    "main"
   ],
   "permissions": [
     "core:default",
     "core:window:default",
-    "dialog:default",
-    "shell:default"
+    "dialog:default"
   ]
 }

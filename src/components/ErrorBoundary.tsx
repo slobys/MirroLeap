@@ -3,6 +3,7 @@ import { AlertCircle, Download, RefreshCcw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { I18nContext } from "../i18n";
 import { en } from "../i18n/locales/en";
+import { safeDiagnosticSettings, redactDiagnosticText } from "../utils/diagnostics";
 
 interface Props {
     children: ReactNode;
@@ -50,22 +51,16 @@ export default class ErrorBoundary extends React.Component<Props, State> {
     };
 
     private handleExportDiagnostics = async () => {
-        const storageData: Record<string, string> = {};
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key) storageData[key] = localStorage.getItem(key) || "";
-        }
-
         const diagnostics = {
             timestamp: new Date().toISOString(),
             userAgent: navigator.userAgent,
-            localStorage: storageData,
-            error: this.state.error?.message || "Unknown error",
-            stack: this.state.error?.stack || "No stack trace available",
+            settings: safeDiagnosticSettings(localStorage),
+            error: redactDiagnosticText(this.state.error?.message || "Unknown error"),
+            stack: redactDiagnosticText(this.state.error?.stack || "No stack trace available"),
         };
 
         try {
-            const fileName = `scrcpy-gui-diagnostics-${Date.now()}.json`;
+            const fileName = `mirroleap-diagnostics-${Date.now()}.json`;
             await invoke('save_report', {
                 content: JSON.stringify(diagnostics, null, 2),
                 name: fileName
