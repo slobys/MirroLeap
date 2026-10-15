@@ -225,13 +225,11 @@ fn inside(x: i32, y: i32, rect: ScreenRect, margin: i32) -> bool {
 /// WebView to the absolute top would paint a ghost toolbar over the browser;
 /// keeping it above SDL but below the browser preserves the video stack.
 fn position_above(window: HWND, anchor: HWND, rect: ScreenRect) -> Result<(), String> {
-    let previous = unsafe { GetWindow(anchor, GW_HWNDPREV) };
-    let (after, flags) = if previous == window {
-        (None, SWP_NOACTIVATE | SWP_NOZORDER)
-    } else if previous.0.is_null() {
-        (Some(HWND_TOP), SWP_NOACTIVATE)
-    } else {
-        (Some(previous), SWP_NOACTIVATE)
+    let (after, flags) = match unsafe { GetWindow(anchor, GW_HWNDPREV) } {
+        Ok(previous) if previous == window => (None, SWP_NOACTIVATE | SWP_NOZORDER),
+        Ok(previous) => (Some(previous), SWP_NOACTIVATE),
+        // No predecessor means the anchor is the top of the desktop stack.
+        Err(_) => (Some(HWND_TOP), SWP_NOACTIVATE),
     };
     unsafe { SetWindowPos(window, after, rect.x, rect.y, rect.width, rect.height, flags) }
         .map_err(|e| format!("Could not position companion above its owner: {e}"))
@@ -377,7 +375,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             }
         }
         let shell_behind_video = overlay_hwnd.map(|shell| {
-            unsafe { GetWindow(hwnd, GW_HWNDPREV) } != shell
+            unsafe { GetWindow(hwnd, GW_HWNDPREV) }.map(|above| above != shell).unwrap_or(true)
         }).unwrap_or(true);
         if shell_visible && (previous_frame != Some(frame) || shell_behind_video || foreground == hwnd || (inking && active)) {
             match place_overlay(&overlay, hwnd, frame) {
