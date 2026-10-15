@@ -136,8 +136,8 @@ mod tests {
         for (width, height) in samples {
             let (native_x, native_y) = native_clip_radius(width, height).unwrap();
             let (svg_x, svg_y) = svg_aperture_radius(width, height).unwrap();
-            assert!(native_x as f64 < svg_x, "GDI must overlap into masked bezel");
-            assert!(native_y as f64 < svg_y, "GDI must overlap into masked bezel");
+            assert!((native_x as f64) < svg_x, "GDI must overlap into masked bezel");
+            assert!((native_y as f64) < svg_y, "GDI must overlap into masked bezel");
             // At every Y through the corner, GDI cannot clip the exposed
             // aperture: the native rounded shape includes the SVG hole.
             for pixel_y in 0..height {
