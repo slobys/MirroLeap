@@ -40,6 +40,7 @@ export const ru: Translations = {
       system: 'Системная',
     },
     languageLabel: 'Язык',
+        uiScale: 'Масштаб интерфейса',
     tagline: 'Трансляция и управление Android-устройствами без лишних сложностей',
     scrcpyEngine: 'Движок scrcpy',
     scrcpyReady: 'scrcpy готов',
