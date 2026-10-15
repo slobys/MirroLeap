@@ -363,11 +363,14 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             (Some((x,y)), Some(r)) => inside(x,y,r,12),
             _ => false,
         };
-        let wanted = active && (close_to_edge || inside_controls || dragging || inking);
+        // After a Windows taskbar restore the SDL window may be visible even
+        // while another application owns foreground focus. An actual pointer
+        // hover over the phone bezel should STILL reveal its control handle.
+        let wanted = close_to_edge || (active && (inside_controls || dragging || inking));
         if wanted { last_nearby = Some(Instant::now()); }
-        let lingering = last_nearby.map(|t| t.elapsed() < Duration::from_millis(420))
+        let lingering = last_nearby.map(|t| t.elapsed() < Duration::from_millis(550))
             .unwrap_or(false);
-        let show_controls = active && (wanted || lingering);
+        let show_controls = wanted || (active && lingering);
 
         if show_controls {
             if controls_rect.is_none() {
@@ -392,12 +395,30 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 rect.x = rect.x.clamp(desktop.x, (desktop.x+desktop.width-rect.width).max(desktop.x));
                 rect.y = (frame.y + controls_y_offset.unwrap_or(rect.y - frame.y))
                     .clamp(desktop.y, (desktop.y + desktop.height - rect.height).max(desktop.y));
-                if place_toolbar(&toolbar, rect).is_err() { break; }
-                controls_rect = Some(rect);
+                if let Err(error) = place_toolbar(&toolbar, rect) {
+                    // Transient Win32 z-order errors during minimize/restore
+                    // must not kill the task that is supposed to restore the
+                    // whole phone-frame session.
+                    let _ = app.emit("scrcpy-log",
+                        format!("[FRAME] Repositioning toolbar on next tick: {error}"));
+                    controls_rect = None;
+                } else {
+                    controls_rect = Some(rect);
+                }
             }
-            if !controls_visible {
-                if toolbar.show().is_err() { break; }
-                controls_visible = true;
+            let actually_visible = toolbar.hwnd().ok()
+                .map(|h| unsafe { IsWindowVisible(h).as_bool() }).unwrap_or(false);
+            if !controls_visible || !actually_visible {
+                if toolbar.show().is_ok() {
+                    controls_visible = true;
+                    // Showing a hidden WebView can reset its HWND placement;
+                    // re-apply coordinates after showing rather than before.
+                    if let Some(rect) = controls_rect {
+                        let _ = place_toolbar(&toolbar, rect);
+                    }
+                } else {
+                    controls_visible = false;
+                }
             }
         } else {
             if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
