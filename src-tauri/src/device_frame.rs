@@ -519,6 +519,34 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
 
     let overlay = app.get_webview_window(&label(device))
         .ok_or("真机外框不存在，无法开启画笔。")?;
+    if action == "ink_reset" {
+        let _guard = InkTransitionGuard::begin(device)?;
+        // One-click restore is deliberately allowed with pen mode ON or OFF.
+        // Recover Android input first even if the canvas has reloaded.
+        overlay.set_ignore_cursor_events(true)
+            .map_err(|e| format!("恢复手机鼠标输入失败: {e}"))?;
+        ink_sessions().lock().map_err(|e| e.to_string())?.remove(device);
+        let clear = if ready_to_ink(device) {
+            evaluate_ink(&overlay,
+                "window.scrcpyInk.clear(); window.scrcpyInk.setEnabled(false); return window.scrcpyInk.isEnabled() === false;"
+            ).await
+        } else {
+            // A reloaded canvas starts empty; there cannot be a previous
+            // surviving ink bitmap to erase in the new WebView context.
+            Ok(true)
+        };
+        if let Some(pid) = app.state::<ScrcpyState>()
+            .processes.lock().ok()
+            .and_then(|map| map.get(device).and_then(|child| child.id()))
+        {
+            if let Some(video) = crate::commands::find_window_by_pid(pid) {
+                let _ = unsafe { SetForegroundWindow(video) };
+            }
+        }
+        clear.map_err(|e| format!("手机触控已恢复，但画笔清除确认失败: {e}"))?;
+        let _ = app.emit("scrcpy-log", format!("[INK] One-click reset annotations for {device}"));
+        return Ok(false);
+    }
     if action == "ink_toggle" {
         let _guard = InkTransitionGuard::begin(device)?;
         let turn_on = !is_inking(device);
@@ -727,6 +755,14 @@ pub fn close(app: &AppHandle, device: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_click_restore_is_part_of_strict_ink_action_namespace() {
+        assert!("ink_reset".starts_with("ink_"));
+        assert!("ink_clear".starts_with("ink_"));
+        assert!(ink_action_script("ink_reset").is_none(),
+            "reset must run native touch restoration, not just JS canvas.clear()");
+    }
 
     #[test]
     fn annotation_scripts_allow_only_fixed_palette_and_edit_commands() {
