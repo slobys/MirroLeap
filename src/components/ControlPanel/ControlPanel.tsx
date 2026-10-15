@@ -160,15 +160,6 @@ export default function ControlPanel({
                     ]}
                 />
             )}
-            {showResolution && isRunning && config.sessionMode === 'mirror' && (
-                <div className="col-span-3 text-[10px] text-zinc-500 leading-relaxed" role="status">
-                    {isSwitchingResolution
-                        ? t('controlPanel.quickResolutionApplying')
-                        : config.record
-                            ? t('controlPanel.quickResolutionRecording')
-                            : t('controlPanel.quickResolutionHint')}
-                </div>
-            )}
             {showCodec && (
                 <CustomSelect
                     label={t('controlPanel.codec')}
@@ -213,6 +204,15 @@ export default function ControlPanel({
                 options={rendererOptions}
             />
         </div>
+            {showResolution && isRunning && config.sessionMode === 'mirror' && (
+                <div className="mt-1 text-[10px] text-zinc-500 leading-relaxed" role="status">
+                    {isSwitchingResolution
+                        ? t('controlPanel.quickResolutionApplying')
+                        : config.record
+                            ? t('controlPanel.quickResolutionRecording')
+                            : t('controlPanel.quickResolutionHint')}
+                </div>
+            )}
         <Tooltip text={t('controlPanel.vsyncTooltip')}>
             <div
                 className="flex items-center justify-between gap-2 cursor-pointer group px-2 py-1.5 rounded-lg border border-zinc-800/60 bg-zinc-950/20 hover:border-primary/40 transition-colors"
