@@ -58,7 +58,7 @@ languages: {
         manualStep4Before: 'Pilih folder yang diekstrak',
         manualStep4Executable: 'scrcpy',
         manualStep4After: 'execute',
-        manualNote: 'Catatan: ScrcpyGUI akan mengingat jalur kustom ini untuk sesi mendatang.',
+        manualNote: 'Catatan: MirroLeap akan mengingat jalur kustom ini untuk sesi mendatang.',
         gotIt: 'Mengerti'
     },
     sidebar: {
@@ -281,7 +281,7 @@ languages: {
         continueToApp: 'Lanjutkan ke Aplikasi'
     },
     footer: {
-        aboutScrcpyGui: 'Tentang Scrcpy GUI',
+        aboutScrcpyGui: 'Tentang MirroLeap',
         github: 'Github',
         youtube: 'Youtube',
         website: 'Situs Web',

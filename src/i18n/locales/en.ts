@@ -59,7 +59,7 @@ export const en = {
         manualStep4Before: 'Select the unzipped folder containing the',
         manualStep4Executable: 'scrcpy',
         manualStep4After: 'executable.',
-        manualNote: 'Note: ScrcpyGUI will remember this custom path for future sessions.',
+        manualNote: 'Note: MirroLeap will remember this custom path for future sessions.',
         gotIt: 'Got it'
     },
     sidebar: {
@@ -282,7 +282,7 @@ export const en = {
         continueToApp: 'Continue to App'
     },
     footer: {
-        aboutScrcpyGui: 'About Scrcpy GUI',
+        aboutScrcpyGui: 'About MirroLeap',
         github: 'Github',
         youtube: 'Youtube',
         website: 'Website',

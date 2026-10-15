@@ -61,7 +61,7 @@ export const ru: Translations = {
     manualStep4Before: 'Выберите распакованную папку, содержащую исполняемый файл',
     manualStep4Executable: 'scrcpy',
     manualStep4After: '.',
-    manualNote: 'Примечание: ScrcpyGUI запомнит этот пользовательский путь для следующих запусков.',
+    manualNote: 'Примечание: MirroLeap запомнит этот пользовательский путь для следующих запусков.',
     gotIt: 'Понятно',
   },
 
@@ -291,7 +291,7 @@ export const ru: Translations = {
   },
 
   footer: {
-    aboutScrcpyGui: 'О Scrcpy GUI',
+    aboutScrcpyGui: 'О MirroLeap',
     github: 'GitHub',
     youtube: 'YouTube',
     website: 'Сайт',

@@ -201,7 +201,7 @@ async fn do_update(window: &Window) -> Result<PathBuf, String> {
     let _cleanup = ScratchDir(temp.clone());
 
     let client = reqwest::Client::builder()
-        .user_agent("ScrcpyGUI-EngineUpdater/4.2")
+        .user_agent("MirroLeap-EngineUpdater/4.2")
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| e.to_string())?;

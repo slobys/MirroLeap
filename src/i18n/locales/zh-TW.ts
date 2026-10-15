@@ -58,7 +58,7 @@ export const zhTW: Translations = {
         manualStep4Before: '選擇包含',
         manualStep4Executable: 'scrcpy',
         manualStep4After: '執行檔的資料夾。',
-        manualNote: '注意：ScrcpyGUI 會記住此自訂路徑。',
+        manualNote: '注意：MirroLeap 會記住此自訂路徑。',
         gotIt: '了解'
     },
     sidebar: {
@@ -281,7 +281,7 @@ export const zhTW: Translations = {
         continueToApp: '進入應用'
     },
         footer: {
-        aboutScrcpyGui: '關於 Scrcpy GUI',
+        aboutScrcpyGui: '關於 MirroLeap',
         github: 'GitHub',
         youtube: 'YouTube',
         website: '網站',

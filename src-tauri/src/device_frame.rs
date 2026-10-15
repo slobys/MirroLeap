@@ -532,12 +532,12 @@ async fn evaluate_ink(overlay: &WebviewWindow, operation: &str) -> Result<bool, 
           success = Boolean((() => {{ {} }})());
         }}
       }} catch (error) {{
-        console.error('[ScrcpyGUI Ink] Canvas operation failed', error);
+        console.error('[MirroLeap Ink] Canvas operation failed', error);
       }}
       const call = window.__TAURI__?.core?.invoke;
       if (call) {{
         void call('device_frame_ack', {{ token: {}, success }})
-          .catch(error => console.error('[ScrcpyGUI Ink] Acknowledgement failed', error));
+          .catch(error => console.error('[MirroLeap Ink] Acknowledgement failed', error));
       }}
     }})()"#, operation, token);
     if let Err(error) = overlay.eval(js) {

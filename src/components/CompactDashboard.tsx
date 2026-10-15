@@ -1,0 +1,242 @@
+import {
+    ArrowRight, Check, CircleHelp, Download, MonitorPlay, RefreshCw,
+    Settings2, ShieldCheck, Smartphone, Volume2, VolumeX, Wifi,
+} from 'lucide-react';
+import type { PendingAdbDevice, ScrcpyConfig } from '../hooks/useScrcpy';
+
+type Props = {
+    locale: string;
+    version: string;
+    devices: string[];
+    pendingDevices: PendingAdbDevice[];
+    deviceModels: Record<string, string>;
+    deviceFriendlyNames: Record<string, string>;
+    runningDevices: string[];
+    activeDevice: string;
+    onSelectDevice: (serial: string) => void;
+    onRefresh: () => void;
+    isRefreshing: boolean;
+    config: ScrcpyConfig;
+    onConfigChange: (config: ScrcpyConfig) => void;
+    onResolutionChange: (size: string) => void;
+    isSwitchingResolution: boolean;
+    onStart: () => void;
+    onStop: () => void;
+    onOpenSettings: (tab?: 'devices' | 'mirror' | 'behavior' | 'appearance' | 'tools') => void;
+    coreReady: boolean;
+    onDownloadCore: () => void;
+    isDownloading: boolean;
+    downloadProgress: number;
+};
+
+const resolutions = [
+    { value: '0', zh: '原始画质（推荐）', en: 'Original (recommended)' },
+    { value: '800', zh: '480p · 省流量', en: '480p · Low bandwidth' },
+    { value: '1280', zh: '720p · 流畅', en: '720p · Smooth' },
+    { value: '1920', zh: '1080p · 清晰', en: '1080p · Sharp' },
+    { value: '2560', zh: '2K · 高清', en: '2K · High resolution' },
+    { value: '3840', zh: '4K · 超清', en: '4K · Ultra HD' },
+];
+
+export default function CompactDashboard({
+    locale, version, devices, pendingDevices, deviceModels, deviceFriendlyNames,
+    runningDevices, activeDevice, onSelectDevice, onRefresh, isRefreshing,
+    config, onConfigChange, onResolutionChange, isSwitchingResolution,
+    onStart, onStop, onOpenSettings, coreReady, onDownloadCore,
+    isDownloading, downloadProgress,
+}: Props) {
+    const zh = locale.startsWith('zh');
+    const copy = (chinese: string, english: string) => zh ? chinese : english;
+    const running = runningDevices.includes(activeDevice);
+    const selected = devices.includes(activeDevice);
+    const deviceLabel = (serial: string) =>
+        deviceFriendlyNames[serial] || deviceModels[serial] || serial;
+
+    return (
+        <main className="ml-home flex flex-col w-full h-full min-h-0">
+            <header className="ml-home-header flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className="ml-brand-icon shrink-0" aria-hidden="true">
+                        <img src="/mirroleap-icon.svg" alt="" className="w-full h-full" />
+                    </div>
+                    <div className="min-w-0">
+                        <h1 className="ml-wordmark text-[23px] leading-none tracking-tight font-extrabold">
+                            Mirro<span>Leap</span>
+                        </h1>
+                        <p className="ml-muted text-[11px] mt-1.5 tracking-wide">
+                            {copy('轻盈投屏，专注当下', 'Simply mirror. Stay focused.')}
+                        </p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                    <span className="ml-version-pill" aria-label={copy('软件版本', 'App version')}>v{version}</span>
+                    <button type="button" className="ml-icon-button" aria-label={copy('打开设置', 'Open settings')}
+                        title={copy('设置与高级功能', 'Settings and advanced features')}
+                        onClick={() => onOpenSettings('mirror')}>
+                        <Settings2 size={19} />
+                    </button>
+                </div>
+            </header>
+
+            <div className="ml-home-body flex-1 min-h-0 w-full max-w-[1080px] mx-auto">
+                <div className="ml-intro flex items-center justify-between gap-3">
+                    <div>
+                        <h2 className="text-xl font-bold tracking-tight">{copy('准备好投屏了吗？', 'Ready to mirror?')}</h2>
+                        <p className="ml-muted mt-1 text-xs">
+                            {copy('选择手机，一键开始。其他功能都在设置里。', 'Choose your phone and start in one click.')}
+                        </p>
+                    </div>
+                    <span className={'ml-status-chip ' + (coreReady ? 'ml-ready' : 'ml-missing')} role="status">
+                        <span className="ml-status-dot" />
+                        {coreReady ? copy('引擎就绪', 'Engine ready') : copy('需要安装引擎', 'Engine missing')}
+                    </span>
+                </div>
+
+                <div className="ml-dashboard-grid grid gap-4 items-stretch">
+                    <section className="ml-card ml-device-card flex flex-col min-h-0" aria-label={copy('选择设备', 'Choose a device')}>
+                        <div className="ml-card-head flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <Smartphone size={17} className="ml-primary" />
+                                <h3 className="font-bold text-sm">{copy('我的设备', 'My devices')}</h3>
+                                <span className="ml-count">{devices.length}</span>
+                            </div>
+                            <button type="button" className="ml-icon-button !w-9 !h-9" onClick={onRefresh}
+                                aria-label={copy('刷新设备列表', 'Refresh devices')} disabled={isRefreshing}
+                                title={copy('重新检测设备', 'Refresh')}>
+                                <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+                            </button>
+                        </div>
+                        <div className="ml-device-list flex-1 min-h-0" role="group" aria-label={copy('已连接设备', 'Connected devices')}>
+                            {devices.length === 0 ? (
+                                <div className="ml-empty-state">
+                                    <Smartphone size={30} strokeWidth={1.4} aria-hidden="true" />
+                                    <strong className="mt-3 text-sm">{copy('还没有连接手机', 'No phone connected')}</strong>
+                                    <p className="ml-muted text-xs text-center mt-1 leading-5">
+                                        {copy('使用 USB 数据线，或在设置中配置无线连接。', 'Connect by USB or configure Wi-Fi in settings.')}
+                                    </p>
+                                </div>
+                            ) : devices.map((serial) => {
+                                const isSelected = activeDevice === serial;
+                                const isRunning = runningDevices.includes(serial);
+                                const wireless = serial.includes(':') || serial.startsWith('adb-');
+                                return (
+                                    <button key={serial} type="button"
+                                        className={'ml-device-row ' + (isSelected ? 'ml-device-selected' : '')}
+                                        aria-pressed={isSelected}
+                                        onClick={() => onSelectDevice(serial)}>
+                                        <span className="ml-device-symbol"><Smartphone size={20} /></span>
+                                        <span className="flex-1 min-w-0 text-left">
+                                            <strong className="block truncate text-[13px] font-bold">{deviceLabel(serial)}</strong>
+                                            <span className="block ml-muted truncate text-[11px] mt-0.5">
+                                                {wireless ? 'Wi-Fi' : 'USB'} · {isRunning ? copy('投屏中', 'Mirroring') : copy('已连接', 'Connected')}
+                                            </span>
+                                        </span>
+                                        {isSelected ? <Check className="ml-primary shrink-0" size={17} aria-hidden="true" /> :
+                                            <span className="ml-device-dot" aria-hidden="true" />}
+                                    </button>
+                                );
+                            })}
+                            {pendingDevices.length > 0 && (
+                                <p className="ml-muted text-[11px] px-2 mt-3" role="note">
+                                    {copy('部分设备未授权或离线，请在设置中查看。', 'Some devices need authorization or are offline.')}
+                                </p>
+                            )}
+                        </div>
+                        <button className="ml-secondary-action mt-3 w-full flex items-center justify-center gap-2"
+                            type="button" onClick={() => onOpenSettings('devices')}>
+                            <Wifi size={15} /> {copy('无线连接 / 配对设备', 'Wi-Fi connection / Pair device')}
+                            <ArrowRight size={14} />
+                        </button>
+                    </section>
+
+                    <section className="ml-card ml-mirror-card flex flex-col" aria-label={copy('投屏控制', 'Mirror controls')}>
+                        <div className="ml-card-head flex items-center gap-2">
+                            <MonitorPlay size={18} className="ml-primary" />
+                            <h3 className="font-bold text-sm">{copy('屏幕投屏', 'Screen mirroring')}</h3>
+                        </div>
+                        <div className="ml-hero flex items-center gap-3 mt-4">
+                            <div className="ml-hero-icon"><Smartphone size={27} strokeWidth={1.7}/></div>
+                            <div className="min-w-0 flex-1">
+                                <div className="font-semibold text-[14px] truncate">
+                                    {selected ? deviceLabel(activeDevice) : copy('请选择一台手机', 'Select a device')}
+                                </div>
+                                <div className="ml-muted text-xs mt-1">
+                                    {running ? copy('投屏正在运行', 'Your screen is being mirrored') :
+                                        selected ? copy('已连接，可以开始投屏', 'Connected and ready') :
+                                        copy('连接后即可开始投屏', 'Connect a phone to get started')}
+                                </div>
+                            </div>
+                            <span className={'ml-running-light ' + (running ? 'ml-on' : '')} aria-hidden="true" />
+                        </div>
+
+                        <div className="ml-field mt-5">
+                            <label htmlFor="ml-resolution" className="ml-field-title">{copy('分辨率', 'Resolution')}</label>
+                            <select id="ml-resolution" value={config.res || '0'}
+                                disabled={isSwitchingResolution}
+                                onChange={(event) => onResolutionChange(event.target.value)}
+                                className="ml-select">
+                                {resolutions.map((option) => <option key={option.value} value={option.value}>
+                                    {zh ? option.zh : option.en}
+                                </option>)}
+                                {!resolutions.some(({value}) => value === config.res) && config.res !== '0' &&
+                                    <option value={config.res}>{config.res}</option>}
+                            </select>
+                        </div>
+                        <div className="ml-quick-toggles grid grid-cols-2 gap-3 mt-4">
+                            <button className={'ml-toggle-card ' + (config.deviceFrame ? 'ml-enabled' : '')}
+                                type="button" aria-pressed={Boolean(config.deviceFrame)}
+                                onClick={() => onConfigChange({...config, deviceFrame: !config.deviceFrame})}>
+                                <ShieldCheck size={17}/>
+                                <span>{copy('真机边框', 'Phone frame')}</span>
+                                <span className="ml-switch" aria-hidden="true"/>
+                            </button>
+                            <button className={'ml-toggle-card ' + (config.audioEnabled !== false ? 'ml-enabled' : '')}
+                                type="button" aria-pressed={config.audioEnabled !== false}
+                                onClick={() => onConfigChange({...config, audioEnabled: config.audioEnabled === false})}>
+                                {config.audioEnabled === false ? <VolumeX size={17}/> : <Volume2 size={17}/>}
+                                <span>{copy('声音', 'Audio')}</span>
+                                <span className="ml-switch" aria-hidden="true"/>
+                            </button>
+                        </div>
+                        <div className="flex-1 min-h-4" />
+                        {!coreReady ? (
+                            <button type="button" className="ml-primary-action flex items-center justify-center gap-2 mt-5"
+                                disabled={isDownloading} onClick={onDownloadCore}>
+                                <Download size={19}/>
+                                {isDownloading ? copy(`正在安装 ${downloadProgress}%`, `Installing ${downloadProgress}%`)
+                                    : copy('安装投屏引擎', 'Install mirroring engine')}
+                            </button>
+                        ) : running ? (
+                            <button type="button" onClick={onStop} className="ml-stop-action flex items-center justify-center gap-2 mt-5">
+                                <span className="w-3 h-3 bg-current rounded-[3px]" aria-hidden="true"/>
+                                {copy('停止投屏', 'Stop mirroring')}
+                            </button>
+                        ) : (
+                            <button type="button" onClick={onStart} disabled={!selected || isSwitchingResolution}
+                                className="ml-primary-action flex items-center justify-center gap-2 mt-5">
+                                <MonitorPlay size={20}/>
+                                {copy('开始投屏', 'Start mirroring')}
+                                <ArrowRight size={16}/>
+                            </button>
+                        )}
+                        {isSwitchingResolution && (
+                            <p className="ml-muted text-xs mt-2 text-center" role="status">
+                                {copy('正在切换分辨率，请稍候…', 'Applying resolution…')}
+                            </p>
+                        )}
+                    </section>
+                </div>
+                <div className="ml-home-footer flex items-center justify-between gap-3 flex-wrap">
+                    <span className="ml-muted text-[11px] flex items-center gap-1.5">
+                        <ShieldCheck size={13} /> {copy('基于开源 scrcpy · 本地投屏', 'Powered by open-source scrcpy')}
+                    </span>
+                    <button type="button" className="ml-footer-link flex items-center gap-1"
+                        onClick={() => onOpenSettings('behavior')}>
+                        <CircleHelp size={14} /> {copy('更多功能与快捷键', 'More features & shortcuts')}
+                        <ArrowRight size={13}/>
+                    </button>
+                </div>
+            </div>
+        </main>
+    );
+}

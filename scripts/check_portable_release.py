@@ -15,6 +15,7 @@ config = json.loads((root / "src-tauri/tauri.conf.json").read_text(encoding="utf
 pkg = json.loads((root / "package.json").read_text(encoding="utf-8"))
 assert config["version"] == pkg["version"]
 assert re.fullmatch(r"\d+\.\d+\.\d+", pkg["version"])
+assert config["productName"] == "MirroLeap" and pkg["name"] == "mirroleap"
 assert config["identifier"] == "com.kb.scrcpy-gui-v3", (
     "Changing the bundle identifier would silently break upgrade compatibility"
 )
@@ -27,7 +28,7 @@ must_have = [
     "scripts/windows-stage-portable.ps1",
     "npm run tauri build",
     "scripts/windows-sign-and-checksum.ps1",
-    f"ScrcpyGUI_{pkg['version']}",
+    "MirroLeap_${version}_x64_Portable.zip",
     "*_x64_Portable.zip",
     "release-checksums/SHA256SUMS.txt",
     "sha256sum --check SHA256SUMS.txt",
@@ -41,8 +42,9 @@ steps = [
     ci.index("scripts/windows-sign-and-checksum.ps1"),
 ]
 assert steps == sorted(steps), "Portable EXE must be staged before installer patches the binary"
-assert "src-tauri\\target\\release\\scrcpy-gui-v3.exe" in stage
-assert "Run-ScrcpyGUI.cmd" in stage and "README-PORTABLE.txt" in stage
+assert "src-tauri\\target\\release\\mirroleap.exe" in stage
+assert "Run-MirroLeap.cmd" in stage and "README-PORTABLE.txt" in stage
+assert "MirroLeap-Portable/mirroleap.exe" in sign
 assert "Compress-Archive -Path $portableStage" in sign
 assert "SCRCPY_SIGNING_PFX_BASE64" in sign
 assert "SCRCPY_SIGNING_PFX_PASSWORD" in sign
@@ -53,4 +55,7 @@ assert "$entries.Count -ne 3" in sign
 assert "Portable.zip" in docs and "Do not uninstall" in docs
 assert "/NCRC" in docs and "不要" in docs
 assert "disable Windows Defender" not in ci
+assert "gh release create" in ci and "--notes-file release-notes.md --latest" in ci
+assert "--prerelease" not in ci and "--latest=false" not in ci
+assert 'RELEASE_TAG="v' in ci and 'MirroLeap-Windows-Installer' in ci
 print("Portable recovery build, signature order and 3-file SHA256 manifest contracts pass")

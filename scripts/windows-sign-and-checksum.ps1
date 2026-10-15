@@ -1,4 +1,4 @@
-# ScrcpyGUI Windows installer signing (optional; never bypass SmartScreen).
+# MirroLeap Windows installer signing (optional; never bypass SmartScreen).
 # The workflow always produces SHA256SUMS.txt. It signs with a genuine CA-issued
 # code signing PFX only when BOTH GitHub Actions secrets are configured:
 #   SCRCPY_SIGNING_PFX_BASE64 / SCRCPY_SIGNING_PFX_PASSWORD
@@ -16,8 +16,8 @@ $installers = @(
     Get-ChildItem -Path (Join-Path $bundle 'msi') -Filter '*.msi' -File -ErrorAction SilentlyContinue
 )
 if ($installers.Count -ne 2) { throw "Expected EXE and MSI installers, got $($installers.Count)" }
-$portableStage = Join-Path $workspace 'release-portable\ScrcpyGUI-Portable'
-$portableExe = Join-Path $portableStage 'scrcpy-gui-v3.exe'
+$portableStage = Join-Path $workspace 'release-portable\MirroLeap-Portable'
+$portableExe = Join-Path $portableStage 'mirroleap.exe'
 if (-not (Test-Path -LiteralPath $portableExe -PathType Leaf)) {
     throw "Missing standalone portable binary: $portableExe"
 }
@@ -61,7 +61,7 @@ $portableBundle = Join-Path $bundle 'portable'
 New-Item -ItemType Directory -Force -Path $portableBundle | Out-Null
 $appVersion = (Get-Content -LiteralPath (Join-Path $workspace 'package.json') -Raw | ConvertFrom-Json).version
 if ($appVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid package.json version' }
-$portableZip = Join-Path $portableBundle "ScrcpyGUI_${appVersion}_x64_Portable.zip"
+$portableZip = Join-Path $portableBundle "MirroLeap_${appVersion}_x64_Portable.zip"
 if (Test-Path -LiteralPath $portableZip) { Remove-Item $portableZip -Force }
 Compress-Archive -Path $portableStage -DestinationPath $portableZip -CompressionLevel Optimal
 if (-not (Test-Path -LiteralPath $portableZip)) {
@@ -74,9 +74,9 @@ $zip = [IO.Compression.ZipFile]::OpenRead($portableZip)
 try {
     $entryNames = @($zip.Entries | ForEach-Object { $_.FullName -replace '\\', '/' })
     foreach ($required in @(
-        'ScrcpyGUI-Portable/scrcpy-gui-v3.exe',
-        'ScrcpyGUI-Portable/Run-ScrcpyGUI.cmd',
-        'ScrcpyGUI-Portable/README-PORTABLE.txt'
+        'MirroLeap-Portable/mirroleap.exe',
+        'MirroLeap-Portable/Run-MirroLeap.cmd',
+        'MirroLeap-Portable/README-PORTABLE.txt'
     )) {
         if ($entryNames -notcontains $required) {
             throw "Portable archive missing $required"

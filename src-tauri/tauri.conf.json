@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ScrcpyGUI",
-  "version": "4.5.2",
+  "productName": "MirroLeap",
+  "version": "4.6.0",
   "identifier": "com.kb.scrcpy-gui-v3",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -13,16 +13,16 @@
     "windows": [
       {
         "label": "main",
-        "title": "ScrcpyGUI",
-        "width": 1200,
-        "height": 890,
+        "title": "MirroLeap",
+        "width": 940,
+        "height": 680,
         "visible": false,
         "resizable": true,
         "center": true,
         "transparent": false,
         "decorations": true,
-        "minWidth": 900,
-        "minHeight": 650
+        "minWidth": 740,
+        "minHeight": 550
       },
       {
         "label": "splashscreen",
@@ -44,7 +44,7 @@
   "bundle": {
     "active": true,
     "publisher": "slobys (community build)",
-    "copyright": "Copyright © 2026 slobys and ScrcpyGUI contributors",
+    "copyright": "Copyright © 2026 slobys and MirroLeap contributors. Based on scrcpy-gui.",
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",
