@@ -37,6 +37,7 @@ export const ptBR: Translations = {
             system: 'Sistema'
         },
         languageLabel: 'Idioma',
+        uiScale: 'Escala da interface',
         tagline: 'Espelhar & Controlar Android // Dispositivos com Facilidade',
         scrcpyEngine: 'Motor Scrcpy',
         scrcpyReady: 'Scrcpy Pronto',
