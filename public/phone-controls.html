@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>投屏悬浮操作栏</title>
+  <title>手机投屏控制和画笔标注</title>
   <style>
     :root { color-scheme: dark; }
     *, *::before, *::after { box-sizing: border-box; }
@@ -13,78 +13,143 @@
       -webkit-user-select: none; user-select: none;
     }
     .rail {
-      height: 100%; width: 100%;
-      padding: 6px 4px;
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-      border-radius: 15px;
-      background: rgba(13, 17, 24, .96);
+      width: 100%; height: 100%; padding: 5px 4px;
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      border-radius: 15px; background: rgba(13, 17, 24, .96);
       border: 1px solid rgba(160, 168, 180, .29);
       box-shadow: 0 6px 20px rgba(0, 0, 0, .34), inset 1px 0 rgba(255,255,255,.07);
     }
     button {
       display: grid; place-items: center;
-      height: 40px; width: 38px; padding: 0;
+      min-height: 34px; height: 38px; width: 38px; padding: 0;
       background: transparent; color: #c6cbd5;
-      border: 0; border-radius: 10px;
-      cursor: pointer; flex: 1 1 0;
-      touch-action: none;
+      border: 0; border-radius: 10px; cursor: pointer;
+      touch-action: none; flex: 0 0 auto;
       -webkit-user-select: none; user-select: none;
       transition: background .13s, color .13s;
     }
     button:hover, button:focus-visible {
-      background: rgba(116, 133, 166, .3);
-      color: #fff; outline: 1px solid rgba(205, 211, 224, .2);
+      background: rgba(116, 133, 166, .3); color: #fff;
+      outline: 1px solid rgba(205, 211, 224, .2);
     }
     button:active { background: rgba(155, 175, 200, .4); }
-    button.danger:hover, button.danger:focus-visible { background: rgba(190, 55, 65, .45); }
+    button.active { background: rgba(40, 177, 157, .35); color: #9af3e5; }
+    button.danger:hover { background: rgba(190,55,65,.45); }
     button svg { height: 19px; width: 19px; stroke-width: 1.8; }
     #drag { cursor: grab; }
     #drag:active { cursor: grabbing; }
+    #ink-tools {
+      width: 100%; display: none; flex-direction: column; gap: 3px;
+      align-items: center; border-top: 1px solid #323942; padding-top: 5px;
+    }
+    body.inking #ink-tools { display: flex; }
+    #ink-tools button { height: 29px; min-height: 29px; width: 36px; }
+    #ink-tools button svg { width: 17px; height: 17px; }
+    .swatches { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; width: 34px; }
+    .swatches button {
+      width: 16px !important; height: 16px !important; min-height: 16px !important;
+      border-radius: 50%; border: 2px solid rgba(240, 240, 255, .2);
+    }
+    .swatches button.selected { outline: 2px solid white; outline-offset: 1px; }
+    #size { font-size: 10px; font-weight: 700; }
     #status { display: none; }
   </style>
 </head>
 <body>
-  <div class="rail" role="toolbar" aria-label="投屏窗口操作">
+  <div class="rail" role="toolbar" aria-label="投屏控制和标注">
     <button id="drag" aria-label="按住拖动投屏窗口" title="按住拖动 / Drag">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 2v20M2 12h20M9 5l3-3 3 3M9 19l3 3 3-3M5 9l-3 3 3 3M19 9l3 3-3 3"/>
       </svg>
     </button>
+    <button id="ink-toggle" aria-label="画笔标注开关" title="画笔：开启后在投屏画面上书写 / Pen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 20h9M15.5 3.5l5 5-12 12H3.5v-5zM14 5l5 5"/>
+      </svg>
+    </button>
     <button id="minimize" aria-label="最小化投屏窗口" title="最小化 / Minimize">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M5 18h14"/>
       </svg>
     </button>
     <button id="close" class="danger" aria-label="关闭投屏窗口" title="关闭 / Close">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M6 6l12 12M18 6L6 18"/>
       </svg>
     </button>
+
+    <div id="ink-tools" role="group" aria-label="画笔工具">
+      <div class="swatches" aria-label="画笔颜色">
+        <button id="yellow" class="selected" aria-label="黄色" title="黄色" style="background:#ffd54b"></button>
+        <button id="red" aria-label="红色" title="红色" style="background:#ff5252"></button>
+        <button id="white" aria-label="白色" title="白色" style="background:#fff"></button>
+        <button id="cyan" aria-label="青色" title="青色" style="background:#40e0d0"></button>
+      </div>
+      <button id="pen" aria-label="画笔" class="active" title="画笔 / Pen">✎</button>
+      <button id="eraser" aria-label="橡皮擦" title="橡皮擦 / Eraser">⌫</button>
+      <button id="size" aria-label="笔刷粗细" title="点击切换笔刷粗细">5px</button>
+      <button id="undo" aria-label="撤销上一笔" title="撤销 / Undo">↶</button>
+      <button id="clear" aria-label="清空所有标注" title="清空 / Clear">⌧</button>
+    </div>
   </div>
   <div id="status" role="status" aria-live="polite"></div>
   <script>
-    // Tauri injects the API (withGlobalTauri=true). The Rust command checks
-    // the caller's phone-controls-* window label and limits actions to its own
-    // active scrcpy process; an ordinary page cannot select another device.
-    const invoke = (action) => {
-      const handler = window.__TAURI__?.core?.invoke;
-      if (!handler) return Promise.reject(new Error('Native controls unavailable'));
-      return handler('device_frame_control', { action });
-    };
-    const status = document.getElementById('status');
-    const act = (kind) => {
-      invoke(kind).catch(error => { status.textContent = String(error); });
-    };
-    document.getElementById('drag').addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      act('drag'); // Windows keeps moving the SDL window until left mouse up.
-    });
-    document.getElementById('minimize').addEventListener('click', () => act('minimize'));
-    document.getElementById('close').addEventListener('click', () => act('close'));
+    (() => {
+      const invoke = action => {
+        const handler = window.__TAURI__?.core?.invoke;
+        if (!handler) return Promise.reject(new Error('Native controls unavailable'));
+        return handler('device_frame_control', { action });
+      };
+      const status = document.getElementById('status');
+      const act = action => invoke(action).catch(e => { status.textContent = String(e); });
+      let enabled = false;
+      const inkButton = document.getElementById('ink-toggle');
+      inkButton.addEventListener('click', async () => {
+        try {
+          await invoke('ink_toggle');
+          enabled = !enabled;
+          document.body.classList.toggle('inking', enabled);
+          inkButton.classList.toggle('active', enabled);
+          inkButton.setAttribute('aria-pressed', String(enabled));
+        } catch (e) { status.textContent = String(e); }
+      });
+      document.getElementById('drag').addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        act('drag');
+      });
+      document.getElementById('minimize').addEventListener('click', () => act('minimize'));
+      document.getElementById('close').addEventListener('click', () => act('close'));
+      document.getElementById('pen').addEventListener('click', () => {
+        act('ink_pen');
+        document.getElementById('pen').classList.add('active');
+        document.getElementById('eraser').classList.remove('active');
+      });
+      document.getElementById('eraser').addEventListener('click', () => {
+        act('ink_erase');
+        document.getElementById('eraser').classList.add('active');
+        document.getElementById('pen').classList.remove('active');
+      });
+      for (const name of ['yellow', 'red', 'white', 'cyan']) {
+        document.getElementById(name).addEventListener('click', () => {
+          act('ink_color_' + name);
+          document.querySelectorAll('.swatches button').forEach(el => el.classList.remove('selected'));
+          document.getElementById(name).classList.add('selected');
+          document.getElementById('pen').classList.add('active');
+          document.getElementById('eraser').classList.remove('active');
+        });
+      }
+      const sizes = [3, 5, 9];
+      let sizeIndex = 1;
+      document.getElementById('size').addEventListener('click', () => {
+        sizeIndex = (sizeIndex + 1) % sizes.length;
+        const size = sizes[sizeIndex];
+        act('ink_size_' + size);
+        document.getElementById('size').textContent = size + 'px';
+      });
+      document.getElementById('undo').addEventListener('click', () => act('ink_undo'));
+      document.getElementById('clear').addEventListener('click', () => act('ink_clear'));
+    })();
   </script>
 </body>
 </html>
