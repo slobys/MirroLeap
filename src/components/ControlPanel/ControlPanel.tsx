@@ -11,6 +11,8 @@ interface ControlPanelProps {
     onStart: () => void;
     onStop: () => void;
     isRunning: boolean;
+    onResolutionChange?: (size: string) => void;
+    isSwitchingResolution?: boolean;
     onListOptions: (arg: string) => void;
     detectedCameras?: { id: string, name: string }[];
     renderDriverSupport?: RenderDriverSupport;
@@ -73,6 +75,8 @@ export default function ControlPanel({
     onStart,
     onStop,
     isRunning,
+    onResolutionChange,
+    isSwitchingResolution = false,
     onListOptions,
     detectedCameras = [],
     renderDriverSupport = { hostOs: 'unknown', supportsRenderDriver: false, supportedDrivers: [] }
@@ -85,7 +89,7 @@ export default function ControlPanel({
 
     const rendererOptions = buildRendererOptions(renderDriverSupport, t('controlPanel.rendererAuto'));
 
-    const CustomSelect = ({ value, onChange, options, label, className = "" }: { value: any, onChange: (val: any) => void, options: { value: any, label: string }[], label?: string, className?: string }) => {
+    const CustomSelect = ({ value, onChange, options, label, className = "", disabled = false }: { value: any, onChange: (val: any) => void, options: { value: any, label: string }[], label?: string, className?: string, disabled?: boolean }) => {
         const [isOpen, setIsOpen] = useState(false);
         const containerRef = useRef<HTMLDivElement>(null);
 
@@ -105,8 +109,9 @@ export default function ControlPanel({
             <div className={`relative ${className}`} ref={containerRef}>
                 {label && <label className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter mb-1 block">{label}</label>}
                 <button
-                    onClick={() => setIsOpen(!isOpen)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-2 py-1.5 text-[11px] text-zinc-300 flex items-center justify-between hover:border-primary/60 hover:bg-black transition-all group"
+                    onClick={() => { if (!disabled) setIsOpen(!isOpen); }}
+                    disabled={disabled}
+                    className="w-full disabled:opacity-50 disabled:cursor-wait bg-zinc-950 border border-zinc-800 rounded-md px-2 py-1.5 text-[11px] text-zinc-300 flex items-center justify-between hover:border-primary/60 hover:bg-black transition-all group"
                 >
                     <span className="truncate">{selectedOption?.label}</span>
                     <ChevronDown size={14} className={`text-zinc-500 group-hover:text-primary transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
@@ -141,7 +146,8 @@ export default function ControlPanel({
                 <CustomSelect
                     label={t('controlPanel.resolution')}
                     value={config.res || "0"}
-                    onChange={(val) => handleChange('res', val)}
+                    onChange={(val) => onResolutionChange ? onResolutionChange(val) : handleChange('res', val)}
+                    disabled={isSwitchingResolution}
                     options={[
                         { value: "0", label: t('controlPanel.resolutionOriginal') },
                         { value: "3840", label: "4K" },
@@ -153,6 +159,15 @@ export default function ControlPanel({
                         { value: "800", label: "480p" },
                     ]}
                 />
+            )}
+            {showResolution && isRunning && config.sessionMode === 'mirror' && (
+                <div className="col-span-3 text-[10px] text-zinc-500 leading-relaxed" role="status">
+                    {isSwitchingResolution
+                        ? t('controlPanel.quickResolutionApplying')
+                        : config.record
+                            ? t('controlPanel.quickResolutionRecording')
+                            : t('controlPanel.quickResolutionHint')}
+                </div>
             )}
             {showCodec && (
                 <CustomSelect
