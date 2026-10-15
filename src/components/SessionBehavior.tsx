@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ScrcpyConfig } from '../hooks/useScrcpy';
 import Tooltip from './Tooltip';
-import { Coffee, MonitorOff, Volume2, Layers, Maximize, Square, Circle, Folder, Settings2, ChevronDown, ActivitySquare, Move } from 'lucide-react';
+import { Coffee, MonitorOff, Volume2, Layers, Maximize, Square, Circle, Folder, Settings2, ChevronDown, ActivitySquare, Move, Smartphone } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 const AUDIO_CODEC_VALUES = ['auto', 'opus', 'aac', 'flac', 'raw'] as const;
@@ -192,6 +192,15 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                         label={t('sessionBehavior.borderless')}
                         tooltip={t('sessionBehavior.borderlessTooltip')}
                     />
+                    {typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent) && (
+                        <Toggle
+                            checked={config.deviceFrame !== false}
+                            onChange={(v) => handleChange('deviceFrame', v)}
+                            icon={Smartphone}
+                            label={t('sessionBehavior.deviceFrame')}
+                            tooltip={t('sessionBehavior.deviceFrameTooltip')}
+                        />
+                    )}
                     <Toggle
                         checked={config.rememberWindowPosition !== false}
                         onChange={(v) => handleChange('rememberWindowPosition', v)}
