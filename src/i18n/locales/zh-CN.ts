@@ -58,7 +58,7 @@ export const zhCN: Translations = {
         manualStep4Before: '选择包含',
         manualStep4Executable: 'scrcpy',
         manualStep4After: '可执行文件的文件夹。',
-        manualNote: '注意：ScrcpyGUI 会记住这个自定义路径，以便后续会话继续使用。',
+        manualNote: '注意：MirroLeap 会记住这个自定义路径，以便后续会话继续使用。',
         gotIt: '知道了'
     },
     sidebar: {
@@ -281,7 +281,7 @@ export const zhCN: Translations = {
         continueToApp: '进入应用'
     },
     footer: {
-        aboutScrcpyGui: '关于 Scrcpy GUI',
+        aboutScrcpyGui: '关于 MirroLeap',
         github: 'GitHub',
         youtube: 'YouTube',
         website: '网站',

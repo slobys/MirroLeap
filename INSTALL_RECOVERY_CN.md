@@ -1,4 +1,4 @@
-# ScrcpyGUI Windows 安装失败：安全恢复和免安装版
+# MirroLeap / 原 ScrcpyGUI Windows 安装恢复指南
 
 此说明针对 ScrcpyGUI v4.5.x 安装时遇到：
 
@@ -17,18 +17,18 @@
 
 此方法对许多升级问题有效，但旧的 `uninstall.exe` 若真的损坏，仍可能出现其它错误。
 
-## 方案二：免安装 ZIP（本项目 v4.5.1 起提供，建议优先采用）
+## 方案二：免安装 ZIP（原 ScrcpyGUI v4.5.1 起提供，建议优先采用）
 
-Release 选择 **`ScrcpyGUI_4.5.2_x64_Portable.zip`**，而不是 NSIS 安装用的 setup.exe：
+MirroLeap v4.6.0 Release 选择 **`MirroLeap_4.6.0_x64_Portable.zip`**，而不是 NSIS 安装用的 setup.exe：
 
-1. 整个 ZIP 解压到可写目录，例如 `D:\Apps\ScrcpyGUI-Portable\`。
-2. 双击 `Run-ScrcpyGUI.cmd` 或 `scrcpy-gui-v3.exe`。
+1. 整个 ZIP 解压到可写目录，例如 `D:\Apps\MirroLeap-Portable\`。
+2. 双击 `Run-MirroLeap.cmd` 或 `mirroleap.exe`。
 3. 此方法**不执行安装器、不触碰旧版卸载记录，也不会自动删除旧软件**。
 4. 如果提示没找到 scrcpy 核心，点击 GUI 内的核心下载；也可以把之前安装目录里完整且可信的 `scrcpy-bin` 文件夹复制到便携版 EXE 同级目录，例如：
    ```text
-   D:\Apps\ScrcpyGUI-Portable\
-     scrcpy-gui-v3.exe
-     Run-ScrcpyGUI.cmd
+   D:\Apps\MirroLeap-Portable\
+     mirroleap.exe
+     Run-MirroLeap.cmd
      scrcpy-bin\
        scrcpy.exe
        adb.exe
@@ -57,10 +57,10 @@ Release 选择 **`ScrcpyGUI_4.5.2_x64_Portable.zip`**，而不是 NSIS 安装用
 
 ## 校验安装包是否完整
 
-v4.5.2 的 Release 同时包含 `SHA256SUMS.txt`，它列出 NSIS EXE、MSI、免安装 ZIP 的 SHA-256。Windows PowerShell 中运行：
+v4.6.0 的 Release 同时包含 `SHA256SUMS.txt`，它列出 NSIS EXE、MSI、免安装 ZIP 的 SHA-256。Windows PowerShell 中运行：
 
 ```powershell
-Get-FileHash -LiteralPath '.\ScrcpyGUI_4.5.2_x64_Portable.zip' -Algorithm SHA256
+Get-FileHash -LiteralPath '.\MirroLeap_4.6.0_x64_Portable.zip' -Algorithm SHA256
 ```
 
 将输出与下载自同一个 Release 的 `SHA256SUMS.txt` 对应文件名的哈希对比。如果不匹配，删除文件重新从官方 GitHub 仓库下载，不要尝试跳过校验。

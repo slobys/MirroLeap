@@ -1,8 +1,8 @@
-name: Desktop CI
+name: MirroLeap Desktop CI
 
 on:
   push:
-    branches: [main, 'fix/v4.5.1-portable-upgrade']
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -39,6 +39,7 @@ jobs:
       - run: python3 scripts/check_annotations.py
       - run: python3 scripts/check_landscape_toolbar.py
       - run: python3 scripts/check_portable_release.py
+      - run: python3 scripts/check_compact_home.py
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   windows:
@@ -84,15 +85,21 @@ jobs:
             throw "The annotation canvas is missing from the Windows build"
           }
           $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
-          if (-not (Test-Path "src-tauri/target/release/bundle/portable/ScrcpyGUI_${version}_x64_Portable.zip")) {
+          if (-not (Test-Path "src-tauri/target/release/bundle/portable/MirroLeap_${version}_x64_Portable.zip")) {
             throw "The no-installer portable ZIP is missing"
+          }
+          if (-not (Test-Path "src-tauri/target/release/bundle/nsis/MirroLeap_${version}_x64-setup.exe")) {
+            throw "MirroLeap branded NSIS installer is missing"
+          }
+          if (-not (Test-Path "src-tauri/target/release/bundle/msi/MirroLeap_${version}_x64_en-US.msi")) {
+            throw "MirroLeap branded MSI installer is missing"
           }
           if (-not (Test-Path "release-checksums/SHA256SUMS.txt")) {
             throw "No signed-and-hashed release manifest"
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: ScrcpyGUI-Windows-Installer
+          name: MirroLeap-Windows-Installer
           if-no-files-found: error
           path: |
             src-tauri/target/release/bundle/msi/*.msi
@@ -101,70 +108,65 @@ jobs:
             release-checksums/SHA256SUMS.txt
 
   publish-release:
-    name: Publish validated Windows release
+    name: Publish stable MirroLeap release
     needs: [checks, windows]
     if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[publish release]') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download validated installers
+      - uses: actions/checkout@v4
+      - name: Download validated Windows packages
         uses: actions/download-artifact@v4
         with:
-          name: ScrcpyGUI-Windows-Installer
+          name: MirroLeap-Windows-Installer
           path: release-assets
-      - name: Publish versioned preview
+      - name: Publish GitHub Release (not just a tag)
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: scrcpygui-v4.5.2-preview.${{ github.run_number }}
         run: |
           set -euo pipefail
-          mapfile -d '' installers < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' -o -iname '*_x64_Portable.zip' \) -print0)
-          if (( ${#installers[@]} != 3 )); then
-            echo "Need NSIS EXE, MSI and no-installer portable ZIP; got ${#installers[@]}"; exit 1
+          VERSION="$(node -p "require('./package.json').version")"
+          RELEASE_TAG="v${VERSION}"
+          mapfile -d '' packages < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' -o -iname '*_x64_Portable.zip' \) -print0)
+          if (( ${#packages[@]} != 3 )); then
+            echo "Expected branded NSIS EXE, MSI and Portable ZIP; got ${#packages[@]}"; exit 1
           fi
-          cat > release-notes.md <<'NOTES'
-          ## ScrcpyGUI v4.5.2 — 简洁画笔面板与 Windows 悬浮栏恢复修复
-
-          - 画笔工具改为与窗口按钮分开的紧凑面板，操作、颜色、笔触粗细一次全部展示，无需上下滚动。
-          - 橡皮擦采用明确的图形图标，画笔、撤销、清空各有独立按钮；一键恢复仍可退出标注并恢复手机触控。
-          - 工具面板根据真实 Windows 显示缩放及可用屏幕边距选择左/右展开或紧凑纵向停靠。
-          - 最小化后重新显示投屏时，尝试恢复真机外框和悬浮栏；窗口层级保持与 scrcpy 视频关联，并短暂显示控制栏。
-          - 新增画笔前端功能测试与 DPI/桌面边界布局回归测试。
-
-          **本预览版已通过 GitHub Actions 自动构建，但仍需在真实 Windows 10/11 显示器上验证最小化恢复、窗口焦点和多屏 DPI。**
-
-          Windows NSIS 升级旧版时可能显示：
-          - NSIS Error: Error launching installer
-          - Already Installed → Unable to uninstall!
-
-          这通常意味着旧版卸载程序无法被启动，或卸载注册记录与当前安装文件不匹配；单纯重新编译安装包不能自动修复用户电脑里已经损坏的旧版卸载路径。Tauri NSIS 也有已知升级/卸载相关问题。
-
-          **推荐下载：ScrcpyGUI_4.5.2_x64_Portable.zip（免安装版）**
-          1. 在可信目录中完整解压，例如 D:\Apps\ScrcpyGUI-Portable。
-          2. 双击 Run-ScrcpyGUI.cmd 或 scrcpy-gui-v3.exe。
-          3. 它不调用旧版 NSIS 卸载程序，不依赖注册表的旧版安装记录，也不会覆盖旧版软件。
-          4. 首次运行若提示找不到 scrcpy 核心，可在软件内下载，或将已有完整可信 scrcpy-bin 文件夹复制到该 exe 同级目录。
-          5. 免安装版仍需要 Windows 10/11 x64 和系统 WebView2 Runtime。
-
-          **标准安装：** 同时保留 EXE（NSIS）和 MSI。若 NSIS 检测到旧版、且卸载失败，可以在 Already Installed 页面选 Do not uninstall 尝试覆盖安装。若旧安装记录确实损坏，建议按微软官方“程序安装和卸载疑难解答”处理，不要手动清理注册表或关闭安全软件。
-
-          **安全与完整性：** EXE、MSI、Portable ZIP 三种发布文件都写入 SHA256SUMS.txt，Release 上传前逐项重新校验。如果配置了 CA Authenticode 证书，会同时签名 Windows 安装包和 ZIP 内的独立 exe；尚未配置证书的预览版仍可能触发 SmartScreen 警告。
-
-          **保留此前功能**：竖屏与横屏黑钛真机外框、无线连接、画笔一键恢复、自动切换投屏分辨率，以及独立 Windows 免安装运行。
-
-          这是独立的 Windows 预览发布，未能直接在你的电脑上复现旧版卸载记录；用户侧的具体 NSIS 失败原因仍需通过安装日志或修复工具确认。
-          NOTES
-          # Verify the SHA256 checksums from the exact installers being released.
-          manifest="$(find release-assets -type f -name SHA256SUMS.txt -print -quit)"
-          if [[ -z "$manifest" ]]; then echo "Missing release checksum manifest"; exit 1; fi
           mkdir -p verified-assets
-          cp "${installers[@]}" verified-assets/
+          cp "${packages[@]}" verified-assets/
+          manifest="$(find release-assets -type f -name SHA256SUMS.txt -print -quit)"
+          test -n "$manifest" || { echo "Missing checksum manifest"; exit 1; }
           cp "$manifest" verified-assets/SHA256SUMS.txt
           (cd verified-assets && sha256sum --check SHA256SUMS.txt)
+          for suffix in "_x64-setup.exe" "_x64_en-US.msi" "_x64_Portable.zip"; do
+            test -f "verified-assets/MirroLeap_${VERSION}${suffix}" || {
+              echo "Missing MirroLeap_${VERSION}${suffix}"; exit 1;
+            }
+          done
+          cat > release-notes.md <<'NOTES'
+          ## MirroLeap — 轻盈投屏，专注当下
+
+          基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 投屏核心。
+
+          ### 主要更新
+          - 软件、窗口、安装包与文档全面采用 MirroLeap 品牌。
+          - 默认精简首页：设备列表、分辨率、声音、真机边框和开始/停止投屏。
+          - 低频功能移入分类设置：摄像头、虚拟显示器、编码器、无线配对、录屏、快捷键、引擎路径和日志。
+          - 保留无线投屏、横竖屏真机外框、画笔、一键恢复、窗口恢复等功能。
+
+          ### Windows 下载
+          - MirroLeap 的 Portable.zip：推荐，解压后双击 Run-MirroLeap.cmd。
+          - MirroLeap 的 setup.exe：Windows NSIS 安装程序。
+          - MirroLeap 的 .msi：Windows Installer 安装程序。
+          - SHA256SUMS.txt：对应全部三个文件的 SHA-256 校验。
+
+          免安装版不调用旧版 NSIS 卸载程序，适合旧版升级出现卸载错误的用户。尚未配置受信任 CA 代码签名证书，Windows SmartScreen 仍可能提示风险；不要关闭系统防护。原有内部应用标识和配置存储键保留用于兼容。发布为正常 Release 不代表完成了每种 Windows 设备的人工验收。
+          NOTES
           gh release create "$RELEASE_TAG" verified-assets/* \
             --target "$GITHUB_SHA" \
-            --title "ScrcpyGUI v4.5.2 · Compact Ink Tools and Toolbar Restore Preview #${{ github.run_number }} (Windows)" \
-            --notes-file release-notes.md --prerelease --latest=false
+            --title "MirroLeap v${VERSION} — Windows" \
+            --notes-file release-notes.md --latest
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,assets \
+            --jq '{draft:.isDraft,prerelease:.isPrerelease,files:[.assets[].name]}'

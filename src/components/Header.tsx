@@ -171,8 +171,8 @@ export default function Header({ onThemeChange, currentTheme, colorMode, onColor
             {/* Branding - Center */}
             <div className="flex-1 flex flex-col items-center justify-center text-center">
                 <div className="flex items-baseline gap-2">
-                    <h1 className="text-2xl md:text-3xl font-black tracking-tighter text-white uppercase italic">
-                        scrcpy <span className="text-primary not-italic">GUI</span>
+                    <h1 className="text-2xl md:text-3xl font-black tracking-tighter text-white">
+                        Mirro<span className="text-primary">Leap</span>
                     </h1>
                     <div className="flex items-center gap-1.5 px-1.5 py-0.5 bg-zinc-800 rounded border border-zinc-700 mt-1">
                         <span className="text-[10px] font-black text-zinc-400 tracking-wider">V{version}</span>

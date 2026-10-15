@@ -1,54 +1,38 @@
-import { Github, Youtube, Globe, Heart, Coffee } from 'lucide-react';
+import { ExternalLink, Github, HeartHandshake } from 'lucide-react';
 import { useI18n } from '../i18n';
 
+/** Project attribution lives in Settings, not on the everyday mirror screen. */
 export default function Footer({ version }: { version: string }) {
-    const { t } = useI18n();
+    const { locale } = useI18n();
+    const zh = locale.startsWith('zh');
+    const links = [
+        { name: zh ? 'MirroLeap 源码' : 'MirroLeap source', href: 'https://github.com/slobys/scrcpy-gui' },
+        { name: zh ? '原始项目' : 'Original scrcpy-gui', href: 'https://github.com/kil0bit-kb/scrcpy-gui' },
+        { name: 'scrcpy', href: 'https://github.com/Genymobile/scrcpy' },
+    ];
     return (
-        <footer className="w-full p-6 mt-4 glass border-t border-zinc-800 bg-zinc-900/80 backdrop-blur-md flex flex-col items-center justify-center space-y-4">
-            <h3 className="text-xs font-black uppercase tracking-widest text-zinc-500">{t('footer.aboutScrcpyGui')}</h3>
-
-            <div className="flex gap-8">
-                <a href="https://github.com/kil0bit-kb" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1 group">
-                    <Github size={16} className="text-zinc-600 group-hover:text-white transition-colors" />
-                    <span className="text-[9px] font-bold text-zinc-600 group-hover:text-white uppercase tracking-wider">{t('footer.github')}</span>
-                </a>
-                <a href="https://www.youtube.com/@kilObit" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1 group">
-                    <Youtube size={16} className="text-zinc-600 group-hover:text-white transition-colors" />
-                    <span className="text-[9px] font-bold text-zinc-600 group-hover:text-white uppercase tracking-wider">{t('footer.youtube')}</span>
-                </a>
-                <a href="https://kil0bit.blogspot.com/" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1 group">
-                    <Globe size={16} className="text-zinc-600 group-hover:text-white transition-colors" />
-                    <span className="text-[9px] font-bold text-zinc-600 group-hover:text-white uppercase tracking-wider">{t('footer.website')}</span>
-                </a>
-                <a href="https://www.patreon.com/cw/KB_kilObit" target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1 group">
-                    <Coffee size={16} className="text-primary group-hover:text-primary/80 transition-colors animate-pulse" />
-                    <span className="text-[9px] font-bold text-primary group-hover:text-primary/80 uppercase tracking-wider">{t('footer.support')}</span>
-                </a>
+        <footer className="ml-card flex flex-col items-start gap-3 text-xs">
+            <div className="flex gap-2 items-center font-bold">
+                <HeartHandshake size={17} className="ml-primary" />
+                MirroLeap v{version}
             </div>
-
-            {/* Tech Attributions */}
-            <div className="pt-2 flex flex-wrap justify-center gap-x-5 gap-y-1.5 opacity-40 hover:opacity-100 transition-opacity divide-x divide-zinc-800">
-                <div className="flex items-center gap-1.5 pl-5 first:pl-0">
-                    <span className="text-[8px] font-black uppercase text-zinc-500 tracking-tighter">{t('footer.core')}</span>
-                    <a href="https://github.com/Genymobile/scrcpy" target="_blank" rel="noopener noreferrer" className="text-[9px] font-black text-zinc-400 hover:text-primary transition-colors hover:underline underline-offset-2">scrcpy</a>
-                </div>
-                <div className="flex items-center gap-1.5 pl-5">
-                    <span className="text-[8px] font-black uppercase text-zinc-500 tracking-tighter">{t('footer.client')}</span>
-                    <a href="https://tauri.app/" target="_blank" rel="noopener noreferrer" className="text-[9px] font-black text-zinc-400 hover:text-primary transition-colors hover:underline underline-offset-2">Tauri</a>
-                </div>
-                <div className="flex items-center gap-1.5 pl-5">
-                    <span className="text-[8px] font-black uppercase text-zinc-500 tracking-tighter">{t('footer.ui')}</span>
-                    <a href="https://react.dev/" target="_blank" rel="noopener noreferrer" className="text-[9px] font-black text-zinc-400 hover:text-primary transition-colors hover:underline underline-offset-2">React</a>
-                </div>
-                <div className="flex items-center gap-1.5 pl-5">
-                    <span className="text-[8px] font-black uppercase text-zinc-500 tracking-tighter">{t('footer.assets')}</span>
-                    <a href="https://lucide.dev/" target="_blank" rel="noopener noreferrer" className="text-[9px] font-black text-zinc-400 hover:text-primary transition-colors hover:underline underline-offset-2">Lucide</a>
-                </div>
+            <p className="ml-muted leading-5">
+                {zh
+                    ? '基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 作为投屏核心。感谢原作者及开源贡献者。'
+                    : 'A community fork of kil0bit-kb/scrcpy-gui, powered by Genymobile/scrcpy. Credit to the original authors and open-source contributors.'}
+            </p>
+            <div className="flex flex-wrap items-center gap-4">
+                {links.map(link => (
+                    <a key={link.href} href={link.href} target="_blank" rel="noopener noreferrer"
+                        className="ml-footer-link inline-flex items-center gap-1.5">
+                        {link.name === 'scrcpy' ? <ExternalLink size={13} /> : <Github size={13} />}
+                        {link.name}
+                    </a>
+                ))}
             </div>
-
-            <div className="text-[10px] text-zinc-600 flex items-center gap-1 mt-2">
-                {t('footer.appVersion', { version })} <Heart size={10} className="text-red-500 fill-red-500" /> {t('footer.byKb')}
-            </div>
+            <span className="ml-muted text-[11px]">
+                {zh ? '授权协议：MIT · 本项目与 Genymobile 无官方隶属关系。' : 'MIT License · Not affiliated with Genymobile.'}
+            </span>
         </footer>
     );
 }

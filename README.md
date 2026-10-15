@@ -1,133 +1,50 @@
-<p align="center">
-  <img src="icon.png" width="128" height="128" alt="ScrcpyGUI Icon">
-  <br>
-  <h1>ScrcpyGUI v4</h1>
-  <strong>A premium, high-performance Android control experience.</strong>
-</p>
+<div align="center">
 
-<p align="center">
-  <img width="850" alt="ScrcpyGUI Interface" src="https://github.com/user-attachments/assets/a416fcd3-295a-4a01-8769-6f9da429b028" />
-</p>
+# MirroLeap
 
+**轻盈投屏，专注当下**
 
----
+基于 [scrcpy-gui](https://github.com/kil0bit-kb/scrcpy-gui) 二次开发的 Android 桌面投屏工具，使用 [scrcpy](https://github.com/Genymobile/scrcpy) 作为底层投屏引擎。
 
-ScrcpyGUI v4 is a modern, feature-rich GUI for [scrcpy](https://github.com/Genymobile/scrcpy), completely rebuilt from the ground up using **Tauri v2**, **React 19**, and **Rust**. It transforms your Android device into a professional tool for gaming, development, and content creation.
+[下载最新版](https://github.com/slobys/scrcpy-gui/releases/latest) · [更新日志](https://github.com/slobys/scrcpy-gui/releases) · [安装问题指南](INSTALL_RECOVERY_CN.md)
 
-## 🛠️ Community Fork — v4.5.2 Toolbar & Annotation Recovery
+</div>
 
-**v4.5.2:** A compact non-scrolling annotation flyout displays pen, proper eraser, undo, clear, four colors and three direct brush widths together. The hover toolbar now retries restoring its window stacking and briefly reappears after the scrcpy video is restored. Physical Windows focus and multi-display DPI still require user testing.
+## ✨ 功能特点
 
-Based on the original Tauri + scrcpy desktop GUI, with wireless ADB diagnosis, a live black-titanium phone frame, and optional temporary on-screen annotations.
+- **精简首页**：连接手机、选择分辨率、开关声音与真机边框、一键开始/停止投屏。
+- **无线与 USB**：支持 USB 投屏、无线调试配对、设备记忆与重连。
+- **手机外观与画笔**：竖屏/横屏真机边框、悬浮控制栏、标注画笔、橡皮擦、撤销、一键恢复。
+- **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
+- **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
-**New in v4.5:** The same slim phone casing adapts to **portrait and landscape Android video** without restarting the mirror. The larger hover toolbar puts **Move / Minimize / Close** together at the top, with Pen and **One-click Restore** below. Restore clears annotations and hands mouse input back to scrcpy. After Windows taskbar minimization, both the casing and toolbar are rechecked and reattached on restoration.
+## 📥 下载与使用
 
-**Can't install or uninstall the previous release?** Use **ScrcpyGUI_4.5.2_x64_Portable.zip** in GitHub Releases. Extract it fully and run the included EXE—no NSIS, MSI, registry changes or old uninstaller are required. The ZIP is made from a separate `tauri build --no-bundle` standalone binary, not an installer EXE disguised with a new extension. Full Chinese instructions: [INSTALL_RECOVERY_CN.md](INSTALL_RECOVERY_CN.md).
+适用于 **Windows 10/11 x64**，需要 WebView2 Runtime 与 Android 设备的 USB 调试/无线调试授权。
 
-**Installer integrity:** Windows EXE, MSI **and portable ZIP** Releases include a `SHA256SUMS.txt` checksum manifest. A trusted CA-issued Authenticode certificate can be configured in GitHub Actions for automatic signing; the fork currently has **no certificate configured**, so preview installers may still trigger Windows SmartScreen. Neither the app's `publisher` metadata nor its SHA256 alone constitutes trusted code signing. Never disable Windows Defender to silence a warning.
+| 版本 | 文件名 | 适用场景 |
+| --- | --- | --- |
+| **免安装版（推荐）** | `MirroLeap_4.6.0_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_4.6.0_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_4.6.0_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**六项改进、横屏和安全签名说明（中文）：** [IMMERSIVE_CONTROLS_CN.md](IMMERSIVE_CONTROLS_CN.md)
+从 **[GitHub Releases](https://github.com/slobys/scrcpy-gui/releases/latest)** 的 Assets 下载，不要从 Tags 页面下载源码 ZIP 当作安装包。
 
-**画笔及分辨率说明：** [ANNOTATION_RESOLUTION_CN.md](ANNOTATION_RESOLUTION_CN.md)
+推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 
-**机身外框设计说明：** [DEVICE_FRAME_CN.md](DEVICE_FRAME_CN.md)
+**基本操作：** 连接手机 → 授权 Android 调试 → 在首页选择设备 → 点击「开始投屏」。无线配对、码率/编码器和录屏等低频设置，从右上角的齿轮进入。
 
-**开发路线图：** [ROADMAP_CN.md](ROADMAP_CN.md)
+> 安全提示：发布文件提供 SHA-256 校验清单，但本项目目前尚未配置受信任的 Windows 代码签名证书，Windows SmartScreen 可能出现警告。哈希一致不等同于代码签名认证，请不要关闭 Windows 安全防护。
 
----
+## 🧩 关于二次开发
 
-## 🚀 Key Features
+MirroLeap 是基于 **[kil0bit-kb/scrcpy-gui](https://github.com/kil0bit-kb/scrcpy-gui)** 的社区二次开发分支，主要重新设计了日常交互、无线连接流程、投屏外框和标注操作，并完善 Windows 便携版与 Release 发布。
 
-- **✨ Best Looking GUI**: A stunning, modern interface with smooth animations and a premium look and feel.
-- **🎨 Custom Theme Engine**: 5 premium, hand-crafted themes including **Ultraviolet**, **Astro**, **Carbon**, **Emerald**, and **Bloodmoon** to match your workspace setup.
-- **🔄 Automated Binary Updates**: Deep-integrated system that automatically checks if your local `scrcpy` binary is outdated compared to Genymobile's latest official release, prompting you with a beautiful one-click update modal.
-- **🎮 Precision Input (OTG)**:
-  - **HID Keyboard**: Native hardware simulation for international layouts and special characters.
-  - **HID Mouse**: Zero-lag, high-precision cursor control for a "native desktop" feel.
-- **🖥️ Graphics Renderer Selection**:
-  - Choose a renderer backend such as Direct3D, OpenGL, OpenGL ES, Metal, or Software (capability-aware, OS-filtered).
-- **🌐 Seamless Connectivity**:
-  - **Wireless Pairing**: Native UI for Android 11+ wireless pairings.
-  - **Connection History**: Remember and reconnect to wireless devices with one click.
-- **📹 Pro Camera Mode (Webcam)**:
-  - **Refresh Lenses**: Click to automatically scan and list all physical camera sensors, resolutions, and zoom ranges.
-  - **Torch & Zoom**: Toggle your device's flashlight or adjust zoom level (1.0x - 5.0x) natively.
-  - **Failsafe Camera-Size**: Automatically maps resolutions and defaults to safe 1080p dimensions, preventing hardware encoder crashes on high-megapixel devices.
-- **🖥️ Desktop Mode (Virtual Display)**:
-  - **Flex Display**: Drag and resize your virtual desktop window dynamically on the fly!
-  - **Background Colors**: Customize scrcpy's border and letterbox color with hex values and a live color swatch.
-  - **Keep Active**: Periodic user activity simulator preventing device sleep without changing global settings.
-- **📁 Fluid File Management**:
-  - Drag & drop APK installation or file pushing directly to `/sdcard/Download/`.
-- **🖼️ Premium UX**:
-  - **Splash Screen**: Zero-flicker, themed startup experience.
-  - **Smart Folder Picker**: Automatically falls back to local `scrcpy-bin` or application executable directories when browsing folders.
+- 底层核心：[Genymobile/scrcpy](https://github.com/Genymobile/scrcpy)
+- 桌面框架：[Tauri](https://tauri.app/) + React + Rust
+- 技术与历史说明：[真机外框](DEVICE_FRAME_CN.md) · [标注/分辨率](ANNOTATION_RESOLUTION_CN.md) · [旧版安装恢复](INSTALL_RECOVERY_CN.md)
+
+感谢原项目和 scrcpy 的作者及开源贡献者。遵循仓库 [MIT License](LICENSE)。MirroLeap 与 Genymobile、Android 设备厂商没有官方关联。
 
 ---
-
-## 📖 Getting Started
-
-To learn how to enable **USB Debugging**, set up **Wireless Pairing**, or install requirements, please read our comprehensive guide:
-
-### 👉 **[View the Complete User Guide (GUIDE.md)](GUIDE.md)**
-
----
-
-## 🛠️ Development
-
-### Prerequisites
-- [Node.js](https://nodejs.org/) (v18+)
-- [Rust](https://rust-lang.org/) & Cargo
-- [Tauri v2 Prerequisites](https://v2.tauri.app/start/prerequisites/)
-
-### Build Instructions
-1. `npm install`
-2. `npm run tauri dev` (Development)
-3. `npm run tauri build` (Production)
-
-## ❄️ NixOS Installation (flakes)
-
-To install it permanently with a desktop launcher, add the flake to your system's `flake.nix`:
-
-```nix
-inputs.scrcpy-gui.url = "github:kil0bit-kb/scrcpy-gui";
-```
-
-Then add it to your system packages:
-
-```nix
-environment.systemPackages = [
-  inputs.scrcpy-gui.packages.${pkgs.system}.default
-];
-```
----
-
-## 💖 Support the Project
-
-If ScrcpyGUI helps you in your daily workflow, consider supporting its development on Patreon. Your support keeps the project alive and independent!
-
-<p align="left">
-  <a href="https://www.patreon.com/cw/KB_kilObit">
-    <img src="https://img.shields.io/badge/Patreon-Support_KB-F96854?style=for-the-badge&logo=patreon" alt="Support on Patreon">
-  </a>
-</p>
-
----
-
-## � Acknowledgments
-
-ScrcpyGUI is made possible by the following amazing open-source projects:
-
-- **[scrcpy](https://github.com/Genymobile/scrcpy)**: The ultra-fast core engine.
-- **[Tauri](https://tauri.app/)**: The secure, lightweight framework for the desktop app.
-- **[Lucide Icons](https://lucide.dev/)**: For the clean and consistent iconography.
-- **[React](https://react.dev/)**: Powering the modern, interactive interface.
-
----
-
-## �📜 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-*ScrcpyGUI is an independent project and is not affiliated with Genymobile or scrcpy authors.*
-
+**Maintained as a community fork by slobys.** The original upstream project and scrcpy engine retain their respective credits and licenses.

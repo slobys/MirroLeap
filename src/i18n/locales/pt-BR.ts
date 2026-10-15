@@ -58,7 +58,7 @@ export const ptBR: Translations = {
         manualStep4Before: 'Selecione a pasta descompactada que contém o executável',
         manualStep4Executable: 'scrcpy',
         manualStep4After: '.',
-        manualNote: 'Observação: o ScrcpyGUI lembrará deste caminho personalizado em sessões futuras.',
+        manualNote: 'Observação: o MirroLeap lembrará deste caminho personalizado em sessões futuras.',
         gotIt: 'Entendi'
     },
     sidebar: {
@@ -281,7 +281,7 @@ export const ptBR: Translations = {
         continueToApp: 'Continuar para o App'
     },
     footer: {
-        aboutScrcpyGui: 'Sobre o Scrcpy GUI',
+        aboutScrcpyGui: 'Sobre o MirroLeap',
         github: 'Github',
         youtube: 'Youtube',
         website: 'Site',

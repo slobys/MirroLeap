@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="MirroLeap">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#173438"/>
+      <stop offset="1" stop-color="#092025"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a5ffe4"/>
+      <stop offset="1" stop-color="#28cba5"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#base)"/>
+  <rect x="84" y="104" width="344" height="304" rx="50" fill="none"
+        stroke="#326065" stroke-width="15"/>
+  <path d="M133 339V173L256 292L379 173V339" fill="none"
+        stroke="url(#accent)" stroke-width="40"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M362 119h51v51" fill="none" stroke="#d7fff2" stroke-width="16"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

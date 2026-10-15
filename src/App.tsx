@@ -8,15 +8,19 @@ import Header from "./components/Header";
 import SessionBehavior from "./components/SessionBehavior";
 import ShortcutsPanel from "./components/ShortcutsPanel";
 import Footer from "./components/Footer";
+import CompactDashboard from "./components/CompactDashboard";
 import ErrorBoundary from "./components/ErrorBoundary";
 import OnboardingModal from "./components/OnboardingModal";
 import ThemedModal from "./components/ThemedModal";
 import { useScrcpy } from "./hooks/useScrcpy";
 import { getVersion } from '@tauri-apps/api/app';
 import { useI18n } from "./i18n";
+import { ArrowLeft, Keyboard, MonitorPlay, Palette, Settings2, Smartphone, TerminalSquare } from 'lucide-react';
+
+type SettingsTab = 'devices' | 'mirror' | 'behavior' | 'appearance' | 'tools';
 
 function App() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const {
     devices,
     deviceModels,
@@ -82,7 +86,15 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("3.3.0");
+  const [appVersion, setAppVersion] = useState("4.6.0");
+  // Keep the daily workflow lightweight. Older saved scrcpy_* options are
+  // still read by useScrcpy, and every advanced feature remains in Settings.
+  const [view, setView] = useState<'home' | 'settings'>('home');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('mirror');
+  const openSettings = (tab: SettingsTab = 'mirror') => {
+    setSettingsTab(tab);
+    setView('settings');
+  };
   const [lastCheckedPath, setLastCheckedPath] = useState<string | undefined>(undefined);
   const [hasCheckedUpdate, setHasCheckedUpdate] = useState(false);
 
@@ -217,6 +229,18 @@ function App() {
     await runScrcpy(config);
   };
 
+  const handleStartMirror = async () => {
+    if (!activeDevice) {
+      showAlert(t('alerts.noDeviceSelectedTitle'), t('alerts.noDeviceSelectedMessage'), 'warning');
+      return;
+    }
+    // The advanced settings may previously have selected camera/desktop mode.
+    // The everyday home button ALWAYS starts screen mirroring explicitly.
+    const mirrorConfig = { ...config, device: activeDevice, sessionMode: 'mirror' };
+    setConfig(mirrorConfig);
+    await runScrcpy(mirrorConfig);
+  };
+
   const handleStop = async () => {
     if (!activeDevice) return;
     await stopScrcpy(activeDevice);
@@ -315,88 +339,120 @@ function App() {
             to { opacity: 1; transform: translateY(0); }
           }
         `}</style>
-        <div className="fixed inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none z-0"></div>
-        <div className="fixed top-[-50%] left-[-50%] w-[200%] h-[200%] bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-primary/30 via-transparent to-transparent pointer-events-none z-0"></div>
+        <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_75%_5%,var(--primary),transparent_64%)] opacity-[0.075] pointer-events-none z-0" />
 
-        <div className="relative z-10 flex flex-col h-screen transition-all duration-700">
-          <Header
-            onThemeChange={setTheme}
-            currentTheme={theme}
-            colorMode={colorMode}
-            onColorModeChange={setColorMode}
-            binaryStatus={scrcpyStatus}
-            onDownload={downloadScrcpy}
-            onSetPath={handleSetPath}
-            onResetPath={handleResetPath}
-            isDownloading={isDownloading}
-            downloadProgress={downloadProgress}
-            version={appVersion}
-          />
-
-          <div className="flex-1 overflow-y-auto flex flex-col pt-6 custom-scrollbar">
-            <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 px-6 pb-6">
-              <div className="lg:col-span-3 flex flex-col">
-                <div className="transition-all duration-700">
-                  <Sidebar
-                    devices={devices}
-                    pendingDevices={pendingDevices}
-                    deviceModels={deviceModels}
-                    deviceFriendlyNames={deviceFriendlyNames}
-                    runningDevices={runningDevices}
-                    onRefresh={handleRefresh}
-                    onKillAdb={handleKillAdb}
-                    selectedDevice={activeDevice}
-                    onSelectDevice={setActiveDevice}
-                    onPair={pairDevice}
-                    onConnect={connectDevice}
-                    onUsbToWireless={enableWirelessFromUsb}
-                    onDiagnose={diagnoseConnection}
-                    isRefreshing={isRefreshing}
-                    onFilePush={handleFileBrowse}
-                    historyDevices={historyDevices}
-                    clearHistory={clearHistory}
-                    mdnsDevices={mdnsDevices}
-                  />
+        <div className="relative z-10 flex flex-col h-screen min-h-0">
+          {view === 'home' ? (
+            <CompactDashboard
+              locale={locale}
+              version={appVersion}
+              devices={devices}
+              pendingDevices={pendingDevices}
+              deviceModels={deviceModels}
+              deviceFriendlyNames={deviceFriendlyNames}
+              runningDevices={runningDevices}
+              activeDevice={activeDevice}
+              onSelectDevice={setActiveDevice}
+              onRefresh={handleRefresh}
+              isRefreshing={isRefreshing}
+              config={config}
+              onConfigChange={setConfig}
+              onResolutionChange={(size) => {
+                if (config.sessionMode === 'mirror') {
+                  void changeMirrorResolution(activeDevice || config.device, size);
+                } else {
+                  setConfig(prev => ({ ...prev, res: size }));
+                }
+              }}
+              isSwitchingResolution={isSwitchingResolution}
+              onStart={handleStartMirror}
+              onStop={handleStop}
+              onOpenSettings={openSettings}
+              coreReady={scrcpyStatus.found}
+              onDownloadCore={downloadScrcpy}
+              isDownloading={isDownloading}
+              downloadProgress={downloadProgress}
+            />
+          ) : (
+            <section className="ml-settings flex flex-col flex-1 min-h-0" aria-label={locale.startsWith('zh') ? '设置' : 'Settings'}>
+              <div className="ml-settings-top shrink-0 px-6 pt-5 pb-3">
+                <div className="flex items-center gap-3">
+                  <button type="button" className="ml-icon-button" aria-label={locale.startsWith('zh') ? '返回首页' : 'Back to home'}
+                    onClick={() => setView('home')}><ArrowLeft size={19}/></button>
+                  <div className="min-w-0 flex-1">
+                    <h1 className="font-bold text-xl flex items-center gap-2"><Settings2 size={20} className="ml-primary"/> {locale.startsWith('zh') ? '设置与高级功能' : 'Settings & advanced features'}</h1>
+                    <p className="ml-muted text-xs mt-0.5">{locale.startsWith('zh') ? '常用功能在首页，全部专业选项在这里。' : 'Every advanced option remains available here.'}</p>
+                  </div>
+                  <span className="ml-version-pill">MirroLeap v{appVersion}</span>
+                </div>
+                <nav className="ml-settings-nav flex gap-2 overflow-x-auto custom-scrollbar mt-4 pb-1" aria-label={locale.startsWith('zh') ? '设置分类' : 'Settings categories'}>
+                  {([
+                    { id: 'mirror' as const, Icon: MonitorPlay, zh: '投屏参数', en: 'Capture' },
+                    { id: 'devices' as const, Icon: Smartphone, zh: '连接与配对', en: 'Connections' },
+                    { id: 'behavior' as const, Icon: Keyboard, zh: '行为与快捷键', en: 'Behavior' },
+                    { id: 'appearance' as const, Icon: Palette, zh: '外观与引擎', en: 'Appearance' },
+                    { id: 'tools' as const, Icon: TerminalSquare, zh: '工具与日志', en: 'Tools & logs' },
+                  ]).map(({id, Icon, zh, en}) => (
+                    <button key={id} type="button" aria-current={settingsTab === id ? 'page' : undefined}
+                      onClick={() => setSettingsTab(id)}
+                      className={'ml-settings-tab ' + (settingsTab === id ? 'ml-tab-active' : '')}>
+                      <Icon size={16}/> {locale.startsWith('zh') ? zh : en}
+                    </button>
+                  ))}
+                </nav>
+              </div>
+              <div className="ml-settings-body flex-1 overflow-y-auto custom-scrollbar px-5 pb-8 pt-4" key={settingsTab}>
+                <div className="max-w-[900px] mx-auto">
+                  {settingsTab === 'mirror' && (
+                    <ControlPanel
+                      config={config} setConfig={setConfig} onStart={handleStart}
+                      onStop={handleStop} isRunning={sessionRunning}
+                      onResolutionChange={(size) => void changeMirrorResolution(activeDevice || config.device, size)}
+                      isSwitchingResolution={isSwitchingResolution} detectedCameras={detectedCameras}
+                      renderDriverSupport={renderDriverSupport}
+                      onListOptions={(arg) => { if (activeDevice) listScrcpyOptions(activeDevice, arg); }}
+                    />
+                  )}
+                  {settingsTab === 'devices' && (
+                    <Sidebar
+                      devices={devices} pendingDevices={pendingDevices} deviceModels={deviceModels}
+                      deviceFriendlyNames={deviceFriendlyNames} runningDevices={runningDevices}
+                      onRefresh={handleRefresh} onKillAdb={handleKillAdb}
+                      selectedDevice={activeDevice} onSelectDevice={setActiveDevice}
+                      onPair={pairDevice} onConnect={connectDevice} onUsbToWireless={enableWirelessFromUsb}
+                      onDiagnose={diagnoseConnection} isRefreshing={isRefreshing}
+                      onFilePush={handleFileBrowse} historyDevices={historyDevices}
+                      clearHistory={clearHistory} mdnsDevices={mdnsDevices}
+                    />
+                  )}
+                  {settingsTab === 'behavior' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <SessionBehavior config={config} setConfig={setConfig}/>
+                      <ShortcutsPanel/>
+                    </div>
+                  )}
+                  {settingsTab === 'appearance' && (
+                    <div className="flex flex-col gap-4">
+                      <Header
+                        onThemeChange={setTheme} currentTheme={theme}
+                        colorMode={colorMode} onColorModeChange={setColorMode}
+                        binaryStatus={scrcpyStatus} onDownload={downloadScrcpy}
+                        onSetPath={handleSetPath} onResetPath={handleResetPath}
+                        isDownloading={isDownloading} downloadProgress={downloadProgress}
+                        version={appVersion}
+                      />
+                      <Footer version={appVersion}/>
+                    </div>
+                  )}
+                  {settingsTab === 'tools' && (
+                    <LogPanel logs={logs} onClear={clearLogs}
+                      onAddLog={(msg) => setLogs((prev: string[]) => [...prev.slice(-100), msg])}
+                      onRunCommand={runTerminalCommand}/>
+                  )}
                 </div>
               </div>
-
-              <div className="lg:col-span-6 flex flex-col gap-6 relative z-20">
-                <div className="relative z-30">
-                  <ControlPanel
-                    config={config}
-                    setConfig={setConfig}
-                    onStart={handleStart}
-                    onStop={handleStop}
-                    isRunning={sessionRunning}
-                    onResolutionChange={(size) => void changeMirrorResolution(activeDevice || config.device, size)}
-                    isSwitchingResolution={isSwitchingResolution}
-                    detectedCameras={detectedCameras}
-                    renderDriverSupport={renderDriverSupport}
-                    onListOptions={(arg) => {
-                      if (activeDevice) {
-                        listScrcpyOptions(activeDevice, arg);
-                      }
-                    }}
-                  />
-                </div>
-                <div className="relative z-10">
-                  <LogPanel
-                    logs={logs}
-                    onClear={clearLogs}
-                    onAddLog={(msg) => setLogs((prev: string[]) => [...prev.slice(-100), msg])}
-                    onRunCommand={runTerminalCommand}
-                  />
-                </div>
-              </div>
-
-              <div className="lg:col-span-3 flex flex-col gap-6">
-                <SessionBehavior config={config} setConfig={setConfig} />
-                <ShortcutsPanel />
-              </div>
-            </div>
-
-            <Footer version={appVersion} />
-          </div>
+            </section>
+          )}
         </div>
 
         <OnboardingModal

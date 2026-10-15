@@ -61,7 +61,7 @@ export const ar: Translations = {
         manualStep4Before: 'حدد المجلد الذي يحتوي على الملف التنفيذي',
         manualStep4Executable: 'scrcpy',
         manualStep4After: '.',
-        manualNote: 'ملاحظة: سيتذكر ScrcpyGUI هذا المسار المخصص في الجلسات القادمة.',
+        manualNote: 'ملاحظة: سيتذكر MirroLeap هذا المسار المخصص في الجلسات القادمة.',
         gotIt: 'حسنًا'
     },
     sidebar: {
@@ -156,7 +156,7 @@ export const ar: Translations = {
         graphicsRenderer: 'محرك الرسوميات',
         vsync: 'المزامنة العمودية VSync',
         vsyncHint: 'منع تمزق الشاشة',
-        vsyncTooltip: 'مزامنة عرض الإطارات مع معدل تحديث الشاشة لمنع تمزق الصورة. مفعلة افتراضيًا في Scrcpy GUI. يمكن إيقافها لتقليل تأخر الإدخال قليلاً.',
+        vsyncTooltip: 'مزامنة عرض الإطارات مع معدل تحديث الشاشة لمنع تمزق الصورة. مفعلة افتراضيًا في MirroLeap. يمكن إيقافها لتقليل تأخر الإدخال قليلاً.',
         rendererAuto: 'تلقائي',
         custom: 'مخصص',
         webcamProTip: 'نصيحة لاستخدام الهاتف ككاميرا ويب',
@@ -284,7 +284,7 @@ export const ar: Translations = {
         continueToApp: 'متابعة إلى التطبيق'
     },
     footer: {
-        aboutScrcpyGui: 'حول Scrcpy GUI',
+        aboutScrcpyGui: 'حول MirroLeap',
         github: 'GitHub',
         youtube: 'YouTube',
         website: 'الموقع الإلكتروني',
