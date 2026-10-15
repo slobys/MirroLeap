@@ -123,6 +123,7 @@ pub fn run() {
             commands::kill_adb,
             commands::run_scrcpy,
             commands::stop_scrcpy,
+            commands::device_frame_control,
             commands::recenter_scrcpy_window,
             commands::set_active_device,
             commands::download_scrcpy,

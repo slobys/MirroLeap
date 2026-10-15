@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>投屏悬浮操作栏</title>
+  <style>
+    :root { color-scheme: dark; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%; padding: 0; margin: 0; overflow: hidden;
+      background: transparent !important; color: #e4e7ee;
+      -webkit-user-select: none; user-select: none;
+    }
+    .rail {
+      height: 100%; width: 100%;
+      padding: 6px 4px;
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      border-radius: 15px;
+      background: rgba(13, 17, 24, .96);
+      border: 1px solid rgba(160, 168, 180, .29);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, .34), inset 1px 0 rgba(255,255,255,.07);
+    }
+    button {
+      display: grid; place-items: center;
+      height: 40px; width: 38px; padding: 0;
+      background: transparent; color: #c6cbd5;
+      border: 0; border-radius: 10px;
+      cursor: pointer; flex: 1 1 0;
+      touch-action: none;
+      -webkit-user-select: none; user-select: none;
+      transition: background .13s, color .13s;
+    }
+    button:hover, button:focus-visible {
+      background: rgba(116, 133, 166, .3);
+      color: #fff; outline: 1px solid rgba(205, 211, 224, .2);
+    }
+    button:active { background: rgba(155, 175, 200, .4); }
+    button.danger:hover, button.danger:focus-visible { background: rgba(190, 55, 65, .45); }
+    button svg { height: 19px; width: 19px; stroke-width: 1.8; }
+    #drag { cursor: grab; }
+    #drag:active { cursor: grabbing; }
+    #status { display: none; }
+  </style>
+</head>
+<body>
+  <div class="rail" role="toolbar" aria-label="投屏窗口操作">
+    <button id="drag" aria-label="按住拖动投屏窗口" title="按住拖动 / Drag">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 2v20M2 12h20M9 5l3-3 3 3M9 19l3 3 3-3M5 9l-3 3 3 3M19 9l3 3-3 3"/>
+      </svg>
+    </button>
+    <button id="minimize" aria-label="最小化投屏窗口" title="最小化 / Minimize">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 18h14"/>
+      </svg>
+    </button>
+    <button id="close" class="danger" aria-label="关闭投屏窗口" title="关闭 / Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+  </div>
+  <div id="status" role="status" aria-live="polite"></div>
+  <script>
+    // Tauri injects the API (withGlobalTauri=true). The Rust command checks
+    // the caller's phone-controls-* window label and limits actions to its own
+    // active scrcpy process; an ordinary page cannot select another device.
+    const invoke = (action) => {
+      const handler = window.__TAURI__?.core?.invoke;
+      if (!handler) return Promise.reject(new Error('Native controls unavailable'));
+      return handler('device_frame_control', { action });
+    };
+    const status = document.getElementById('status');
+    const act = (kind) => {
+      invoke(kind).catch(error => { status.textContent = String(error); });
+    };
+    document.getElementById('drag').addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      act('drag'); // Windows keeps moving the SDL window until left mouse up.
+    });
+    document.getElementById('minimize').addEventListener('click', () => act('minimize'));
+    document.getElementById('close').addEventListener('click', () => act('close'));
+  </script>
+</body>
+</html>

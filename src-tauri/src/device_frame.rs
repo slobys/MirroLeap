@@ -1,36 +1,63 @@
-//! Windows-only click-through device frame around the *live* scrcpy SDL window.
+//! Windows-only iPhone-style frame, rounded SDL video corners and hover actions.
 //!
-//! This is NOT a screenshot or a second video stream: scrcpy continues to draw
-//! and receive mouse/keyboard events unmodified. A small transparent WebView2
-//! window paints only a thin, SVG-based black titanium case and side buttons.
-//! The whole overlay ignores mouse events so clicks reach scrcpy below it.
+//! Three independent windows:
+//!   - scrcpy's SDL window: owns real-time video, keyboard and mouse input.
+//!   - transparent, click-through SVG shell: owns visual bezel only.
+//!   - tiny, interactive hover toolbar: drag, minimize, close.
 //!
-//! The frame stays in the normal Windows z-order (not globally TOPMOST) to
-//! avoid obscuring unrelated applications. It follows the SDL client rect,
-//! automatically hides while minimized/maximized/landscape, and closes with the session.
+//! The toolbar is a separate native window because making the main full-screen
+//! overlay mouse-active would intercept scrcpy taps and swipes.
 
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
-use windows::Win32::Graphics::Gdi::ClientToScreen;
+use windows::Win32::Graphics::Gdi::{
+    ClientToScreen, CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, GetForegroundWindow, IsIconic, IsWindowVisible, IsZoomed, SetWindowPos,
-    HWND_TOP, SWP_NOACTIVATE, SWP_NOZORDER,
+    GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowRect,
+    IsIconic, IsWindowVisible, IsZoomed, SetForegroundWindow, SetWindowPos, ShowWindow,
+    HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+    SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
 };
 
-use crate::frame_layout::{expand_screen, FrameRect, ScreenRect};
+use crate::frame_layout::{
+    expand_screen, is_frame_edge_hover, round_clip_radius, toolbar_position,
+    FrameRect, ScreenRect, TOOLBAR_HEIGHT, TOOLBAR_WIDTH,
+};
 use crate::ScrcpyState;
 
-fn label(device: &str) -> String {
-    // A stable short label avoids special characters in network/mDNS serials.
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    device.hash(&mut hasher);
-    format!("phone-frame-{:016x}", hasher.finish())
+static ACTIVE_DRAGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn drags() -> &'static Mutex<HashSet<String>> {
+    ACTIVE_DRAGS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-fn screen_rect(pid: u32) -> Option<(HWND, FrameRect)> {
+fn is_dragging(device: &str) -> bool {
+    drags().lock().map(|items| items.contains(device)).unwrap_or(false)
+}
+
+fn hashed_label(prefix: &str, device: &str) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    device.hash(&mut hasher);
+    format!("{prefix}-{:016x}", hasher.finish())
+}
+
+fn label(device: &str) -> String { hashed_label("phone-frame", device) }
+fn toolbar_label(device: &str) -> String { hashed_label("phone-controls", device) }
+
+struct CapturedWindow {
+    hwnd: HWND,
+    frame: FrameRect,
+    screen: ScreenRect,
+}
+
+fn capture_screen(pid: u32) -> Option<CapturedWindow> {
     let hwnd = crate::commands::find_window_by_pid(pid)?;
     if !unsafe { IsWindowVisible(hwnd) }.as_bool()
         || unsafe { IsIconic(hwnd) }.as_bool()
@@ -40,41 +67,103 @@ fn screen_rect(pid: u32) -> Option<(HWND, FrameRect)> {
     }
 
     let mut rect = RECT::default();
-    if unsafe { GetClientRect(hwnd, &mut rect) }.is_err() {
-        return None;
-    }
+    if unsafe { GetClientRect(hwnd, &mut rect) }.is_err() { return None; }
     let mut origin = POINT::default();
-    if !unsafe { ClientToScreen(hwnd, &mut origin) }.as_bool() {
-        return None;
-    }
-    // This first skin is deliberately portrait-only. Landscape shows the
-    // unmodified scrcpy window; rotating back automatically restores the shell.
-    let frame = expand_screen(ScreenRect {
+    if !unsafe { ClientToScreen(hwnd, &mut origin) }.as_bool() { return None; }
+
+    let screen = ScreenRect {
         x: origin.x,
         y: origin.y,
         width: rect.right - rect.left,
         height: rect.bottom - rect.top,
-    })?;
-    Some((hwnd, frame))
+    };
+    // Landscape falls back to the unmodified scrcpy video.
+    let frame = expand_screen(screen)?;
+    Some(CapturedWindow { hwnd, frame, screen })
+}
+
+/// The SVG only rounds its *transparent opening*. The scrcpy SDL window would
+/// still paint square pixels underneath those corners. Apply the corresponding
+/// ellipse to the native SDL window itself, relative to the outer HWND rect.
+/// This fixes the four exposed rectangular screen corners seen in v4.3.1.
+fn apply_native_corner_clip(hwnd: HWND, screen: ScreenRect) -> Result<(), String> {
+    let mut outer = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut outer) }
+        .map_err(|e| format!("Cannot read scrcpy window boundary: {e}"))?;
+
+    let (rx, ry) = round_clip_radius(screen.width, screen.height)
+        .ok_or("Invalid scrcpy client dimensions for rounded corners")?;
+    let left = screen.x - outer.left;
+    let top = screen.y - outer.top;
+    let right = left + screen.width;
+    let bottom = top + screen.height;
+
+    let region = unsafe {
+        CreateRoundRectRgn(left, top, right + 1, bottom + 1, 2 * rx, 2 * ry)
+    };
+    if region.0.is_null() {
+        return Err("Windows could not create a rounded region".into());
+    }
+    let ok = unsafe { SetWindowRgn(hwnd, Some(region), true) };
+    if ok == 0 {
+        // Windows takes ownership *only on success*.
+        let _ = unsafe { DeleteObject(HGDIOBJ(region.0)) };
+        return Err("Windows refused the rounded scrcpy region".into());
+    }
+    Ok(())
+}
+
+fn reset_native_corner_clip(hwnd: HWND) {
+    // A NULL region restores the original, complete HWND area. Important when
+    // rotating into landscape or leaving the framed preview.
+    let _ = unsafe { SetWindowRgn(hwnd, None, true) };
+}
+
+fn pointer() -> Option<(i32, i32)> {
+    let mut p = POINT::default();
+    if unsafe { GetCursorPos(&mut p) }.is_ok() { Some((p.x, p.y)) } else { None }
+}
+
+fn virtual_desktop() -> ScreenRect {
+    ScreenRect {
+        x: unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) },
+        y: unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) },
+        width: unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) }.max(TOOLBAR_WIDTH),
+        height: unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) }.max(TOOLBAR_HEIGHT),
+    }
+}
+
+fn inside(x: i32, y: i32, rect: ScreenRect, margin: i32) -> bool {
+    x >= rect.x - margin && x < rect.x + rect.width + margin
+        && y >= rect.y - margin && y < rect.y + rect.height + margin
 }
 
 fn place_overlay(overlay: &WebviewWindow, video: HWND, frame: FrameRect) -> Result<(), String> {
-    let shell = overlay.hwnd().map_err(|e| format!("Missing frame window handle: {e}"))?;
-    // Scrcpy receives keyboard focus and ordinary mouse input. When it is the
-    // foreground window, raise the click-through shell *without activating it*.
-    // Otherwise preserve z-order so other applications may cover both windows.
+    let shell = overlay.hwnd().map_err(|e| e.to_string())?;
     let foreground = unsafe { GetForegroundWindow() } == video;
     let order = if foreground { Some(HWND_TOP) } else { None };
     let flags = if foreground { SWP_NOACTIVATE } else { SWP_NOACTIVATE | SWP_NOZORDER };
-
     unsafe { SetWindowPos(shell, order, frame.x, frame.y, frame.width, frame.height, flags) }
-        .map_err(|e| format!("Could not position device frame: {e}"))
+        .map_err(|e| format!("Could not position device shell: {e}"))
 }
 
-async fn follow(app: AppHandle, device: String, overlay: WebviewWindow) {
-    let mut was_visible = false;
-    let mut last_rect: Option<FrameRect> = None;
-    let mut ticker = tokio::time::interval(Duration::from_millis(60));
+fn place_toolbar(toolbar: &WebviewWindow, rect: ScreenRect) -> Result<(), String> {
+    let hwnd = toolbar.hwnd().map_err(|e| e.to_string())?;
+    unsafe {
+        SetWindowPos(hwnd, Some(HWND_TOP), rect.x, rect.y, rect.width, rect.height, SWP_NOACTIVATE)
+    }.map_err(|e| format!("Could not position hover controls: {e}"))
+}
+
+async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar: WebviewWindow) {
+    let mut shell_visible = false;
+    let mut controls_visible = false;
+    let mut previous_frame: Option<FrameRect> = None;
+    let mut last_screen_size: Option<(u32, i32, i32)> = None;
+    let mut clipped_pid: Option<u32> = None;
+    let mut controls_rect: Option<ScreenRect> = None;
+    let mut controls_y_offset: Option<i32> = None;
+    let mut last_nearby: Option<Instant> = None;
+    let mut ticker = tokio::time::interval(Duration::from_millis(50));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
@@ -82,41 +171,188 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow) {
         let pid = app.state::<ScrcpyState>()
             .processes.lock().ok()
             .and_then(|processes| processes.get(&device).and_then(|child| child.id()));
-        let Some(pid) = pid else { break; };
+        let Some(pid) = pid else { break };
 
-        let Some((scrcpy_hwnd, rect)) = screen_rect(pid) else {
-            if was_visible {
-                let _ = overlay.hide();
-                was_visible = false;
-                last_rect = None;
+        let Some(captured) = capture_screen(pid) else {
+            // On landscape, maximize or minimize, restore a rectangular native
+            // window and hide the portrait-only frame. Never interfere with
+            // the underlying stream or its ADB device state.
+            if clipped_pid == Some(pid) {
+                if let Some(hwnd) = crate::commands::find_window_by_pid(pid) {
+                    reset_native_corner_clip(hwnd);
+                }
+                clipped_pid = None;
+                last_screen_size = None;
             }
+            if shell_visible { let _ = overlay.hide(); shell_visible = false; }
+            if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
+            previous_frame = None;
+            controls_rect = None;
+            controls_y_offset = None;
+            last_nearby = None;
             continue;
         };
 
-        if last_rect != Some(rect) || unsafe { GetForegroundWindow() } == scrcpy_hwnd {
-            if place_overlay(&overlay, scrcpy_hwnd, rect).is_err() {
+        let hwnd = captured.hwnd;
+        let frame = captured.frame;
+        let screen = captured.screen;
+
+        if last_screen_size != Some((pid, screen.width, screen.height)) {
+            if let Err(error) = apply_native_corner_clip(hwnd, screen) {
+                let _ = app.emit("scrcpy-log", format!("[FRAME] Rounded display clipping unavailable: {error}"));
                 break;
             }
-            last_rect = Some(rect);
+            last_screen_size = Some((pid, screen.width, screen.height));
+            clipped_pid = Some(pid);
         }
-        if !was_visible {
+
+        if previous_frame != Some(frame) || unsafe { GetForegroundWindow() } == hwnd {
+            if place_overlay(&overlay, hwnd, frame).is_err() { break; }
+            previous_frame = Some(frame);
+        }
+        if !shell_visible {
             if overlay.show().is_err() { break; }
-            was_visible = true;
-            // .show() may raise scrcpy above the overlay. Reorder on next tick.
-            last_rect = None;
+            shell_visible = true;
+            previous_frame = None;
+        }
+
+        // Keep phone interactions native. Detect edge hover at the OS level,
+        // then show ONLY a small interactive popover to the right of the phone.
+        let cursor = pointer();
+        let toolbar_hwnd = toolbar.hwnd().ok();
+        let foreground = unsafe { GetForegroundWindow() };
+        let active = foreground == hwnd || toolbar_hwnd == Some(foreground);
+        let dragging = is_dragging(&device);
+        let close_to_edge = cursor.map(|(x,y)| is_frame_edge_hover(x,y,frame)).unwrap_or(false);
+        let inside_controls = match (cursor, controls_rect) {
+            (Some((x,y)), Some(r)) => inside(x,y,r,12),
+            _ => false,
+        };
+        let wanted = active && (close_to_edge || inside_controls || dragging);
+        if wanted { last_nearby = Some(Instant::now()); }
+        let lingering = last_nearby.map(|t| t.elapsed() < Duration::from_millis(420))
+            .unwrap_or(false);
+        let show_controls = active && (wanted || lingering);
+
+        if show_controls {
+            if controls_rect.is_none() {
+                let desktop = virtual_desktop();
+                let y = cursor.map(|(_,y)| y).unwrap_or(frame.y + 80);
+                let rect = toolbar_position(frame, y, desktop);
+                controls_y_offset = Some(rect.y - frame.y);
+                controls_rect = Some(rect);
+            }
+            // Follow the *moving phone*, but don't make the toolbar chase the
+            // pointer vertically while the user tries to press a button.
+            if let Some(mut rect) = controls_rect {
+                let desktop = virtual_desktop();
+                let left_gap = frame.x - 8 - TOOLBAR_WIDTH;
+                let right_gap = frame.x + frame.width + 8;
+                let prefer_right = right_gap + TOOLBAR_WIDTH <= desktop.x + desktop.width;
+                rect.x = if prefer_right { right_gap } else { left_gap };
+                rect.x = rect.x.clamp(desktop.x, (desktop.x+desktop.width-rect.width).max(desktop.x));
+                rect.y = (frame.y + controls_y_offset.unwrap_or(rect.y - frame.y))
+                    .clamp(desktop.y, (desktop.y + desktop.height - rect.height).max(desktop.y));
+                if place_toolbar(&toolbar, rect).is_err() { break; }
+                controls_rect = Some(rect);
+            }
+            if !controls_visible {
+                if toolbar.show().is_err() { break; }
+                controls_visible = true;
+            }
+        } else {
+            if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
+            controls_rect = None;
+            controls_y_offset = None;
         }
     }
 
+    if let Some(pid) = clipped_pid {
+        if let Some(hwnd) = crate::commands::find_window_by_pid(pid) {
+            reset_native_corner_clip(hwnd);
+        }
+    }
+    let _ = toolbar.close();
     let _ = overlay.close();
 }
 
-pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), String> {
-    let name = label(device);
-    if let Some(existing) = app.get_webview_window(&name) {
-        let _ = existing.close();
+fn device_for_controls(app: &AppHandle, caller: &tauri::Window) -> Result<String, String> {
+    let processes = app.state::<ScrcpyState>();
+    let guard = processes.processes.lock().map_err(|e| e.to_string())?;
+    guard.keys()
+        .find(|device| toolbar_label(device) == caller.label())
+        .cloned()
+        .ok_or_else(|| "This control bar is not attached to an active scrcpy window".into())
+}
+
+/// Called only by the dedicated phone-controls-* toolbar window.
+/// The full-screen visual overlay cannot receive pointer events by design.
+pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<(), String> {
+    let device = device_for_controls(app, caller)?;
+    let pid = app.state::<ScrcpyState>().processes.lock()
+        .map_err(|e| e.to_string())?
+        .get(&device).and_then(|child| child.id())
+        .ok_or("scrcpy session has ended")?;
+    let hwnd = crate::commands::find_window_by_pid(pid).ok_or("scrcpy window is not visible")?;
+
+    match action {
+        "minimize" => {
+            unsafe { ShowWindow(hwnd, SW_MINIMIZE); }
+            Ok(())
+        }
+        "close" => crate::commands::stop_scrcpy(app.state::<ScrcpyState>(), device).await,
+        "drag" => begin_drag(device, hwnd),
+        _ => Err("Unsupported device-frame action".into()),
+    }
+}
+
+fn begin_drag(device: String, hwnd: HWND) -> Result<(), String> {
+    let cursor = pointer().ok_or("Could not read mouse position")?;
+    let mut rect = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut rect) }.map_err(|e| e.to_string())?;
+    {
+        let mut pending = drags().lock().map_err(|e| e.to_string())?;
+        if !pending.insert(device.clone()) {
+            return Ok(());
+        }
     }
 
-    let overlay = WebviewWindowBuilder::new(app, name, WebviewUrl::App("frame.html".into()))
+    // HWND is kept as an integer across await boundaries (Win32 HWND wrappers
+    // carry pointer types that must not be held across Send async suspension).
+    let hwnd_value = hwnd.0 as usize;
+    let dx = cursor.0 - rect.left;
+    let dy = cursor.1 - rect.top;
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(12));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        for _ in 0..2500 { // hard stop after 30 seconds even if mouse state fails
+            interval.tick().await;
+            let held = (unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } as u16 & 0x8000) != 0;
+            if !held { break; }
+            let Some((x,y)) = pointer() else { continue };
+            let video = HWND(hwnd_value as *mut _);
+            let _ = unsafe {
+                SetWindowPos(video, None, x-dx, y-dy, 0, 0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+            };
+        }
+        if let Ok(mut pending) = drags().lock() { pending.remove(&device); }
+        // Return keyboard focus to the live video when the mouse is released.
+        let video = HWND(hwnd_value as *mut _);
+        let _ = unsafe { SetForegroundWindow(video) };
+    });
+    Ok(())
+}
+
+pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), String> {
+    let shell_name = label(device);
+    let controls_name = toolbar_label(device);
+    if let Some(old) = app.get_webview_window(&shell_name) { let _ = old.close(); }
+    if let Some(old) = app.get_webview_window(&controls_name) { let _ = old.close(); }
+
+    let overlay = WebviewWindowBuilder::new(
+        app, shell_name, WebviewUrl::App("frame.html".into())
+    )
         .title("Device frame")
         .transparent(true)
         .decorations(false)
@@ -129,32 +365,55 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
         .visible(false)
         .inner_size(430.0, 900.0)
         .build()
-        .map_err(|e| format!("Unable to create phone frame overlay: {e}"))?;
+        .map_err(|e| format!("Cannot create phone frame: {e}"))?;
 
     if let Err(error) = overlay.set_ignore_cursor_events(true) {
         let _ = overlay.close();
-        return Err(format!("Unable to enable click-through frame: {error}"));
+        return Err(format!("Frame is not click-through: {error}"));
     }
 
-    tokio::spawn(follow(app.clone(), device.to_owned(), overlay));
+    let toolbar = match WebviewWindowBuilder::new(
+        app, controls_name, WebviewUrl::App("phone-controls.html".into())
+    )
+        .title("Phone controls")
+        .transparent(true)
+        .decorations(false)
+        .shadow(false)
+        .resizable(false)
+        .skip_taskbar(true)
+        .always_on_top(always_on_top)
+        .visible(false)
+        .inner_size(TOOLBAR_WIDTH as f64, TOOLBAR_HEIGHT as f64)
+        .build()
+    {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = overlay.close();
+            return Err(format!("Cannot create phone controls: {e}"));
+        }
+    };
+
+    tokio::spawn(follow(app.clone(), device.to_owned(), overlay, toolbar));
     Ok(())
 }
 
 pub fn close(app: &AppHandle, device: &str) {
-    if let Some(overlay) = app.get_webview_window(&label(device)) {
-        let _ = overlay.close();
-    }
+    if let Some(shell) = app.get_webview_window(&label(device)) { let _ = shell.close(); }
+    if let Some(toolbar) = app.get_webview_window(&toolbar_label(device)) { let _ = toolbar.close(); }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn labels_are_stable_and_safe_for_network_serials() {
+    fn both_window_labels_are_stable_and_unique() {
         let a = label("192.168.2.226:5555");
+        let b = toolbar_label("192.168.2.226:5555");
         assert!(a.starts_with("phone-frame-"));
+        assert!(b.starts_with("phone-controls-"));
+        assert_ne!(a, b);
         assert_eq!(a, label("192.168.2.226:5555"));
-        assert_ne!(a, label("adb-phone._adb-tls-connect._tcp"));
-        assert_eq!(a.len(), "phone-frame-".len() + 16);
+        assert_ne!(b, toolbar_label("192.168.2.226:43001"));
     }
 }

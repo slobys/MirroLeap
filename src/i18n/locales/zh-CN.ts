@@ -226,7 +226,7 @@ export const zhCN: Translations = {
         borderless: '无边框',
         borderlessTooltip: '启动 scrcpy 时不显示窗口边框。窗口位置会在会话间记住。移动窗口：Windows 上按 Ctrl+Alt+Shift+W，GNOME/KDE 上用 Super/Meta+拖动。如果窗口跑到屏幕外，按 Ctrl+Alt+Shift+C 可将其重新居中。',
         deviceFrame: 'iPhone 风格·黑钛窄边框',
-        deviceFrameTooltip: '仅 Windows：超窄黑钛金属外框，中间为实时可操作的安卓投屏。不添加假刘海、灵动岛或 iOS 状态栏。优先支持竖屏，横屏保留普通投屏；Ctrl+Alt+Shift+W 移动，Ctrl+Alt+Shift+C 居中。',
+        deviceFrameTooltip: '仅 Windows：真正裁剪 scrcpy 实时画面的四个圆角，杜绝方角露出。鼠标移到手机边缘，自动出现拖动、最小化、关闭按钮；按住四方向箭头拖动，松开结束。最小化后可从任务栏或 Alt+Tab 恢复。原有 Ctrl+Alt+Shift+W / C 快捷键仍可用。',
         rememberWindowPosition: '记住窗口位置',
         rememberWindowPositionTooltip: '在上次的位置重新打开镜像窗口。如果你经常切换分辨率，建议关闭此项，否则可能打乱已保存的位置。如果窗口跑到屏幕外，按 Ctrl+Alt+Shift+C 可将其重新居中。',
         recordFeed: '录制画面',

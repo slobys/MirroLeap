@@ -226,7 +226,7 @@ export const zhTW: Translations = {
         borderless: '無邊框',
         borderlessTooltip: '無視窗邊框模式。視窗位置會在工作階段之間記住。移動視窗：Windows 上按 Ctrl+Alt+Shift+W，GNOME/KDE 上用 Super/Meta+拖曳。如果視窗跑到螢幕外，按 Ctrl+Alt+Shift+C 可將其重新置中。',
         deviceFrame: 'iPhone 風格·黑鈦窄邊框',
-        deviceFrameTooltip: '僅 Windows：超窄黑鈦金屬外框，中央仍是真實安卓畫面。沒有假瀏海、動態島或 iOS 狀態列。優先支援直向，橫向保留一般投影；Ctrl+Alt+Shift+W 移動，Ctrl+Alt+Shift+C 置中。',
+        deviceFrameTooltip: '僅 Windows：裁切 scrcpy 即時畫面的四個圓角，避免方角外露。游標移到機身邊緣，會自動顯示拖曳、最小化與關閉按鈕；按住四向箭頭拖曳，放開結束。可由工作列或 Alt+Tab 還原最小化視窗。',
         rememberWindowPosition: '記住視窗位置',
         rememberWindowPositionTooltip: '在上次的位置重新開啟鏡像視窗。如果你經常切換解析度，建議關閉此項，否則可能打亂已儲存的位置。如果視窗跑到螢幕外，按 Ctrl+Alt+Shift+C 可將其重新置中。',
         recordFeed: '錄影',
