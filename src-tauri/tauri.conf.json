@@ -17,10 +17,12 @@
         "width": 1200,
         "height": 890,
         "visible": false,
-        "resizable": false,
+        "resizable": true,
         "center": true,
         "transparent": false,
-        "decorations": true
+        "decorations": true,
+        "minWidth": 900,
+        "minHeight": 650
       },
       {
         "label": "splashscreen",
