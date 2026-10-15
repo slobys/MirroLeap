@@ -61,9 +61,90 @@ pub fn expand_screen(screen: ScreenRect) -> Option<FrameRect> {
     })
 }
 
+
+pub const TOOLBAR_WIDTH: i32 = 48;
+pub const TOOLBAR_HEIGHT: i32 = 146;
+pub const TOOLBAR_GAP: i32 = 8;
+
+/// Expected radius of the SVG inner corner measured in physical client pixels.
+/// The SVG transparent aperture uses rx=57 in the 1000x2150 design viewBox.
+pub fn round_clip_radius(video_width: i32, video_height: i32) -> Option<(i32, i32)> {
+    if video_width < 80 || video_height < 80 { return None; }
+    let rx = ((video_width as f64) * 57.0 / INNER_WIDTH).round() as i32;
+    let ry = ((video_height as f64) * 57.0 / INNER_HEIGHT).round() as i32;
+    Some((rx.clamp(4, video_width / 3), ry.clamp(4, video_height / 3)))
+}
+
+/// Hover near the right/left bezel, or the top edge; the controller never
+/// covers the live video when not requested.
+pub fn is_frame_edge_hover(x: i32, y: i32, frame: FrameRect) -> bool {
+    let within_y = y >= frame.y && y <= frame.y + frame.height;
+    let within_x = x >= frame.x && x <= frame.x + frame.width;
+    let on_side = within_y && (
+        (x >= frame.x - 10 && x <= frame.x + 38)
+            || (x >= frame.x + frame.width - 38 && x <= frame.x + frame.width + 10)
+    );
+    let on_top = within_x && y >= frame.y - 10 && y <= frame.y + 32;
+    on_side || on_top
+}
+
+/// Prefer a non-overlapping right-side popover, fall back to the left if the
+/// device is too close to the desktop edge. Clamp on multi-monitor desktops.
+pub fn toolbar_position(frame: FrameRect, cursor_y: i32, desktop: ScreenRect) -> ScreenRect {
+    let bounds_right = desktop.x + desktop.width;
+    let right = frame.x + frame.width + TOOLBAR_GAP;
+    let left = frame.x - TOOLBAR_GAP - TOOLBAR_WIDTH;
+    let fits_right = right + TOOLBAR_WIDTH <= bounds_right;
+    let requested_x = if fits_right { right } else { left };
+    let max_x = (bounds_right - TOOLBAR_WIDTH).max(desktop.x);
+    let max_y = (desktop.y + desktop.height - TOOLBAR_HEIGHT).max(desktop.y);
+    ScreenRect {
+        x: requested_x.clamp(desktop.x, max_x),
+        y: (cursor_y - TOOLBAR_HEIGHT / 2).clamp(desktop.y, max_y),
+        width: TOOLBAR_WIDTH,
+        height: TOOLBAR_HEIGHT,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rounded_clip_matches_inner_svg_corner_in_physical_pixels() {
+        let (rx, ry) = round_clip_radius(540, 1200).unwrap();
+        assert!(rx >= 30 && rx <= 35);
+        assert!(ry >= 30 && ry <= 35);
+        assert!(round_clip_radius(0, 100).is_none());
+    }
+
+    #[test]
+    fn toolbar_appears_at_edge_and_stays_outside_video() {
+        let phone = expand_screen(ScreenRect { x: 200, y: 30, width: 450, height: 940 }).unwrap();
+        let desktop = ScreenRect { x: 0, y: 0, width: 1920, height: 1080 };
+        assert!(is_frame_edge_hover(phone.x + phone.width - 2, 450, phone));
+        assert!(is_frame_edge_hover(phone.x + 120, phone.y + 4, phone));
+        assert!(!is_frame_edge_hover(phone.x + 225, 450, phone));
+        let ctrl = toolbar_position(phone, 450, desktop);
+        assert!(ctrl.x >= phone.x + phone.width);
+        assert!(ctrl.y >= 0 && ctrl.y + ctrl.height <= 1080);
+    }
+
+    #[test]
+    fn toolbar_falls_back_to_left_on_rightmost_monitor() {
+        let phone = expand_screen(ScreenRect { x: 1450, y: 100, width: 440, height: 900 }).unwrap();
+        let desktop = ScreenRect { x: 0, y: 0, width: 1920, height: 1080 };
+        let ctrl = toolbar_position(phone, 220, desktop);
+        assert!(ctrl.x + ctrl.width <= phone.x);
+    }
+
+    #[test]
+    fn toolbar_clamps_to_negative_origin_virtual_desktop() {
+        let phone = expand_screen(ScreenRect { x: -650, y: -80, width: 450, height: 900 }).unwrap();
+        let desktop = ScreenRect { x: -1920, y: -200, width: 3840, height: 1280 };
+        let ctrl = toolbar_position(phone, -195, desktop);
+        assert!(ctrl.x >= -1920 && ctrl.y >= -200);
+    }
 
     #[test]
     fn narrow_bezel_aligns_sdl_client_for_portrait() {
