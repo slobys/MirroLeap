@@ -40,6 +40,15 @@
       cursor: crosshair;
       touch-action: none;
     }
+    /* Landscape is the same black titanium SVG rotated 90 degrees.
+       The Canvas hole is now x=18,y=18,w=2114,h=964 in a 2150x1000
+       viewBox. Both percentages must match the Rust Win32 layout. */
+    html[data-orientation="landscape"] #annotation {
+      left: .8372093023255814%;
+      top: 1.8%;
+      width: 98.32558139534883%;
+      height: 96.4%;
+    }
     body.inking #annotation { pointer-events: auto; }
   </style>
 </head>
@@ -139,6 +148,32 @@
 
     // Native toolbar controls this API via WebviewWindow.eval(), so the
     // click-through drawing overlay needs no additional Tauri capabilities.
+    // Rust detects actual SDL client orientation and asks this same overlay
+    // window to swap skins without restarting scrcpy or losing keyboard focus.
+    // Pixel/ellipse geometry is handled natively in frame_layout.rs.
+    window.scrcpyFrame = Object.freeze({
+      setOrientation(orientation) {
+        const value = orientation === 'landscape' ? 'landscape' : 'portrait';
+        const changed = document.documentElement.dataset.orientation !== value;
+        document.documentElement.dataset.orientation = value;
+        const asset = '/device-frame/iphone-black-' + value + '.svg';
+        const img = document.getElementById('device-frame');
+        if (img.getAttribute('src') !== asset) img.setAttribute('src', asset);
+        if (changed) {
+          // Existing strokes are portrait-normalized and would drift on
+          // rotation. Clear them; the native pen can remain enabled.
+          drawing = null;
+          strokes.length = 0;
+          redraw();
+          requestAnimationFrame(fit);
+        }
+        return value;
+      },
+      current() {
+        return document.documentElement.dataset.orientation || 'portrait';
+      }
+    });
+
     window.scrcpyInk = Object.freeze({
       // The native control bar must receive an explicit evaluated result before
       // enabling hit-testing. A queued window.eval() by itself is NOT proof

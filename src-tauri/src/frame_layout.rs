@@ -5,7 +5,7 @@
 //! viewBox: 1000 x 2150; transparent aperture: x=18 y=18 w=964 h=2114.
 //! The insets are independent in X/Y to accommodate different Android screen
 //! ratios without leaving a thick black gap or drifting at high Windows DPI.
-//! Landscape video is intentionally left untouched in this portrait-first skin.
+//! A rotated SVG skin and swapped X/Y aperture ratios also support landscape video.
 
 pub const ARTBOARD_WIDTH: f64 = 1000.0;
 pub const ARTBOARD_HEIGHT: f64 = 2150.0;
@@ -13,6 +13,17 @@ pub const INNER_X: f64 = 18.0;
 pub const INNER_Y: f64 = 18.0;
 pub const INNER_WIDTH: f64 = ARTBOARD_WIDTH - 2.0 * INNER_X;
 pub const INNER_HEIGHT: f64 = ARTBOARD_HEIGHT - 2.0 * INNER_Y;
+pub const LANDSCAPE_ARTBOARD_WIDTH: f64 = ARTBOARD_HEIGHT;
+pub const LANDSCAPE_ARTBOARD_HEIGHT: f64 = ARTBOARD_WIDTH;
+pub const LANDSCAPE_INNER_WIDTH: f64 = INNER_HEIGHT;
+pub const LANDSCAPE_INNER_HEIGHT: f64 = INNER_WIDTH;
+
+/// Video rotation follows the actual SDL client dimensions; no guess from the
+/// phone model and no forced scrcpy video restart.
+pub fn is_landscape(video_width: i32, video_height: i32) -> bool {
+    video_width > video_height
+}
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScreenRect {
@@ -33,10 +44,9 @@ pub struct FrameRect {
 }
 
 pub fn expand_screen(screen: ScreenRect) -> Option<FrameRect> {
-    // Unsupported landscape / unreasonably small or large Win32 client rects:
-    // hide the decoration, but keep scrcpy itself running.
+    // Reject only invalid geometry. A sideways Android video uses the
+    // landscape.svg artboard and keeps the same native SDL stream.
     if screen.width < 80 || screen.height < 80
-        || screen.width >= screen.height
         || screen.width > 10000 || screen.height > 10000
     {
         return None;
@@ -46,8 +56,13 @@ pub fn expand_screen(screen: ScreenRect) -> Option<FrameRect> {
     //   inset_x / (video_width + 2*inset_x) = INNER_X / ARTBOARD_WIDTH
     // so the SVG transparent hole lies on the SDL client, even when the
     // Android device differs from the SVG's design aspect ratio.
-    let inset_x = ((screen.width as f64) * INNER_X / INNER_WIDTH).round() as i32;
-    let inset_y = ((screen.height as f64) * INNER_Y / INNER_HEIGHT).round() as i32;
+    let (inner_width, inner_height) = if is_landscape(screen.width, screen.height) {
+        (LANDSCAPE_INNER_WIDTH, LANDSCAPE_INNER_HEIGHT)
+    } else {
+        (INNER_WIDTH, INNER_HEIGHT)
+    };
+    let inset_x = ((screen.width as f64) * INNER_X / inner_width).round() as i32;
+    let inset_y = ((screen.height as f64) * INNER_Y / inner_height).round() as i32;
     let width = screen.width.checked_add(inset_x.checked_mul(2)?)?;
     let height = screen.height.checked_add(inset_y.checked_mul(2)?)?;
 
@@ -62,9 +77,9 @@ pub fn expand_screen(screen: ScreenRect) -> Option<FrameRect> {
 }
 
 
-pub const TOOLBAR_WIDTH: i32 = 48;
-pub const TOOLBAR_HEIGHT: i32 = 194;
-pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 434;
+pub const TOOLBAR_WIDTH: i32 = 62;
+pub const TOOLBAR_HEIGHT: i32 = 270;
+pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 540;
 pub const TOOLBAR_GAP: i32 = 8;
 
 /// Ellipse radii for the REAL SDL client region, in physical screen pixels.
@@ -80,8 +95,13 @@ pub const TOOLBAR_GAP: i32 = 8;
 pub const NATIVE_CORNER_OVERSCAN_PX: i32 = 3;
 pub fn native_clip_radius(video_width: i32, video_height: i32) -> Option<(i32, i32)> {
     if video_width < 80 || video_height < 80 { return None; }
-    let rx = ((video_width as f64) * 57.0 / INNER_WIDTH).round() as i32;
-    let ry = ((video_height as f64) * 57.0 / INNER_HEIGHT).round() as i32;
+    let (inner_width, inner_height) = if is_landscape(video_width, video_height) {
+        (LANDSCAPE_INNER_WIDTH, LANDSCAPE_INNER_HEIGHT)
+    } else {
+        (INNER_WIDTH, INNER_HEIGHT)
+    };
+    let rx = ((video_width as f64) * 57.0 / inner_width).round() as i32;
+    let ry = ((video_height as f64) * 57.0 / inner_height).round() as i32;
     Some(((rx - NATIVE_CORNER_OVERSCAN_PX).clamp(2, video_width / 3),
           (ry - NATIVE_CORNER_OVERSCAN_PX).clamp(2, video_height / 3)))
 }
@@ -89,8 +109,13 @@ pub fn native_clip_radius(video_width: i32, video_height: i32) -> Option<(i32, i
 #[cfg(test)]
 fn svg_aperture_radius(video_width: i32, video_height: i32) -> Option<(f64, f64)> {
     if video_width < 80 || video_height < 80 { return None; }
-    Some((video_width as f64 * 57.0 / INNER_WIDTH,
-          video_height as f64 * 57.0 / INNER_HEIGHT))
+    let (inner_width, inner_height) = if is_landscape(video_width, video_height) {
+        (LANDSCAPE_INNER_WIDTH, LANDSCAPE_INNER_HEIGHT)
+    } else {
+        (INNER_WIDTH, INNER_HEIGHT)
+    };
+    Some((video_width as f64 * 57.0 / inner_width,
+          video_height as f64 * 57.0 / inner_height))
 }
 
 /// Hover near the right/left bezel, or the top edge; the controller never
@@ -241,9 +266,33 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_video_disables_the_portrait_skin_without_disabling_video() {
-        assert!(expand_screen(ScreenRect { x: 0, y: 0, width: 900, height: 400 }).is_none());
-        assert!(expand_screen(ScreenRect { x: 0, y: 0, width: 400, height: 400 }).is_none());
+    fn landscape_video_uses_rotated_svg_aperture_without_restarting_video() {
+        let video = ScreenRect { x: -700, y: 150, width: 1280, height: 720 };
+        assert!(is_landscape(video.width, video.height));
+        let frame = expand_screen(video).unwrap();
+        assert_eq!(frame.x + frame.inset_x, video.x);
+        assert_eq!(frame.y + frame.inset_y, video.y);
+        assert_eq!(frame.width - frame.inset_x * 2, video.width);
+        assert_eq!(frame.height - frame.inset_y * 2, video.height);
+        assert!(frame.inset_x <= 12);
+        assert!(frame.inset_y <= 15);
+        let (clip_x, clip_y) = native_clip_radius(video.width, video.height).unwrap();
+        let (svg_x, svg_y) = svg_aperture_radius(video.width, video.height).unwrap();
+        assert!((clip_x as f64) < svg_x && (clip_y as f64) < svg_y);
+        let mapped_left = frame.width as f64 * INNER_X / LANDSCAPE_ARTBOARD_WIDTH;
+        let mapped_top = frame.height as f64 * INNER_Y / LANDSCAPE_ARTBOARD_HEIGHT;
+        assert!((mapped_left - frame.inset_x as f64).abs() < 0.55);
+        assert!((mapped_top - frame.inset_y as f64).abs() < 0.55);
+    }
+
+    #[test]
+    fn restoring_portrait_after_landscape_keeps_screen_client_aligned() {
+        for (w,h) in [(1280,720), (720,1280), (1920,1080), (450,960)] {
+            let client=ScreenRect{x:33,y:-17,width:w,height:h};
+            let frame=expand_screen(client).unwrap();
+            assert_eq!(frame.x+frame.inset_x,client.x);
+            assert_eq!(frame.y+frame.inset_y,client.y);
+        }
     }
 
     #[test]

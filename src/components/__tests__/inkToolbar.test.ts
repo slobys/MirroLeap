@@ -21,6 +21,46 @@ function mount(invoke: (command: string, args: { action: string }) => Promise<bo
   return { dom, alert, body: dom.window.document.body };
 }
 
+describe('v4.5 grouped window controls and single-click annotation reset', () => {
+  it('places minimize and close together above pen and restore', () => {
+    const controls = ['drag','minimize','close','ink-toggle','restore'];
+    const positions = controls.map(id => html.indexOf('id="' + id + '"'));
+    expect(positions.every(value => value >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a,b) => a-b));
+    expect(html).toContain('class="session-actions"');
+    expect(html).toContain('class="annotation-actions"');
+  });
+
+  it('clears annotations and exits pen mode in a single click while active', async () => {
+    let enabled = true;
+    const invoke = vi.fn(async (_: string, {action}: {action: string}) => {
+      if (action === 'ink_status') return enabled;
+      if (action === 'ink_reset') { enabled = false; return false; }
+      return enabled;
+    });
+    const {dom,body} = mount(invoke);
+    await settle();
+    expect(body.classList.contains('inking')).toBe(true);
+    (dom.window.document.getElementById('restore') as HTMLButtonElement).click();
+    await settle();
+    expect(invoke.mock.calls.filter(([,v]) => v.action === 'ink_reset')).toHaveLength(1);
+    expect(body.classList.contains('inking')).toBe(false);
+    expect(dom.window.document.getElementById('ink-toggle')?.getAttribute('aria-pressed')).toBe('false');
+    dom.window.close();
+  });
+
+  it('allows one-click reset while pen mode is off', async () => {
+    const invoke = vi.fn(async (_: string, {action}: {action: string}) => action === 'ink_status' ? false : false);
+    const {dom,body} = mount(invoke);
+    await settle();
+    (dom.window.document.getElementById('restore') as HTMLButtonElement).click();
+    await settle();
+    expect(invoke.mock.calls.some(([,v])=>v.action === 'ink_reset')).toBe(true);
+    expect(body.classList.contains('inking')).toBe(false);
+    dom.window.close();
+  });
+});
+
 describe('native-acknowledged annotation hover toolbar', () => {
   it('uses native enabled state rather than optimistic local toggling', async () => {
     let enabled = false;
