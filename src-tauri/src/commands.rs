@@ -1026,6 +1026,8 @@ pub struct ScrcpyConfig {
     always_on_top: Option<bool>,
     fullscreen: Option<bool>,
     borderless: Option<bool>,
+    /// Draw a click-through iPhone-inspired bezel above the live SDL window (Windows only).
+    device_frame: Option<bool>,
     record: Option<bool>,
     record_path: Option<String>,
     scrcpy_path: Option<String>,
@@ -1099,7 +1101,7 @@ fn parse_shell_var_int(text: &str, key: &str) -> Option<i32> {
 /// position-capture and recenter paths so both agree on which window they
 /// mean.
 #[cfg(target_os = "windows")]
-fn find_window_by_pid(pid: u32) -> Option<windows::Win32::Foundation::HWND> {
+pub(crate) fn find_window_by_pid(pid: u32) -> Option<windows::Win32::Foundation::HWND> {
     use windows::core::BOOL;
     use windows::Win32::Foundation::{HWND, LPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -1415,6 +1417,14 @@ fn emit_window_pos_and_stop(
     let _ = window.emit("scrcpy-status", json!({ "device": device, "running": false }));
 }
 
+fn wants_device_frame(config: &ScrcpyConfig) -> bool {
+    cfg!(target_os = "windows")
+        && config.device_frame.unwrap_or(false)
+        && config.session_mode == "mirror"
+        && !config.fullscreen.unwrap_or(false)
+        && !config.otg_pure.unwrap_or(false)
+}
+
 fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, audio_codec_override: Option<&str>) -> Vec<String> {
     let mut args = Vec::new();
     
@@ -1470,7 +1480,9 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
         }
         if let Some(aot) = config.always_on_top { if aot { args.push("--always-on-top".to_string()); } }
         if let Some(fs) = config.fullscreen { if fs { args.push("--fullscreen".to_string()); } }
-        if let Some(bl) = config.borderless { if bl { args.push("--window-borderless".to_string()); } }
+        if config.borderless.unwrap_or(false) || wants_device_frame(config) {
+            args.push("--window-borderless".to_string());
+        }
 
         // Restore the last saved window position (client-area origin), for
         // mirror sessions only. Skipped in fullscreen (scrcpy ignores it) and
@@ -1771,6 +1783,18 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
 
     let initial_scrcpy_pid = child.id();
     state.processes.lock().unwrap().insert(config.device.clone(), child);
+
+    // Render a *transparent shell* over the native SDL window; video rendering,
+    // keyboard and pointer control remain scrcpy's own. Never launch the shell
+    // for camera/desktop/fullscreen/OTG sessions.
+    #[cfg(target_os = "windows")]
+    if wants_device_frame(&config) {
+        if let Err(e) = crate::device_frame::start(
+            &app_handle, &config.device, config.always_on_top.unwrap_or(false)
+        ) {
+            let _ = window.emit("scrcpy-log", format!("[FRAME] Phone shell disabled: {e}. Screen mirroring remains available."));
+        }
+    }
     let _ = window.emit("scrcpy-status", json!({ "device": config.device, "running": true }));
 
     // Monitor for exit (and orchestrate the audio codec fallback chain)
@@ -1955,6 +1979,7 @@ mod tests {
             always_on_top: None,
             fullscreen: None,
             borderless: None,
+            device_frame: None,
             record: None,
             record_path: None,
             scrcpy_path: None,
@@ -1982,6 +2007,31 @@ mod tests {
             window_y: None,
             ignore_video_encoder_constraints: None,
         }
+    }
+
+    #[test]
+    fn test_device_frame_only_for_windows_windowed_mirror() {
+        let mut config = base_config("mirror");
+        config.device_frame = Some(true);
+        let args = build_scrcpy_args(&config, None, None);
+        assert_eq!(
+            args.iter().filter(|a| a.as_str() == "--window-borderless").count(),
+            if cfg!(target_os = "windows") { 1 } else { 0 },
+        );
+
+        config.fullscreen = Some(true);
+        let fullscreen_args = build_scrcpy_args(&config, None, None);
+        assert!(!fullscreen_args.contains(&"--window-borderless".to_string()));
+
+        config.fullscreen = None;
+        config.otg_pure = Some(true);
+        let otg_args = build_scrcpy_args(&config, None, None);
+        assert!(!otg_args.contains(&"--window-borderless".to_string()));
+
+        config.otg_pure = None;
+        config.session_mode = "camera".to_owned();
+        let camera_args = build_scrcpy_args(&config, None, None);
+        assert!(!camera_args.contains(&"--window-borderless".to_string()));
     }
 
     #[test]
