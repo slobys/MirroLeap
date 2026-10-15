@@ -37,6 +37,7 @@ export const fr: Translations = {
             system: 'Système'
         },
         languageLabel: 'Langue',
+        uiScale: 'Échelle de l’interface',
         tagline: 'Miroir & Contrôle Android // Appareils Facilement',
         scrcpyEngine: 'Moteur Scrcpy',
         scrcpyReady: 'Scrcpy Prêt',
