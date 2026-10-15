@@ -20,6 +20,8 @@ This fork prioritizes reliable wireless ADB connections, readable diagnostics, s
 
 **中文开发计划与测试清单：** [ROADMAP_CN.md](ROADMAP_CN.md)
 
+**Windows 真机外框：** [DEVICE_FRAME_CN.md](DEVICE_FRAME_CN.md) — iPhone 风格实时投屏外观，保留 scrcpy 原生低延迟操控。
+
 ---
 
 ## 🚀 Key Features
