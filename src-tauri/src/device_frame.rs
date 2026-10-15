@@ -161,6 +161,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut last_screen_size: Option<(u32, i32, i32)> = None;
     let mut clipped_pid: Option<u32> = None;
     let mut controls_rect: Option<ScreenRect> = None;
+    let mut controls_y_offset: Option<i32> = None;
     let mut last_nearby: Option<Instant> = None;
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -187,6 +188,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
             previous_frame = None;
             controls_rect = None;
+            controls_y_offset = None;
             last_nearby = None;
             continue;
         };
@@ -236,7 +238,9 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             if controls_rect.is_none() {
                 let desktop = virtual_desktop();
                 let y = cursor.map(|(_,y)| y).unwrap_or(frame.y + 80);
-                controls_rect = Some(toolbar_position(frame, y, desktop));
+                let rect = toolbar_position(frame, y, desktop);
+                controls_y_offset = Some(rect.y - frame.y);
+                controls_rect = Some(rect);
             }
             // Follow the *moving phone*, but don't make the toolbar chase the
             // pointer vertically while the user tries to press a button.
@@ -247,7 +251,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 let prefer_right = right_gap + TOOLBAR_WIDTH <= desktop.x + desktop.width;
                 rect.x = if prefer_right { right_gap } else { left_gap };
                 rect.x = rect.x.clamp(desktop.x, (desktop.x+desktop.width-rect.width).max(desktop.x));
-                rect.y = rect.y.clamp(desktop.y, (desktop.y+desktop.height-rect.height).max(desktop.y));
+                rect.y = (frame.y + controls_y_offset.unwrap_or(rect.y - frame.y))
+                    .clamp(desktop.y, (desktop.y + desktop.height - rect.height).max(desktop.y));
                 if place_toolbar(&toolbar, rect).is_err() { break; }
                 controls_rect = Some(rect);
             }
@@ -258,6 +263,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         } else {
             if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
             controls_rect = None;
+            controls_y_offset = None;
         }
     }
 
