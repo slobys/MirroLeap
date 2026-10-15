@@ -66,8 +66,10 @@ pub const TOOLBAR_WIDTH: i32 = 48;
 pub const TOOLBAR_HEIGHT: i32 = 146;
 pub const TOOLBAR_GAP: i32 = 8;
 
-/// Expected radius of the SVG inner corner measured in physical client pixels.
-/// The SVG transparent aperture uses rx=57 in the 1000x2150 design viewBox.
+/// Test-only geometry reference for the SVG's antialiased inner corner.
+/// Native Win32 clipping has been removed because its pixel-staircase edges
+/// leaked blue desktop colors through the independently rasterized SVG edge.
+#[cfg(test)]
 pub fn round_clip_radius(video_width: i32, video_height: i32) -> Option<(i32, i32)> {
     if video_width < 80 || video_height < 80 { return None; }
     let rx = ((video_width as f64) * 57.0 / INNER_WIDTH).round() as i32;
@@ -111,7 +113,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rounded_clip_matches_inner_svg_corner_in_physical_pixels() {
+    fn svg_aperture_corner_reference_matches_physical_pixels() {
         let (rx, ry) = round_clip_radius(540, 1200).unwrap();
         assert!(rx >= 30 && rx <= 35);
         assert!(ry >= 30 && ry <= 35);

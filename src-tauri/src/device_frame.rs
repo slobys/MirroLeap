@@ -1,8 +1,8 @@
-//! Windows-only iPhone-style frame, rounded SDL video corners and hover actions.
+//! Windows-only iPhone-style frame with GPU-antialiased rounded screen matting.
 //!
 //! Three independent windows:
-//!   - scrcpy's SDL window: owns real-time video, keyboard and mouse input.
-//!   - transparent, click-through SVG shell: owns visual bezel only.
+//!   - scrcpy's UNCLIPPED SDL window: owns real-time video, keyboard and mouse input.
+//!   - transparent, click-through SVG shell: owns the visual bezel and seam-sealing corners.
 //!   - tiny, interactive hover toolbar: drag, minimize, close.
 //!
 //! The toolbar is a separate native window because making the main full-screen
@@ -13,11 +13,9 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
-use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn,
-};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowRect,
@@ -27,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::frame_layout::{
-    expand_screen, is_frame_edge_hover, round_clip_radius, toolbar_position,
+    expand_screen, is_frame_edge_hover, toolbar_position,
     FrameRect, ScreenRect, TOOLBAR_HEIGHT, TOOLBAR_WIDTH,
 };
 use crate::ScrcpyState;
@@ -54,7 +52,6 @@ fn toolbar_label(device: &str) -> String { hashed_label("phone-controls", device
 struct CapturedWindow {
     hwnd: HWND,
     frame: FrameRect,
-    screen: ScreenRect,
 }
 
 fn capture_screen(pid: u32) -> Option<CapturedWindow> {
@@ -79,45 +76,15 @@ fn capture_screen(pid: u32) -> Option<CapturedWindow> {
     };
     // Landscape falls back to the unmodified scrcpy video.
     let frame = expand_screen(screen)?;
-    Some(CapturedWindow { hwnd, frame, screen })
+    Some(CapturedWindow { hwnd, frame })
 }
 
-/// The SVG only rounds its *transparent opening*. The scrcpy SDL window would
-/// still paint square pixels underneath those corners. Apply the corresponding
-/// ellipse to the native SDL window itself, relative to the outer HWND rect.
-/// This fixes the four exposed rectangular screen corners seen in v4.3.1.
-fn apply_native_corner_clip(hwnd: HWND, screen: ScreenRect) -> Result<(), String> {
-    let mut outer = RECT::default();
-    unsafe { GetWindowRect(hwnd, &mut outer) }
-        .map_err(|e| format!("Cannot read scrcpy window boundary: {e}"))?;
-
-    let (rx, ry) = round_clip_radius(screen.width, screen.height)
-        .ok_or("Invalid scrcpy client dimensions for rounded corners")?;
-    let left = screen.x - outer.left;
-    let top = screen.y - outer.top;
-    let right = left + screen.width;
-    let bottom = top + screen.height;
-
-    let region = unsafe {
-        CreateRoundRectRgn(left, top, right + 1, bottom + 1, 2 * rx, 2 * ry)
-    };
-    if region.0.is_null() {
-        return Err("Windows could not create a rounded region".into());
-    }
-    let ok = unsafe { SetWindowRgn(hwnd, Some(region), true) };
-    if ok == 0 {
-        // Windows takes ownership *only on success*.
-        let _ = unsafe { DeleteObject(HGDIOBJ(region.0)) };
-        return Err("Windows refused the rounded scrcpy region".into());
-    }
-    Ok(())
-}
-
-fn reset_native_corner_clip(hwnd: HWND) {
-    // A NULL region restores the original, complete HWND area. Important when
-    // rotating into landscape or leaving the framed preview.
-    let _ = unsafe { SetWindowRgn(hwnd, None, true) };
-}
+// We deliberately do NOT call SetWindowRgn on the native scrcpy HWND.
+// Windows GDI regions have hard integer-aligned edges; compositing them under
+// WebView2's antialiased SVG aperture exposes wallpaper-colored cyan seams and
+// dotted corners. Instead an opaque black SVG corner matte covers the SDL
+// rectangle outside the rounded aperture, and an inner gasket hides tiny DPI
+// alignment errors. scrcpy retains its entire native input and video area.
 
 fn pointer() -> Option<(i32, i32)> {
     let mut p = POINT::default();
@@ -158,9 +125,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut shell_visible = false;
     let mut controls_visible = false;
     let mut previous_frame: Option<FrameRect> = None;
-    let mut last_screen_size: Option<(u32, i32, i32)> = None;
-    let mut clipped_pid: Option<u32> = None;
-    let mut controls_rect: Option<ScreenRect> = None;
+     let mut controls_rect: Option<ScreenRect> = None;
     let mut controls_y_offset: Option<i32> = None;
     let mut last_nearby: Option<Instant> = None;
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
@@ -174,16 +139,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let Some(pid) = pid else { break };
 
         let Some(captured) = capture_screen(pid) else {
-            // On landscape, maximize or minimize, restore a rectangular native
-            // window and hide the portrait-only frame. Never interfere with
-            // the underlying stream or its ADB device state.
-            if clipped_pid == Some(pid) {
-                if let Some(hwnd) = crate::commands::find_window_by_pid(pid) {
-                    reset_native_corner_clip(hwnd);
-                }
-                clipped_pid = None;
-                last_screen_size = None;
-            }
+            // Landscape / minimized: hide the portrait bezel. scrcpy has
+            // never been clipped, so no native window region reset is needed.
             if shell_visible { let _ = overlay.hide(); shell_visible = false; }
             if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
             previous_frame = None;
@@ -195,16 +152,6 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
 
         let hwnd = captured.hwnd;
         let frame = captured.frame;
-        let screen = captured.screen;
-
-        if last_screen_size != Some((pid, screen.width, screen.height)) {
-            if let Err(error) = apply_native_corner_clip(hwnd, screen) {
-                let _ = app.emit("scrcpy-log", format!("[FRAME] Rounded display clipping unavailable: {error}"));
-                break;
-            }
-            last_screen_size = Some((pid, screen.width, screen.height));
-            clipped_pid = Some(pid);
-        }
 
         if previous_frame != Some(frame) || unsafe { GetForegroundWindow() } == hwnd {
             if place_overlay(&overlay, hwnd, frame).is_err() { break; }
@@ -267,11 +214,6 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         }
     }
 
-    if let Some(pid) = clipped_pid {
-        if let Some(hwnd) = crate::commands::find_window_by_pid(pid) {
-            reset_native_corner_clip(hwnd);
-        }
-    }
     let _ = toolbar.close();
     let _ = overlay.close();
 }

@@ -14,9 +14,9 @@
       <stop offset="0" stop-color="#60636a"/>
       <stop offset=".016" stop-color="#353940"/>
       <stop offset=".09" stop-color="#16191e"/>
-      <stop offset=".35" stop-color="#656970"/>
+      <stop offset=".35" stop-color="#50545b"/>
       <stop offset=".62" stop-color="#22252a"/>
-      <stop offset=".87" stop-color="#797e85"/>
+      <stop offset=".87" stop-color="#575b63"/>
       <stop offset=".984" stop-color="#3c4047"/>
       <stop offset="1" stop-color="#696e76"/>
     </linearGradient>
@@ -24,20 +24,20 @@
       <stop offset="0" stop-color="#575c64"/>
       <stop offset=".028" stop-color="#363a40"/>
       <stop offset=".35" stop-color="#2c3036"/>
-      <stop offset=".76" stop-color="#555b62"/>
+      <stop offset=".76" stop-color="#42474f"/>
       <stop offset=".98" stop-color="#282c31"/>
       <stop offset="1" stop-color="#484d55"/>
     </linearGradient>
     <linearGradient id="buttonLeft" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#202329"/>
-      <stop offset=".43" stop-color="#8b9097"/>
+      <stop offset=".43" stop-color="#70757e"/>
       <stop offset=".83" stop-color="#4b5057"/>
       <stop offset="1" stop-color="#1b1e22"/>
     </linearGradient>
     <linearGradient id="buttonRight" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#1b1d22"/>
       <stop offset=".42" stop-color="#4d5159"/>
-      <stop offset=".80" stop-color="#999da3"/>
+      <stop offset=".80" stop-color="#737780"/>
       <stop offset="1" stop-color="#22252a"/>
     </linearGradient>
     <!-- Alpha cutout: the centre is REAL transparency, not a black/white fill.
@@ -70,6 +70,34 @@
          black border or bright decorative ring. -->
     <rect x="16.5" y="16.5" width="967" height="2117" rx="58"
           fill="none" stroke="#20242b" stroke-opacity=".9" stroke-width="1.0"/>
+  </g>
+
+  <!--
+    Physical screen seam fix:
+    Windows SetWindowRgn creates a *hard integer* edge, while the WebView2/SVG
+    aperture is subpixel-antialiased. On a blue desktop this revealed a cyan
+    hairline and dotted blue corners. We therefore leave scrcpy's rectangular
+    native video intact and cover its FOUR screen-corner wedges with an opaque
+    matte, then overdraw the aperture by a few pixels with an antialiased black
+    gasket. The live SDL video is still directly visible through the centre.
+
+    Keep the matte under the metal rim but above the video (this is the SVG
+    visual overlay), and never clip the SDL HWND with CreateRoundRectRgn.
+    The geometry of the aperture itself stays unchanged for Rust positioning.
+  -->
+  <g id="screen-seam-seal" aria-hidden="true">
+    <!-- Occupies the four square client corners OUTSIDE the rounded aperture.
+         The original metallic body has larger outside corner radii and does
+         not paint these wedges, so the matte must be an independent layer. -->
+    <rect x="16.5" y="16.5" width="967" height="2117"
+          fill="#06080b" mask="url(#transparentScreen)"/>
+    <!-- Anti-alias guard: a 9-unit stroke overlaps ~4 screen pixels and
+         conceals ±1–2px Windows / WebView2 DPI alignment gaps without
+         creating a wide visible border or coloring the Android status bar. -->
+    <rect id="video-edge-gasket"
+          x="18" y="18" width="964" height="2114" rx="57"
+          fill="none" stroke="#06080b" stroke-width="9"
+          stroke-linejoin="round"/>
   </g>
 
   <!-- Physical side controls only, never fake status bar / notch / island. -->
