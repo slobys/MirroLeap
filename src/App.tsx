@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import Sidebar from "./components/Sidebar";
 import ControlPanel from "./components/ControlPanel";
 import LogPanel from "./components/LogPanel";
+import ScreenshotTools from "./components/ScreenshotTools";
 import Header from "./components/Header";
 import SessionBehavior from "./components/SessionBehavior";
 import ShortcutsPanel from "./components/ShortcutsPanel";
@@ -86,7 +87,7 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("4.6.5");
+  const [appVersion, setAppVersion] = useState("4.7.0");
   // Keep the daily workflow lightweight. Older saved scrcpy_* options are
   // still read by useScrcpy, and every advanced feature remains in Settings.
   const [view, setView] = useState<'home' | 'settings'>('home');
@@ -445,9 +446,12 @@ function App() {
                     </div>
                   )}
                   {settingsTab === 'tools' && (
-                    <LogPanel logs={logs} onClear={clearLogs}
-                      onAddLog={(msg) => setLogs((prev: string[]) => [...prev.slice(-100), msg])}
-                      onRunCommand={runTerminalCommand}/>
+                    <div className="flex flex-col gap-4">
+                      <ScreenshotTools device={activeDevice} customPath={config.scrcpyPath}/>
+                      <LogPanel logs={logs} onClear={clearLogs}
+                        onAddLog={(msg) => setLogs((prev: string[]) => [...prev.slice(-100), msg])}
+                        onRunCommand={runTerminalCommand}/>
+                    </div>
                   )}
                 </div>
               </div>
