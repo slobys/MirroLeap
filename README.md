@@ -14,13 +14,15 @@
 
 ScrcpyGUI v4 is a modern, feature-rich GUI for [scrcpy](https://github.com/Genymobile/scrcpy), completely rebuilt from the ground up using **Tauri v2**, **React 19**, and **Rust**. It transforms your Android device into a professional tool for gaming, development, and content creation.
 
-## 🛠️ Community Fork — v4.5.1 Portable Installer Recovery
+## 🛠️ Community Fork — v4.5.2 Toolbar & Annotation Recovery
+
+**v4.5.2:** A compact non-scrolling annotation flyout displays pen, proper eraser, undo, clear, four colors and three direct brush widths together. The hover toolbar now retries restoring its window stacking and briefly reappears after the scrcpy video is restored. Physical Windows focus and multi-display DPI still require user testing.
 
 Based on the original Tauri + scrcpy desktop GUI, with wireless ADB diagnosis, a live black-titanium phone frame, and optional temporary on-screen annotations.
 
 **New in v4.5:** The same slim phone casing adapts to **portrait and landscape Android video** without restarting the mirror. The larger hover toolbar puts **Move / Minimize / Close** together at the top, with Pen and **One-click Restore** below. Restore clears annotations and hands mouse input back to scrcpy. After Windows taskbar minimization, both the casing and toolbar are rechecked and reattached on restoration.
 
-**Can't install or uninstall the previous release?** Use **ScrcpyGUI_4.5.1_x64_Portable.zip** in GitHub Releases. Extract it fully and run the included EXE—no NSIS, MSI, registry changes or old uninstaller are required. The ZIP is made from a separate `tauri build --no-bundle` standalone binary, not an installer EXE disguised with a new extension. Full Chinese instructions: [INSTALL_RECOVERY_CN.md](INSTALL_RECOVERY_CN.md).
+**Can't install or uninstall the previous release?** Use **ScrcpyGUI_4.5.2_x64_Portable.zip** in GitHub Releases. Extract it fully and run the included EXE—no NSIS, MSI, registry changes or old uninstaller are required. The ZIP is made from a separate `tauri build --no-bundle` standalone binary, not an installer EXE disguised with a new extension. Full Chinese instructions: [INSTALL_RECOVERY_CN.md](INSTALL_RECOVERY_CN.md).
 
 **Installer integrity:** Windows EXE, MSI **and portable ZIP** Releases include a `SHA256SUMS.txt` checksum manifest. A trusted CA-issued Authenticode certificate can be configured in GitHub Actions for automatic signing; the fork currently has **no certificate configured**, so preview installers may still trigger Windows SmartScreen. Neither the app's `publisher` metadata nor its SHA256 alone constitutes trusted code signing. Never disable Windows Defender to silence a warning.
 

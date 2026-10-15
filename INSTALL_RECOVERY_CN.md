@@ -17,9 +17,9 @@
 
 此方法对许多升级问题有效，但旧的 `uninstall.exe` 若真的损坏，仍可能出现其它错误。
 
-## 方案二：免安装 ZIP（本项目 v4.5.1 新增，建议优先采用）
+## 方案二：免安装 ZIP（本项目 v4.5.1 起提供，建议优先采用）
 
-Release 选择 **`ScrcpyGUI_4.5.1_x64_Portable.zip`**，而不是 NSIS 安装用的 setup.exe：
+Release 选择 **`ScrcpyGUI_4.5.2_x64_Portable.zip`**，而不是 NSIS 安装用的 setup.exe：
 
 1. 整个 ZIP 解压到可写目录，例如 `D:\Apps\ScrcpyGUI-Portable\`。
 2. 双击 `Run-ScrcpyGUI.cmd` 或 `scrcpy-gui-v3.exe`。
@@ -57,10 +57,10 @@ Release 选择 **`ScrcpyGUI_4.5.1_x64_Portable.zip`**，而不是 NSIS 安装用
 
 ## 校验安装包是否完整
 
-v4.5.1 的 Release 同时包含 `SHA256SUMS.txt`，它列出 NSIS EXE、MSI、免安装 ZIP 的 SHA-256。Windows PowerShell 中运行：
+v4.5.2 的 Release 同时包含 `SHA256SUMS.txt`，它列出 NSIS EXE、MSI、免安装 ZIP 的 SHA-256。Windows PowerShell 中运行：
 
 ```powershell
-Get-FileHash -LiteralPath '.\ScrcpyGUI_4.5.1_x64_Portable.zip' -Algorithm SHA256
+Get-FileHash -LiteralPath '.\ScrcpyGUI_4.5.2_x64_Portable.zip' -Algorithm SHA256
 ```
 
 将输出与下载自同一个 Release 的 `SHA256SUMS.txt` 对应文件名的哈希对比。如果不匹配，删除文件重新从官方 GitHub 仓库下载，不要尝试跳过校验。

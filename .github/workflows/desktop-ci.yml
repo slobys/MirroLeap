@@ -83,7 +83,8 @@ jobs:
           if (-not (Test-Path "dist/frame.html")) {
             throw "The annotation canvas is missing from the Windows build"
           }
-          if (-not (Test-Path "src-tauri/target/release/bundle/portable/ScrcpyGUI_4.5.1_x64_Portable.zip")) {
+          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          if (-not (Test-Path "src-tauri/target/release/bundle/portable/ScrcpyGUI_${version}_x64_Portable.zip")) {
             throw "The no-installer portable ZIP is missing"
           }
           if (-not (Test-Path "release-checksums/SHA256SUMS.txt")) {
@@ -117,7 +118,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: scrcpygui-v4.5.1-preview.${{ github.run_number }}
+          RELEASE_TAG: scrcpygui-v4.5.2-preview.${{ github.run_number }}
         run: |
           set -euo pipefail
           mapfile -d '' installers < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' -o -iname '*_x64_Portable.zip' \) -print0)
@@ -125,7 +126,15 @@ jobs:
             echo "Need NSIS EXE, MSI and no-installer portable ZIP; got ${#installers[@]}"; exit 1
           fi
           cat > release-notes.md <<'NOTES'
-          ## ScrcpyGUI v4.5.1 — 修复旧版卸载失败导致无法安装（新增免安装 ZIP）
+          ## ScrcpyGUI v4.5.2 — 简洁画笔面板与 Windows 悬浮栏恢复修复
+
+          - 画笔工具改为与窗口按钮分开的紧凑面板，操作、颜色、笔触粗细一次全部展示，无需上下滚动。
+          - 橡皮擦采用明确的图形图标，画笔、撤销、清空各有独立按钮；一键恢复仍可退出标注并恢复手机触控。
+          - 工具面板根据真实 Windows 显示缩放及可用屏幕边距选择左/右展开或紧凑纵向停靠。
+          - 最小化后重新显示投屏时，尝试恢复真机外框和悬浮栏；窗口层级保持与 scrcpy 视频关联，并短暂显示控制栏。
+          - 新增画笔前端功能测试与 DPI/桌面边界布局回归测试。
+
+          **本预览版已通过 GitHub Actions 自动构建，但仍需在真实 Windows 10/11 显示器上验证最小化恢复、窗口焦点和多屏 DPI。**
 
           Windows NSIS 升级旧版时可能显示：
           - NSIS Error: Error launching installer
@@ -133,7 +142,7 @@ jobs:
 
           这通常意味着旧版卸载程序无法被启动，或卸载注册记录与当前安装文件不匹配；单纯重新编译安装包不能自动修复用户电脑里已经损坏的旧版卸载路径。Tauri NSIS 也有已知升级/卸载相关问题。
 
-          **推荐下载：ScrcpyGUI_4.5.1_x64_Portable.zip（免安装版）**
+          **推荐下载：ScrcpyGUI_4.5.2_x64_Portable.zip（免安装版）**
           1. 在可信目录中完整解压，例如 D:\Apps\ScrcpyGUI-Portable。
           2. 双击 Run-ScrcpyGUI.cmd 或 scrcpy-gui-v3.exe。
           3. 它不调用旧版 NSIS 卸载程序，不依赖注册表的旧版安装记录，也不会覆盖旧版软件。
@@ -144,7 +153,7 @@ jobs:
 
           **安全与完整性：** EXE、MSI、Portable ZIP 三种发布文件都写入 SHA256SUMS.txt，Release 上传前逐项重新校验。如果配置了 CA Authenticode 证书，会同时签名 Windows 安装包和 ZIP 内的独立 exe；尚未配置证书的预览版仍可能触发 SmartScreen 警告。
 
-          **保留 v4.5.0 功能**：竖屏与横屏黑钛真机外框、放大的边缘悬浮工具栏、画笔一键恢复，以及自动切换投屏分辨率。
+          **保留此前功能**：竖屏与横屏黑钛真机外框、无线连接、画笔一键恢复、自动切换投屏分辨率，以及独立 Windows 免安装运行。
 
           这是独立的 Windows 预览发布，未能直接在你的电脑上复现旧版卸载记录；用户侧的具体 NSIS 失败原因仍需通过安装日志或修复工具确认。
           NOTES
@@ -157,5 +166,5 @@ jobs:
           (cd verified-assets && sha256sum --check SHA256SUMS.txt)
           gh release create "$RELEASE_TAG" verified-assets/* \
             --target "$GITHUB_SHA" \
-            --title "ScrcpyGUI v4.5.1 · Portable Upgrade Recovery Preview #${{ github.run_number }} (Windows)" \
+            --title "ScrcpyGUI v4.5.2 · Compact Ink Tools and Toolbar Restore Preview #${{ github.run_number }} (Windows)" \
             --notes-file release-notes.md --prerelease --latest=false

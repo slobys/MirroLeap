@@ -7,12 +7,14 @@ created after optional signing, and that a release cannot silently omit its ZIP.
 Windows Actions additionally verify all ZIP members and release file hashes.
 """
 import json
+import re
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 config = json.loads((root / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
 pkg = json.loads((root / "package.json").read_text(encoding="utf-8"))
-assert config["version"] == pkg["version"] == "4.5.1"
+assert config["version"] == pkg["version"]
+assert re.fullmatch(r"\d+\.\d+\.\d+", pkg["version"])
 assert config["identifier"] == "com.kb.scrcpy-gui-v3", (
     "Changing the bundle identifier would silently break upgrade compatibility"
 )
@@ -25,7 +27,7 @@ must_have = [
     "scripts/windows-stage-portable.ps1",
     "npm run tauri build",
     "scripts/windows-sign-and-checksum.ps1",
-    "ScrcpyGUI_4.5.1",
+    f"ScrcpyGUI_{pkg['version']}",
     "*_x64_Portable.zip",
     "release-checksums/SHA256SUMS.txt",
     "sha256sum --check SHA256SUMS.txt",
