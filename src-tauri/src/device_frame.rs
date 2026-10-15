@@ -362,64 +362,146 @@ fn ink_action_script(action: &str) -> Option<&'static str> {
     }
 }
 
-fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<(), String> {
-    let overlay = app.get_webview_window(&label(device))
-        .ok_or("Live phone frame is not available for annotation")?;
-    if action == "ink_toggle" {
-        let turn_on = !is_inking(device);
-        if turn_on {
-            // Turn on hit testing only in drawing mode; outside this mode the
-            // entire visual overlay remains click-through to the SDL window.
-            overlay.eval("window.scrcpyInk?.setEnabled(true)")
-                .map_err(|e| format!("Cannot activate drawing surface: {e}"))?;
-            overlay.set_ignore_cursor_events(false)
-                .map_err(|e| format!("Cannot enable drawing pointer input: {e}"))?;
-            ink_sessions().lock().map_err(|e| e.to_string())?.insert(device.to_owned());
-        } else {
-            overlay.eval("window.scrcpyInk?.setEnabled(false)")
-                .map_err(|e| format!("Cannot close drawing surface: {e}"))?;
-            overlay.set_ignore_cursor_events(true)
-                .map_err(|e| format!("Cannot restore scrcpy touch input: {e}"))?;
-            ink_sessions().lock().map_err(|e| e.to_string())?.remove(device);
-            // Return keyboard/mouse focus to native scrcpy after pen mode.
-            if let Some(pid) = app.state::<ScrcpyState>()
-                .processes.lock().ok()
-                .and_then(|map| map.get(device).and_then(|child| child.id()))
-            {
-                if let Some(video) = crate::commands::find_window_by_pid(pid) {
-                    let _ = unsafe { SetForegroundWindow(video) };
-                }
-            }
+/// Execute an ink command only after the SVG WebView2 page has really loaded.
+/// Tauri's plain eval() is fire-and-forget: returning Ok() means queued, not
+/// canvas enabled. On Windows this caused a lit pen button while all taps
+/// still hit the SDL window or no ink could be painted.
+///
+/// eval_with_callback returns JSON from the real page. A failed/missing
+/// script cannot silently advance the native hit-test state.
+async fn evaluate_ink(overlay: &WebviewWindow, operation: &str) -> Result<bool, String> {
+    let js = format!(
+        "(() => {{ if (!window.scrcpyInk || window.scrcpyInk.ready !== true) return false; {} }})()",
+        operation
+    );
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    let sender = Arc::new(Mutex::new(Some(tx)));
+    overlay.eval_with_callback(js, move |reply| {
+        let enabled = serde_json::from_str::<bool>(&reply).unwrap_or(false);
+        if let Ok(mut slot) = sender.lock() {
+            if let Some(tx) = slot.take() { let _ = tx.send(enabled); }
         }
-        return Ok(());
+    }).map_err(|e| format!("无法与画笔画布通信: {e}"))?;
+    let ready = tokio::time::timeout(Duration::from_secs(2), rx).await
+        .map_err(|_| "画布未响应，请稍等片刻后重试画笔按钮。".to_owned())?
+        .map_err(|_| "画布窗口已关闭，请重新开始投屏。".to_owned())?;
+    if !ready {
+        return Err("画布还没有完成加载，画笔未开启，请稍后重试。".into());
     }
-    if !is_inking(device) {
-        return Err("Enable the annotation pen before using drawing tools".into());
-    }
-    let code = ink_action_script(action).ok_or("Unsupported annotation action")?;
-    overlay.eval(code).map_err(|e| format!("Cannot apply annotation tool: {e}"))
+    Ok(true)
 }
 
-/// Called only by the dedicated phone-controls-* toolbar window.
-/// The full-screen visual overlay receives mouse input only while annotating.
-pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<(), String> {
+fn promote_drawing_windows(
+    app: &AppHandle,
+    device: &str,
+    overlay: &WebviewWindow,
+) -> Result<(), String> {
+    let shell = overlay.hwnd().map_err(|e| e.to_string())?;
+    unsafe {
+        SetWindowPos(shell, Some(HWND_TOP), 0, 0, 0, 0,
+                     SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)
+    }.map_err(|e| format!("无法将画笔放到实时画面上方: {e}"))?;
+    // Promoting the shell must not cover pen/close/minimize buttons.
+    if let Some(toolbar) = app.get_webview_window(&toolbar_label(device)) {
+        let handle = toolbar.hwnd().map_err(|e| e.to_string())?;
+        unsafe {
+            SetWindowPos(handle, Some(HWND_TOP), 0, 0, 0, 0,
+                         SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)
+        }.map_err(|e| format!("无法保持画笔工具栏在前景: {e}"))?;
+    }
+    Ok(())
+}
+
+async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool, String> {
+    // UI asks native state instead of a separate toggle flag which could drift.
+    if action == "ink_status" { return Ok(is_inking(device)); }
+
+    let overlay = app.get_webview_window(&label(device))
+        .ok_or("真机外框不存在，无法开启画笔。")?;
+    if action == "ink_toggle" {
+        let _guard = InkTransitionGuard::begin(device)?;
+        let turn_on = !is_inking(device);
+
+        if turn_on {
+            if !ready_to_ink(device) {
+                return Err("画笔画布尚未加载完毕，请稍后重试。".into());
+            }
+            // Verify JS has entered ink mode before intercepting SDL clicks.
+            evaluate_ink(&overlay, "window.scrcpyInk.setEnabled(true); return window.scrcpyInk.isEnabled() === true;").await?;
+            if let Err(error) = overlay.set_ignore_cursor_events(false) {
+                let _ = overlay.eval("window.scrcpyInk?.setEnabled(false)");
+                return Err(format!("启用画笔鼠标捕获失败: {error}"));
+            }
+            if let Err(error) = promote_drawing_windows(app, device, &overlay) {
+                let _ = overlay.set_ignore_cursor_events(true);
+                let _ = overlay.eval("window.scrcpyInk?.setEnabled(false)");
+                return Err(error);
+            }
+            ink_sessions().lock().map_err(|e| e.to_string())?.insert(device.to_owned());
+            let _ = app.emit("scrcpy-log", format!("[INK] Enabled annotation on {device}"));
+            return Ok(true);
+        }
+
+        // Restore real phone interaction first. Even if HTML reloaded,
+        // no invisible overlay should continue capturing Android taps.
+        overlay.set_ignore_cursor_events(true)
+            .map_err(|e| format!("无法恢复手机鼠标操作: {e}"))?;
+        if ready_to_ink(device) {
+            if let Err(e) = evaluate_ink(&overlay, "window.scrcpyInk.setEnabled(false); return window.scrcpyInk.isEnabled() === false;").await {
+                let _ = app.emit("scrcpy-log", format!("[INK] Drawing page reset while disabling: {e}"));
+            }
+        }
+        ink_sessions().lock().map_err(|e| e.to_string())?.remove(device);
+        if let Some(pid) = app.state::<ScrcpyState>()
+            .processes.lock().ok()
+            .and_then(|map| map.get(device).and_then(|child| child.id()))
+        {
+            if let Some(video) = crate::commands::find_window_by_pid(pid) {
+                let _ = unsafe { SetForegroundWindow(video) };
+            }
+        }
+        let _ = app.emit("scrcpy-log", format!("[INK] Restored phone control on {device}"));
+        return Ok(false);
+    }
+
+    if ink_busy().lock().map_err(|e| e.to_string())?.contains(device) {
+        return Err("画笔正在切换，请稍候再操作。".into());
+    }
+    if !is_inking(device) {
+        return Err("请先点击画笔按钮进入标注模式。".into());
+    }
+    let code = ink_action_script(action).ok_or("不支持的画笔操作")?;
+    let command = format!("{}; return true;", code);
+    evaluate_ink(&overlay, &command).await?;
+    Ok(true)
+}
+
+/// The dedicated phone-controls-* window is the ONLY trusted caller.
+/// The SVG overlay captures pointer events solely during annotation mode.
+pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<bool, String> {
     let device = device_for_controls(app, caller)?;
     let pid = app.state::<ScrcpyState>().processes.lock()
         .map_err(|e| e.to_string())?
         .get(&device).and_then(|child| child.id())
-        .ok_or("scrcpy session has ended")?;
-    let hwnd = crate::commands::find_window_by_pid(pid).ok_or("scrcpy window is not visible")?;
+        .ok_or("scrcpy 会话已结束")?;
+    let hwnd = crate::commands::find_window_by_pid(pid).ok_or("投屏窗口不可见")?;
 
     if action.starts_with("ink_") {
-        return control_ink(app, &device, action);
+        return control_ink(app, &device, action).await;
     }
     match action {
         "minimize" => {
             unsafe { ShowWindow(hwnd, SW_MINIMIZE); }
-            Ok(())
+            Ok(is_inking(&device))
         }
-        "close" => crate::commands::stop_scrcpy(app.state::<ScrcpyState>(), device).await,
-        "drag" => begin_drag(device, hwnd),
+        "close" => {
+            crate::commands::stop_scrcpy(app.state::<ScrcpyState>(), device).await?;
+            Ok(false)
+        }
+        "drag" => {
+            begin_drag(device.clone(), hwnd)?;
+            Ok(is_inking(&device))
+        }
         _ => Err("Unsupported device-frame action".into()),
     }
 }
