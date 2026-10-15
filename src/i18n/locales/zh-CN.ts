@@ -225,6 +225,8 @@ export const zhCN: Translations = {
         fullScreenTooltip: '以全屏模式启动 scrcpy。',
         borderless: '无边框',
         borderlessTooltip: '启动 scrcpy 时不显示窗口边框。窗口位置会在会话间记住。移动窗口：Windows 上按 Ctrl+Alt+Shift+W，GNOME/KDE 上用 Super/Meta+拖动。如果窗口跑到屏幕外，按 Ctrl+Alt+Shift+C 可将其重新居中。',
+        deviceFrame: 'iPhone 风格真机外框',
+        deviceFrameTooltip: '仅 Windows：投屏后在实时可操作的 scrcpy 画面外显示深空灰金属手机框和灵动岛。按 Ctrl+Alt+Shift+W 拖动手机窗口，单击结束拖动；Ctrl+Alt+Shift+C 可居中。外框跟随移动、缩放，遇到全屏、相机、桌面和纯 OTG 模式时自动停用。',
         rememberWindowPosition: '记住窗口位置',
         rememberWindowPositionTooltip: '在上次的位置重新打开镜像窗口。如果你经常切换分辨率，建议关闭此项，否则可能打乱已保存的位置。如果窗口跑到屏幕外，按 Ctrl+Alt+Shift+C 可将其重新居中。',
         recordFeed: '录制画面',
