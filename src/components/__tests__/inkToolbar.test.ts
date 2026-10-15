@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+// @ts-ignore: jsdom is available at runtime through Vitest; this project has no @types/jsdom.
 import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -10,7 +11,7 @@ function mount(invoke: (command: string, args: { action: string }) => Promise<bo
   const dom = new JSDOM(html, {
     url: 'https://localhost/phone-controls.html',
     runScripts: 'dangerously',
-    beforeParse(window) {
+    beforeParse(window: any) {
       Object.defineProperty(window, '__TAURI__', { value: { core: { invoke } } });
       window.alert = alert;
     },
