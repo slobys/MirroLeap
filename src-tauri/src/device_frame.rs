@@ -108,7 +108,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow) {
     let _ = overlay.close();
 }
 
-pub fn start(app: &AppHandle, device: &str) -> Result<(), String> {
+pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), String> {
     let name = label(device);
     if let Some(existing) = app.get_webview_window(&name) {
         let _ = existing.close();
@@ -121,6 +121,7 @@ pub fn start(app: &AppHandle, device: &str) -> Result<(), String> {
         .shadow(false)
         .resizable(false)
         .skip_taskbar(true)
+        .always_on_top(always_on_top)
         .focusable(false)
         .focused(false)
         .visible(false)
