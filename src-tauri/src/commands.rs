@@ -234,11 +234,14 @@ pub async fn get_devices(custom_path: Option<String>) -> serde_json::Value {
              if o.status.success() {
                  let out_str = String::from_utf8_lossy(&o.stdout);
                  let mut devices: Vec<String> = Vec::new();
+                 let mut pending = Vec::new();
                  let mut device_models = serde_json::Map::new();
                  for line in out_str.lines().skip(1) {
-                     // Skip "List of devices attached"
                      let Some((serial, state)) = parse_adb_device_line(line) else { continue };
                      if state != "device" {
+                         // Keep these visible for troubleshooting, but never send
+                         // them to scrcpy as usable targets.
+                         pending.push(json!({ "serial": serial, "state": state }));
                          continue;
                      }
                      if let Some(model) = extract_device_model(line) {
@@ -247,7 +250,7 @@ pub async fn get_devices(custom_path: Option<String>) -> serde_json::Value {
                      devices.push(serial);
                  }
 
-                 json!({ "error": false, "devices": devices, "deviceModels": device_models })
+                 json!({ "error": false, "devices": devices, "pendingDevices": pending, "deviceModels": device_models })
              } else {
                  json!({ "error": true, "message": "ADB returned error" })
              }
