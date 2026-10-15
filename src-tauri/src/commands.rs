@@ -2413,6 +2413,25 @@ pub async fn download_scrcpy(
     crate::core_manager::install_latest(&window).await
 }
 
+
+#[tauri::command]
+pub async fn device_frame_control(
+    window: Window,
+    app_handle: tauri::AppHandle,
+    action: String,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        crate::device_frame::control(&app_handle, &window, &action).await
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, app_handle, action);
+        Err("Device frame controls are available only on Windows".into())
+    }
+}
+
+
 #[tauri::command]
 pub async fn get_videos_dir(app_handle: tauri::AppHandle) -> Result<String, String> {
     use tauri::Manager;
