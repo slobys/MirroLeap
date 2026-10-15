@@ -9,11 +9,13 @@
 //! overlay mouse-active would intercept scrcpy taps and swipes.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::webview::PageLoadEvent;
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn,
@@ -23,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowRect,
     IsIconic, IsWindowVisible, IsZoomed, SetForegroundWindow, SetWindowPos, ShowWindow,
     HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-    SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
 };
 
 use crate::frame_layout::{
@@ -34,6 +36,36 @@ use crate::ScrcpyState;
 
 static ACTIVE_DRAGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static INK_READY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static INK_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn ink_ready() -> &'static Mutex<HashSet<String>> {
+    INK_READY.get_or_init(|| Mutex::new(HashSet::new()))
+}
+fn ink_busy() -> &'static Mutex<HashSet<String>> {
+    INK_BUSY.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+struct InkTransitionGuard(String);
+impl InkTransitionGuard {
+    fn begin(device: &str) -> Result<Self, String> {
+        let mut pending = ink_busy().lock().map_err(|e| e.to_string())?;
+        if !pending.insert(device.to_string()) {
+            return Err("画笔正在切换，请稍候再操作。".into());
+        }
+        Ok(Self(device.to_string()))
+    }
+}
+impl Drop for InkTransitionGuard {
+    fn drop(&mut self) {
+        if let Ok(mut pending) = ink_busy().lock() { pending.remove(&self.0); }
+    }
+}
+
+fn ready_to_ink(device: &str) -> bool {
+    ink_ready().lock().map(|r| r.contains(device)).unwrap_or(false)
+}
+
 
 fn ink_sessions() -> &'static Mutex<HashSet<String>> {
     INK_ENABLED.get_or_init(|| Mutex::new(HashSet::new()))
@@ -291,6 +323,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     }
 
     if let Ok(mut set) = ink_sessions().lock() { set.remove(&device); }
+    if let Ok(mut set) = ink_ready().lock() { set.remove(&device); }
     let _ = overlay.set_ignore_cursor_events(true);
     if let Some(pid) = clipped_pid {
         if let Some(hwnd) = crate::commands::find_window_by_pid(pid) {
@@ -435,9 +468,26 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
     if let Some(old) = app.get_webview_window(&shell_name) { let _ = old.close(); }
     if let Some(old) = app.get_webview_window(&controls_name) { let _ = old.close(); }
 
+    let page_device = device.to_owned();
     let overlay = WebviewWindowBuilder::new(
         app, shell_name, WebviewUrl::App("frame.html".into())
     )
+        .on_page_load(move |view, payload| {
+            match payload.event() {
+                PageLoadEvent::Started => {
+                    if let Ok(mut ready) = ink_ready().lock() { ready.remove(&page_device); }
+                    if let Ok(mut sessions) = ink_sessions().lock() { sessions.remove(&page_device); }
+                    // On navigation/reload never leave an opaque input-capturing
+                    // overlay ahead of native scrcpy when its canvas script resets.
+                    let _ = view.set_ignore_cursor_events(true);
+                },
+                PageLoadEvent::Finished => {
+                    if let Ok(mut ready) = ink_ready().lock() {
+                        ready.insert(page_device.clone());
+                    }
+                }
+            }
+        })
         .title("Device frame")
         .transparent(true)
         .decorations(false)
@@ -485,6 +535,8 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
 }
 
 pub fn close(app: &AppHandle, device: &str) {
+    if let Ok(mut set) = ink_sessions().lock() { set.remove(device); }
+    if let Ok(mut set) = ink_ready().lock() { set.remove(device); }
     if let Some(shell) = app.get_webview_window(&label(device)) { let _ = shell.close(); }
     if let Some(toolbar) = app.get_webview_window(&toolbar_label(device)) { let _ = toolbar.close(); }
 }
