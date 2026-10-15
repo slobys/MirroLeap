@@ -37,6 +37,7 @@ languages: {
             system: 'Sistem'
         },
         languageLabel: 'Bahasa',
+        uiScale: 'Skala antarmuka',
         tagline: 'Mirror & Kontrol HP Android // dengan Mudah',
         scrcpyEngine: 'Sistem Scrcpy',
         scrcpyReady: 'Scrcpy Siap',
