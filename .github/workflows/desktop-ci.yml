@@ -2,7 +2,7 @@ name: Desktop CI
 
 on:
   push:
-    branches: [main, 'feat/v4.5-immersive-controls']
+    branches: [main, 'fix/v4.5.1-portable-upgrade']
   workflow_dispatch:
 
 permissions:
@@ -38,6 +38,7 @@ jobs:
       - run: python3 scripts/check_device_frame.py
       - run: python3 scripts/check_annotations.py
       - run: python3 scripts/check_landscape_toolbar.py
+      - run: python3 scripts/check_portable_release.py
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   windows:
@@ -54,7 +55,13 @@ jobs:
         with:
           workspaces: src-tauri -> target
       - run: npm ci
-      - run: npm run tauri build
+      - name: Build original standalone desktop executable (unpatched, without any installer)
+        run: npm run tauri build -- --no-bundle
+      - name: Stage extract-and-run portable version
+        shell: pwsh
+        run: ./scripts/windows-stage-portable.ps1
+      - name: Build Windows NSIS and MSI installers
+        run: npm run tauri build
       - name: Optional Authenticode signing and mandatory SHA256 verification
         shell: pwsh
         env:
@@ -76,6 +83,12 @@ jobs:
           if (-not (Test-Path "dist/frame.html")) {
             throw "The annotation canvas is missing from the Windows build"
           }
+          if (-not (Test-Path "src-tauri/target/release/bundle/portable/ScrcpyGUI_4.5.1_x64_Portable.zip")) {
+            throw "The no-installer portable ZIP is missing"
+          }
+          if (-not (Test-Path "release-checksums/SHA256SUMS.txt")) {
+            throw "No signed-and-hashed release manifest"
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: ScrcpyGUI-Windows-Installer
@@ -83,6 +96,7 @@ jobs:
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/portable/*_x64_Portable.zip
             release-checksums/SHA256SUMS.txt
 
   publish-release:
@@ -103,26 +117,36 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: scrcpygui-v4.5.0-preview.${{ github.run_number }}
+          RELEASE_TAG: scrcpygui-v4.5.1-preview.${{ github.run_number }}
         run: |
           set -euo pipefail
-          mapfile -d '' installers < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' \) -print0)
-          if (( ${#installers[@]} == 0 )); then
-            echo "No Windows installers found"; exit 1
+          mapfile -d '' installers < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' -o -iname '*_x64_Portable.zip' \) -print0)
+          if (( ${#installers[@]} != 3 )); then
+            echo "Need NSIS EXE, MSI and no-installer portable ZIP; got ${#installers[@]}"; exit 1
           fi
           cat > release-notes.md <<'NOTES'
-          ## ScrcpyGUI v4.5.0 — 横屏真机外框、悬浮栏与一键恢复
+          ## ScrcpyGUI v4.5.1 — 修复旧版卸载失败导致无法安装（新增免安装 ZIP）
 
-          - **横屏外框**：手机打开横向全屏视频时，自动改用旋转后的黑钛金属外框（独立横向 SVG），保留 Android 实时画面、触控与长宽比例，无须停止投屏；转回竖屏自动恢复原外框。
-          - **最小化再恢复**：恢复后重新确认 WebView2 外框和悬浮工具栏真实可见性，重新设置窗口位置和前后层级；鼠标移到机身边缘即可再次呼出悬浮栏。
-          - **悬浮工具栏更易点**：从约 48 像素扩展至 62 像素物理宽度；「拖动」「最小化」「关闭」放在顶部相邻一组，画笔与其他工具单独分组。
-          - **画笔一键恢复**：新按钮可一次清除当前全部标注，并立即退出画笔、恢复真实手机鼠标操作。原来的撤销、橡皮擦、颜色及分辨率自动切换保持可用。
-          - **安装安全与可信度**：所有 EXE/MSI 发布 SHA256SUMS.txt 校验文件。CI 支持在配置受信任的 Authenticode PFX 代码签名证书后自动签名并验证；在未提供有效证书时安装包仍为未签名，会如实显示警告，不会绕过 Defender/SmartScreen。
-          - **权限与说明**：说明如何使用合法可信代码签名与微软商店分发途径，不把 GitHub 发布者名称伪装为 Windows 可验证签名身份。
+          Windows NSIS 升级旧版时可能显示：
+          - NSIS Error: Error launching installer
+          - Already Installed → Unable to uninstall!
 
-          Windows 64 位用户优先下载安装 EXE，也提供 MSI。退出旧版及投屏窗口后安装。安装后请验证 100%/125%/150% 显示缩放下的最小化恢复、横竖屏视频、悬浮栏和一键恢复。
+          这通常意味着旧版卸载程序无法被启动，或卸载注册记录与当前安装文件不匹配；单纯重新编译安装包不能自动修复用户电脑里已经损坏的旧版卸载路径。Tauri NSIS 也有已知升级/卸载相关问题。
 
-          此版本仍是 Windows 预览版；自动化不能代替用户真实电脑上的鼠标/DPI/播放器全屏测试。
+          **推荐下载：ScrcpyGUI_4.5.1_x64_Portable.zip（免安装版）**
+          1. 在可信目录中完整解压，例如 D:\Apps\ScrcpyGUI-Portable。
+          2. 双击 Run-ScrcpyGUI.cmd 或 scrcpy-gui-v3.exe。
+          3. 它不调用旧版 NSIS 卸载程序，不依赖注册表的旧版安装记录，也不会覆盖旧版软件。
+          4. 首次运行若提示找不到 scrcpy 核心，可在软件内下载，或将已有完整可信 scrcpy-bin 文件夹复制到该 exe 同级目录。
+          5. 免安装版仍需要 Windows 10/11 x64 和系统 WebView2 Runtime。
+
+          **标准安装：** 同时保留 EXE（NSIS）和 MSI。若 NSIS 检测到旧版、且卸载失败，可以在 Already Installed 页面选 Do not uninstall 尝试覆盖安装。若旧安装记录确实损坏，建议按微软官方“程序安装和卸载疑难解答”处理，不要手动清理注册表或关闭安全软件。
+
+          **安全与完整性：** EXE、MSI、Portable ZIP 三种发布文件都写入 SHA256SUMS.txt，Release 上传前逐项重新校验。如果配置了 CA Authenticode 证书，会同时签名 Windows 安装包和 ZIP 内的独立 exe；尚未配置证书的预览版仍可能触发 SmartScreen 警告。
+
+          **保留 v4.5.0 功能**：竖屏与横屏黑钛真机外框、放大的边缘悬浮工具栏、画笔一键恢复，以及自动切换投屏分辨率。
+
+          这是独立的 Windows 预览发布，未能直接在你的电脑上复现旧版卸载记录；用户侧的具体 NSIS 失败原因仍需通过安装日志或修复工具确认。
           NOTES
           # Verify the SHA256 checksums from the exact installers being released.
           manifest="$(find release-assets -type f -name SHA256SUMS.txt -print -quit)"
@@ -133,5 +157,5 @@ jobs:
           (cd verified-assets && sha256sum --check SHA256SUMS.txt)
           gh release create "$RELEASE_TAG" verified-assets/* \
             --target "$GITHUB_SHA" \
-            --title "ScrcpyGUI v4.5.0 · Immersive Phone Controls Preview #${{ github.run_number }} (Windows)" \
+            --title "ScrcpyGUI v4.5.1 · Portable Upgrade Recovery Preview #${{ github.run_number }} (Windows)" \
             --notes-file release-notes.md --prerelease --latest=false
