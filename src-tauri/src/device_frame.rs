@@ -348,6 +348,15 @@ fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<(), String
             overlay.set_ignore_cursor_events(true)
                 .map_err(|e| format!("Cannot restore scrcpy touch input: {e}"))?;
             ink_sessions().lock().map_err(|e| e.to_string())?.remove(device);
+            // Return keyboard/mouse focus to native scrcpy after pen mode.
+            if let Some(pid) = app.state::<ScrcpyState>()
+                .processes.lock().ok()
+                .and_then(|map| map.get(device).and_then(|child| child.id()))
+            {
+                if let Some(video) = crate::commands::find_window_by_pid(pid) {
+                    let _ = unsafe { SetForegroundWindow(video) };
+                }
+            }
         }
         return Ok(());
     }
@@ -436,7 +445,9 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
         .resizable(false)
         .skip_taskbar(true)
         .always_on_top(always_on_top)
-        .focusable(false)
+        // Remain mouse-through at rest, but allow real pointer capture after
+        // the user explicitly enables annotation in the separate tool rail.
+        .focusable(true)
         .focused(false)
         .visible(false)
         .inner_size(430.0, 900.0)
