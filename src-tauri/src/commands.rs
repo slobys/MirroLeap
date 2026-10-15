@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::json;
 use crate::ScrcpyState;
 use tokio::process::Command as TokioCommand;
-use tokio::io::{BufReader, AsyncBufReadExt};
+use tokio::io::{BufReader, AsyncBufReadExt, AsyncReadExt};
 use tokio::time::{timeout, Duration};
 use serde::Deserialize;
 
@@ -708,6 +708,138 @@ pub async fn adb_shell(window: Window, device: String, command: String, custom_p
              json!({ "success": o.status.success(), "output": String::from_utf8_lossy(&o.stdout).to_string() })
         },
         Err(e) => json!({ "success": false, "message": e.to_string() })
+    }
+}
+
+/// MirroCapture v1 saves the ORIGINAL Android screenshot. Separate WebView2
+/// pen annotations are NOT included. Only an explicit user click triggers ADB
+/// and no phone screenshot bytes are sent over the network by MirroLeap.
+const MAX_SCREENSHOT_PNG_SIZE: usize = 24 * 1024 * 1024;
+
+fn validate_capture_device(device: &str) -> Result<(), String> {
+    if device.is_empty() || device.len() > 160 || device.starts_with('-') ||
+        !device.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
+    {
+        return Err("Invalid Android device identifier.".into());
+    }
+    Ok(())
+}
+
+fn valid_android_screenshot_png(bytes: &[u8]) -> bool {
+    if bytes.len() < 45 || bytes.len() > MAX_SCREENSHOT_PNG_SIZE ||
+        !bytes.starts_with(b"\x89PNG\r\n\x1a\n") ||
+        bytes[8..12] != [0, 0, 0, 13] ||
+        &bytes[12..16] != b"IHDR" ||
+        bytes[bytes.len() - 12..bytes.len() - 8] != [0, 0, 0, 0] ||
+        &bytes[bytes.len() - 8..bytes.len() - 4] != b"IEND"
+    {
+        return false;
+    }
+    let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap_or([0; 4]));
+    let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap_or([0; 4]));
+    (1..=16_384).contains(&width) && (1..=16_384).contains(&height)
+}
+
+#[tauri::command]
+pub async fn save_device_screenshot(
+    window: Window, app_handle: tauri::AppHandle,
+    device: String, custom_path: Option<String>,
+) -> Result<String, String> {
+    require_main_window(&window)?;
+    validate_capture_device(&device)?;
+    let adb = get_binary_path("adb", custom_path);
+    let mut command = create_command(&adb);
+    command.arg("-s").arg(&device).args(["exec-out", "screencap", "-p"])
+        .stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+    let mut child = command.spawn().map_err(|e| format!("Cannot start ADB screenshot: {e}"))?;
+    let capture = async {
+        let stdout = child.stdout.take().ok_or("Cannot read ADB screenshot output")?;
+        let mut png = Vec::new();
+        stdout.take((MAX_SCREENSHOT_PNG_SIZE + 1) as u64).read_to_end(&mut png)
+            .await.map_err(|e| format!("Cannot receive screenshot: {e}"))?;
+        if png.len() > MAX_SCREENSHOT_PNG_SIZE {
+            return Err("Screenshot too large (24 MiB limit).".into());
+        }
+        let status = child.wait().await.map_err(|e| format!("ADB screenshot failed: {e}"))?;
+        if !status.success() || !valid_android_screenshot_png(&png) {
+            return Err("Android did not return a valid PNG. Check device authorization and connection.".into());
+        }
+        Ok::<Vec<u8>, String>(png)
+    };
+    let png = timeout(Duration::from_secs(20), capture).await
+        .map_err(|_| "Android screenshot timed out after 20 seconds.".to_string())??;
+
+    use std::fs::{self, OpenOptions};
+    use std::io::Write;
+    let downloads = app_handle.path().download_dir()
+        .map_err(|e| format!("Downloads directory unavailable: {e}"))?;
+    fs::create_dir_all(&downloads).map_err(|e| format!("Cannot open Downloads directory: {e}"))?;
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    // Names are deterministic and never expose the phone serial. create_new
+    // prevents overwriting existing files or following a symlink.
+    for attempt in 0..100 {
+        let suffix = if attempt == 0 { String::new() } else { format!("-{attempt}") };
+        let path = downloads.join(format!("MirroLeap-Screenshot-{stamp}{suffix}.png"));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut output) => {
+                if let Err(error) = output.write_all(&png).and_then(|_| output.sync_all()) {
+                    drop(output);
+                    let _ = fs::remove_file(&path);
+                    return Err(format!("Cannot save screenshot: {error}"));
+                }
+                return Ok(path.to_string_lossy().into_owned());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Cannot create screenshot file: {e}")),
+        }
+    }
+    Err("Too many screenshots with the same timestamp. Retry shortly.".into())
+}
+
+#[cfg(test)]
+mod screenshot_capture_tests {
+    use super::{validate_capture_device, valid_android_screenshot_png, MAX_SCREENSHOT_PNG_SIZE};
+    fn synthetic_png() -> Vec<u8> {
+        let mut bytes = vec![0u8; 60];
+        bytes[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        bytes[8..12].copy_from_slice(&13_u32.to_be_bytes());
+        bytes[12..16].copy_from_slice(b"IHDR");
+        bytes[16..20].copy_from_slice(&1_u32.to_be_bytes());
+        bytes[20..24].copy_from_slice(&1_u32.to_be_bytes());
+        bytes[52..56].copy_from_slice(b"IEND");
+        bytes
+    }
+    #[test]
+    fn device_identifier_cannot_become_an_adb_option_or_path() {
+        let very_long = "a".repeat(200);
+        for serial in ["192.168.2.226:5555", "emulator-5554", "adb-XXXX._adb-tls-connect._tcp"] {
+            assert!(validate_capture_device(serial).is_ok());
+        }
+        for serial in ["", "-a", "../secret", "a/b", "a\\b", "x\ny", "abc\0def", very_long.as_str()] {
+            assert!(validate_capture_device(serial).is_err(), "accepted {serial:?}");
+        }
+    }
+    #[test]
+    fn screenshot_accepts_only_bounded_png_with_dimensions_and_iend() {
+        let good = synthetic_png();
+        assert!(valid_android_screenshot_png(&good));
+        assert!(!valid_android_screenshot_png(&good[..36]));
+        let mut bad = good.clone();
+        bad[0] = b'x';
+        assert!(!valid_android_screenshot_png(&bad));
+        bad = good.clone();
+        bad[20..24].copy_from_slice(&0_u32.to_be_bytes());
+        assert!(!valid_android_screenshot_png(&bad));
+        bad = good.clone();
+        bad[52..56].copy_from_slice(b"FAIL");
+        assert!(!valid_android_screenshot_png(&bad));
+        bad = good.clone();
+        bad[8..12].copy_from_slice(&10_u32.to_be_bytes());
+        assert!(!valid_android_screenshot_png(&bad));
+        bad = good.clone();
+        bad[48..52].copy_from_slice(&2_u32.to_be_bytes());
+        assert!(!valid_android_screenshot_png(&bad));
+        assert!(!valid_android_screenshot_png(&vec![0u8; MAX_SCREENSHOT_PNG_SIZE + 1]));
     }
 }
 
