@@ -14,15 +14,19 @@
 
 ScrcpyGUI v4 is a modern, feature-rich GUI for [scrcpy](https://github.com/Genymobile/scrcpy), completely rebuilt from the ground up using **Tauri v2**, **React 19**, and **Rust**. It transforms your Android device into a professional tool for gaming, development, and content creation.
 
-## 🛠️ Community Fork — v4.4.1 Reliable Pen Hotfix
+## 🛠️ Community Fork — v4.5.0 Immersive Controls
 
-This fork builds on Tauri + scrcpy with wireless ADB diagnostics, a black-titanium phone frame and optional annotation tools.
+Based on the original Tauri + scrcpy desktop GUI, with wireless ADB diagnosis, a live black-titanium phone frame, and optional temporary on-screen annotations.
 
-**New in v4.4:** Change the mirror resolution from the settings dropdown while it is running. The GUI automatically stops and relaunches the scrcpy stream using the new launch-time `--max-size` value (a brief reconnect, not in-place encoder resizing). On Windows, hover next to the phone border and click the **pen** icon to mark up the live screen with four colors, three brush sizes, an eraser, undo and clear. Turn the pen off to resume normal Android touch input. The ink is temporary and clears on stream restart. **v4.4.1 stabilizes the pen**: the WebView2 canvas now acknowledges successful activation before native mouse capture, the overlay remains above scrcpy while drawing, and the toolbar resynchronizes its state after window focus changes.
+**New in v4.5:** The same slim phone casing adapts to **portrait and landscape Android video** without restarting the mirror. The larger hover toolbar puts **Move / Minimize / Close** together at the top, with Pen and **One-click Restore** below. Restore clears annotations and hands mouse input back to scrcpy. After Windows taskbar minimization, both the casing and toolbar are rechecked and reattached on restoration.
 
-**中文功能说明与验收清单：** [ANNOTATION_RESOLUTION_CN.md](ANNOTATION_RESOLUTION_CN.md)
+**Installer integrity:** Windows EXE/MSI Releases include a `SHA256SUMS.txt` checksum manifest. A trusted CA-issued Authenticode certificate can be configured in GitHub Actions for automatic signing; the fork currently has **no certificate configured**, so preview installers may still trigger Windows SmartScreen. Neither the app's `publisher` metadata nor its SHA256 alone constitutes trusted code signing. Never disable Windows Defender to silence a warning.
 
-**真机外框与圆角调试：** [DEVICE_FRAME_CN.md](DEVICE_FRAME_CN.md)
+**六项改进、横屏和安全签名说明（中文）：** [IMMERSIVE_CONTROLS_CN.md](IMMERSIVE_CONTROLS_CN.md)
+
+**画笔及分辨率说明：** [ANNOTATION_RESOLUTION_CN.md](ANNOTATION_RESOLUTION_CN.md)
+
+**机身外框设计说明：** [DEVICE_FRAME_CN.md](DEVICE_FRAME_CN.md)
 
 **开发路线图：** [ROADMAP_CN.md](ROADMAP_CN.md)
 
