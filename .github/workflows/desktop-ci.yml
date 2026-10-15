@@ -2,7 +2,7 @@ name: Desktop CI
 
 on:
   push:
-    branches: [main, 'fix/v4.3.2-rounded-frame-toolbar']
+    branches: [main, 'fix/v4.3.3-frame-seam']
   workflow_dispatch:
 
 permissions:
@@ -88,7 +88,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: scrcpygui-v4.3.2-preview.${{ github.run_number }}
+          RELEASE_TAG: scrcpygui-v4.3.3-preview.${{ github.run_number }}
         run: |
           set -euo pipefail
           mapfile -d '' installers < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' \) -print0)
@@ -96,23 +96,22 @@ jobs:
             echo "No Windows installers found"; exit 1
           fi
           cat > release-notes.md <<'NOTES'
-          ## ScrcpyGUI v4.3.2 — 圆角投屏与隐藏式悬浮控制条（Windows）
+          ## ScrcpyGUI v4.3.3 — 无蓝线真机圆角优化（Windows）
 
-          根据真实投屏截图修复上一版的三个问题：
+          根据用户实际截图，重点修复四角与手机边框之间的蓝色锯齿线，以及侧边 / 底部的细亮线。
 
-          - **四角不再露出方形画面**：使用 Windows 原生 SetWindowRgn 把真正的 scrcpy SDL 视频窗口裁剪成与外框开口匹配的圆角，而不仅仅是在上方绘制圆角线。
-          - **鼠标移到边框自动出现工具条**：按住四方向箭头可以拖动整台手机，另外支持一键最小化与关闭；移开鼠标后工具条自动隐藏。原有 Ctrl+Alt+Shift+W 和 Ctrl+Alt+Shift+C 仍可用。
-          - **去掉外缘白线**：调暗 SVG 的金属高光及内侧轮廓，修复浅色桌面上明显的白色细线。
-          - **保留实时触控与性能**：中间仍是 scrcpy 原生视频，装饰层继续鼠标穿透；仅小型独立控制条接收操作，不会重编码画面。
-          - **横屏兼容**：横屏/最小化/最大化时取消圆角裁剪并隐藏竖屏外框，不影响正常投屏。
+          - **去掉 Windows GDI 的硬圆角剪裁**：原版 SetWindowRgn 使用整数像素裁剪，而独立 WebView2 SVG 圆角使用抗锯齿，叠加时会漏出 Windows 桌面的蓝色壁纸。本版保留完整的 scrcpy 原生视频窗口，避免背景穿透。
+          - **增加 SVG 实体圆角遮片**：在屏幕透明开口外，将原生矩形视频的四个小角覆盖为深黑色，呈现平滑自然的圆角。
+          - **密封屏幕边缘**：增加内侧极窄深色遮片，盖住不同 DPI 下 1–2 像素的亚像素缝隙，消除蓝线和白色亮边。
+          - **减少高光**：将金属外框渐变压暗，保留窄边框与手机轮廓，避免过亮镶边。
+          - **保留所有控制功能**：边缘悬停出现操作栏，支持按住拖动、最小化、关闭；原生触控、快捷键和低延迟投屏不受影响。
+          - **仅 Windows 竖屏真机外框**：横屏、全屏及其他模式继续原生 scrcpy。
 
-          **使用方法**：启动竖屏镜像，将鼠标移到手机右边框、左边框或顶部边缘，按住浮出的移动箭头拖动，松开结束；横线最小化，叉号关闭。最小化后可从 Windows 任务栏或 Alt+Tab 恢复。
+          升级方法：退出旧版与投屏窗口，下载安装下方 EXE 或 MSI，重新启动竖屏投屏。
 
-          **下载**：Windows 64 位 EXE/MSI；这是 Windows 桌面控制端，并非 Android APK。
-
-          **仍需验证**：CI 检查编译与逻辑，不会模拟真实 Windows 桌面拖动和多 DPI 下的全部视觉情况。请使用你的安卓手机实测 100% / 125% / 150% 系统缩放与四角、白线、悬浮控件。
+          **预览版与实测说明**：CI 验证 Python SVG/Rust 静态约束、Rust 及前端测试、Windows 正式打包，不能代替你的 Windows 电脑上的真实 DPI 与视觉检测。请继续用蓝色或浅色桌面壁纸观察四角，必要时可关闭外框恢复普通 scrcpy。
           NOTES
           gh release create "$RELEASE_TAG" "${installers[@]}" \
             --target "$GITHUB_SHA" \
-            --title "ScrcpyGUI v4.3.2 · Rounded Frame & Controls Preview #${{ github.run_number }} (Windows)" \
+            --title "ScrcpyGUI v4.3.3 · Seamless Phone Frame Preview #${{ github.run_number }} (Windows)" \
             --notes-file release-notes.md --prerelease --latest=false
