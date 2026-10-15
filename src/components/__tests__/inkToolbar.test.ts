@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 // @ts-ignore: jsdom is available at runtime through Vitest; this project has no @types/jsdom.
