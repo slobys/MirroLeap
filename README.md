@@ -14,9 +14,9 @@
 
 ScrcpyGUI v4 is a modern, feature-rich GUI for [scrcpy](https://github.com/Genymobile/scrcpy), completely rebuilt from the ground up using **Tauri v2**, **React 19**, and **Rust**. It transforms your Android device into a professional tool for gaming, development, and content creation.
 
-## 🛠️ Community Fork — v4.3.1 Slim Phone Frame
+## 🛠️ Community Fork — v4.3.2 Rounded Phone Frame & Hover Controls
 
-This fork adds reliable wireless ADB diagnostics, a rollback-safe scrcpy engine updater, and a Windows **live phone frame**. Version 4.3.1 redesigns the earlier thick CSS bezel into a slim editable **black-titanium SVG shell**, with a real transparent screen opening and **no simulated notch, Dynamic Island, or iOS status bar**. The video and mouse/keyboard controls remain native scrcpy, not a screenshot.
+This fork adds reliable wireless ADB diagnostics, a rollback-safe scrcpy engine updater, and a Windows **live phone frame**. Version 4.3.2 refines the earlier thick CSS bezel into a slim editable **black-titanium SVG shell**, with a real transparent screen opening and **no simulated notch, Dynamic Island, or iOS status bar**. The video and mouse/keyboard controls remain native scrcpy, not a screenshot. The four live SDL video corners are now clipped to the bezel opening; move your mouse to the phone edge to reveal a small drag/minimize/close toolbar. Outer white highlights were also removed.
 
 **中文路线图：** [ROADMAP_CN.md](ROADMAP_CN.md)
 
