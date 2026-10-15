@@ -38,6 +38,7 @@ jobs:
       - run: python3 scripts/check_device_frame.py
       - run: python3 scripts/check_annotations.py
       - run: python3 scripts/check_landscape_toolbar.py
+      - run: python3 scripts/check_portable_release.py
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   windows:
@@ -81,6 +82,12 @@ jobs:
           }
           if (-not (Test-Path "dist/frame.html")) {
             throw "The annotation canvas is missing from the Windows build"
+          }
+          if (-not (Test-Path "src-tauri/target/release/bundle/portable/ScrcpyGUI_4.5.1_x64_Portable.zip")) {
+            throw "The no-installer portable ZIP is missing"
+          }
+          if (-not (Test-Path "release-checksums/SHA256SUMS.txt")) {
+            throw "No signed-and-hashed release manifest"
           }
       - uses: actions/upload-artifact@v4
         with:
