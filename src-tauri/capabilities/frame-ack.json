@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "phone-frame-ack",
+  "description": "Minimal core IPC access for the local phone frame Canvas to acknowledge completion of drawing commands. It has no shell or dialog permissions.",
+  "windows": [
+    "phone-frame-*"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}
