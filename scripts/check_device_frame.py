@@ -54,7 +54,7 @@ assert not any(
     element.tag.endswith("text") for element in top.iter()
 ), "The frame must not draw a fake clock, status bar or UI"
 
-# Verify the optional native tool rail and rounded screen clipping survive
+# Verify the native hover rail and SVG-based rounded corner seal survive
 # future refactors. This is a static safety check; Windows UI still needs an
 # actual physical mouse and monitor test.
 controls_page = (root / "public/phone-controls.html").read_text(encoding="utf-8")
@@ -65,10 +65,10 @@ assert all(f"act('{key}')" in controls_page for key in ("drag", "minimize", "clo
 assert 'phone-controls-*' in capability
 # Do NOT reintroduce Win32 region clipping: it is a hard-pixel mask,
 # incompatible with WebView2 antialiasing and creates wallpaper-colored seams.
-assert not re.search(r"\\bSetWindowRgn\\s*\\(", backend), (
+assert not re.search(r"\bSetWindowRgn\s*\(", backend), (
     "Win32 SetWindowRgn reintroduced: it leaks cyan wallpaper behind rounded SVG edges"
 )
-assert not re.search(r"\\bCreateRoundRectRgn\\s*\\(", backend), (
+assert not re.search(r"\bCreateRoundRectRgn\s*\(", backend), (
     "GDI hard rounded mask must not be used under SVG antialiasing"
 )
 seal = top.find('.//svg:g[@id="screen-seam-seal"]', ns)
