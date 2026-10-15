@@ -21,9 +21,13 @@ describe('MirroLeap visible failure fallback', () => {
     const entry = readFileSync(join(root, 'src/main.tsx'), 'utf8');
     const workflow = readFileSync(join(root, '.github/workflows/desktop-ci.yml'), 'utf8');
     const test = readFileSync(join(root, 'scripts/windows-smoke-cdp.mjs'), 'utf8');
+    const accessibility = readFileSync(join(root, 'scripts/windows-smoke-uia.ps1'), 'utf8');
     expect(entry).toContain('MutationObserver');
     expect(entry).toContain('rootElement.firstElementChild');
     expect(workflow).toContain('./scripts/windows-smoke-webview.ps1');
     expect(test).toContain('state.homeHeader && state.phoneList && state.mirrorControls');
+    expect(accessibility).toContain('System.Windows.Automation.AutomationElement');
+    expect(accessibility).toContain('Screen mirroring');
+    expect(accessibility).toContain('My devices');
   });
 });

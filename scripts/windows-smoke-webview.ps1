@@ -26,13 +26,27 @@ try {
     $webviewProcesses | Select-Object -First 4 Id, SessionId, ProcessName | Format-Table -AutoSize
     $listening = @(Get-NetTCPConnection -LocalPort 19222 -State Listen -ErrorAction SilentlyContinue)
     Write-Host "WebView2 remote debugging port listeners: $($listening.Count)"
-    node scripts/windows-smoke-cdp.mjs
-    if ($LASTEXITCODE -ne 0) {
+    # Prefer the normal Windows accessibility tree; it works even when the
+    # WebView2 runtime refuses Chrome's optional remote debugging flags.
+    & pwsh -NoProfile -File scripts/windows-smoke-uia.ps1 -AppProcessId $appProcess.Id
+    $uiaExitCode = $LASTEXITCODE
+    if ($uiaExitCode -eq 0) {
+        Write-Host 'PASS: Installed Windows application visibly exposed its actual controls.'
+    } else {
+        Write-Warning "UIAutomation result=$uiaExitCode. Checking the optional WebView2 CDP channel."
+        $env:MIRROLEAP_SMOKE_TIMEOUT_MS = '25000'
+        node scripts/windows-smoke-cdp.mjs
+        $cdpExitCode = $LASTEXITCODE
+        Remove-Item Env:MIRROLEAP_SMOKE_TIMEOUT_MS -ErrorAction SilentlyContinue
+        if ($cdpExitCode -eq 0) {
+            Write-Host 'PASS: real WebView2 DOM inspection found the homepage.'
+        } else {
         $appProcess.Refresh()
         Write-Host "MirroLeap process at test failure: Exited=$($appProcess.HasExited)"
         $processesAfter = @(Get-Process msedgewebview2 -ErrorAction SilentlyContinue)
         Write-Host "WebView2 processes after failure: $($processesAfter.Count)"
-        throw 'Packaged MirroLeap did not render its real homepage (WebView2 startup regression).'
+        throw 'Neither Windows accessibility nor WebView2 DOM inspection proved that the MirroLeap homepage rendered.'
+        }
     }
 } finally {
     $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = $previousArgs
