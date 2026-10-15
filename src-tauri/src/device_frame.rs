@@ -8,8 +8,8 @@
 //! The toolbar is a separate native window because making the main full-screen
 //! overlay mouse-active would intercept scrcpy taps and swipes.
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -38,6 +38,38 @@ static ACTIVE_DRAGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_READY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+// Tauri 2.10.x WebviewWindow.eval() has no eval_with_callback API. Instead
+// frame.html calls a narrow native acknowledgement command after running a
+// specific drawing operation. Match the nonce and caller window label.
+static INK_ACK_NONCE: AtomicU64 = AtomicU64::new(1);
+static INK_ACKS: OnceLock<Mutex<HashMap<u64, (String, tokio::sync::oneshot::Sender<bool>)>>> = OnceLock::new();
+fn ink_acks() -> &'static Mutex<HashMap<u64, (String, tokio::sync::oneshot::Sender<bool>)>> {
+    INK_ACKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Invoked by the phone-frame-* view only. The caller's trusted Tauri label
+/// must match the nonce's outstanding overlay; never trust a JS-supplied serial.
+pub(crate) fn acknowledge_ink(
+    caller: &tauri::Window,
+    token: u64,
+    success: bool,
+) -> Result<(), String> {
+    let caller_label = caller.label();
+    if !caller_label.starts_with("phone-frame-") {
+        return Err("Only the dedicated annotation window may acknowledge ink".into());
+    }
+    let sender = {
+        let mut acks = ink_acks().lock().map_err(|e| e.to_string())?;
+        match acks.get(&token) {
+            Some((expected, _)) if expected == caller_label => {},
+            Some(_) => return Err("Ink acknowledgement came from the wrong window".into()),
+            None => return Err("Unrecognized or expired ink acknowledgement".into()),
+        }
+        acks.remove(&token).map(|(_, tx)| tx)
+    }.ok_or("Ink acknowledgement has expired")?;
+    let _ = sender.send(success);
+    Ok(())
+}
 
 fn ink_ready() -> &'static Mutex<HashSet<String>> {
     INK_READY.get_or_init(|| Mutex::new(HashSet::new()))
@@ -376,31 +408,48 @@ fn ink_action_script(action: &str) -> Option<&'static str> {
     }
 }
 
-/// Execute an ink command only after the SVG WebView2 page has really loaded.
-/// Tauri's plain eval() is fire-and-forget: returning Ok() means queued, not
-/// canvas enabled. On Windows this caused a lit pen button while all taps
-/// still hit the SDL window or no ink could be painted.
+/// Actually execute an ink command on the WebView2 canvas, then await its
+/// one-time acknowledgement through Tauri's supported native IPC command.
 ///
-/// eval_with_callback returns JSON from the real page. A failed/missing
-/// script cannot silently advance the native hit-test state.
+/// Merely calling WebviewWindow.eval() returns when the script is QUEUED, not
+/// when it has RUN. Previous versions optimistically turned green and stole
+/// mouse events even if this canvas had not finished loading.
+///
+/// Tauri 2.10.x does not yet implement eval_with_callback on WebviewWindow,
+/// so we use an authenticated nonce and the caller's trusted window label.
 async fn evaluate_ink(overlay: &WebviewWindow, operation: &str) -> Result<bool, String> {
-    let js = format!(
-        "(() => {{ if (!window.scrcpyInk || window.scrcpyInk.ready !== true) return false; {} }})()",
-        operation
-    );
+    let token = INK_ACK_NONCE.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
-    let sender = Arc::new(Mutex::new(Some(tx)));
-    overlay.eval_with_callback(js, move |reply| {
-        let enabled = serde_json::from_str::<bool>(&reply).unwrap_or(false);
-        if let Ok(mut slot) = sender.lock() {
-            if let Some(tx) = slot.take() { let _ = tx.send(enabled); }
-        }
-    }).map_err(|e| format!("无法与画笔画布通信: {e}"))?;
-    let ready = tokio::time::timeout(Duration::from_secs(2), rx).await
-        .map_err(|_| "画布未响应，请稍等片刻后重试画笔按钮。".to_owned())?
-        .map_err(|_| "画布窗口已关闭，请重新开始投屏。".to_owned())?;
-    if !ready {
-        return Err("画布还没有完成加载，画笔未开启，请稍后重试。".into());
+    ink_acks().lock().map_err(|e| e.to_string())?
+        .insert(token, (overlay.label().to_string(), tx));
+    let js = format!(r#"(() => {{
+      let success = false;
+      try {{
+        const ink = window.scrcpyInk;
+        if (ink && ink.ready === true) {{
+          success = Boolean((() => {{ {} }})());
+        }}
+      }} catch (error) {{
+        console.error('[ScrcpyGUI Ink] Canvas operation failed', error);
+      }}
+      const call = window.__TAURI__?.core?.invoke;
+      if (call) {{
+        void call('device_frame_ack', {{ token: {}, success }})
+          .catch(error => console.error('[ScrcpyGUI Ink] Acknowledgement failed', error));
+      }}
+    }})()"#, operation, token);
+    if let Err(error) = overlay.eval(js) {
+        ink_acks().lock().map_err(|e| e.to_string())?.remove(&token);
+        return Err(format!("向画布发送绘制指令失败: {error}"));
+    }
+    let received = tokio::time::timeout(Duration::from_secs(3), rx).await;
+    // Timeout and cancellation must never leave one-time senders in memory.
+    ink_acks().lock().map_err(|e| e.to_string())?.remove(&token);
+    let ok = received
+        .map_err(|_| "画笔画布未响应，请稍后重新点击画笔按钮。".to_string())?
+        .map_err(|_| "画笔窗口已断开，请重新启动投屏。".to_string())?;
+    if !ok {
+        return Err("画笔还没有就绪，未接管手机鼠标。请稍后重试。".into());
     }
     Ok(true)
 }
