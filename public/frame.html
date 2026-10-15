@@ -123,6 +123,7 @@
     });
     canvas.addEventListener('pointermove', event => {
       if (!enabled || !drawing) return;
+      event.preventDefault();
       drawing.points.push(currentPoint(event));
       redraw();
     });
@@ -139,10 +140,16 @@
     // Native toolbar controls this API via WebviewWindow.eval(), so the
     // click-through drawing overlay needs no additional Tauri capabilities.
     window.scrcpyInk = Object.freeze({
+      // The native control bar must receive an explicit evaluated result before
+      // enabling hit-testing. A queued window.eval() by itself is NOT proof
+      // that this script was loaded or the canvas really entered ink mode.
+      ready: true,
+      isEnabled() { return enabled; },
       setEnabled(value) {
         enabled = Boolean(value);
         document.body.classList.toggle('inking', enabled);
         if (!enabled) { drawing = null; redraw(); }
+        return enabled;
       },
       setTool(value) { if (value === 'pen' || value === 'erase') tool = value; },
       setColor(value) {

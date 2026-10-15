@@ -124,6 +124,7 @@ pub fn run() {
             commands::run_scrcpy,
             commands::stop_scrcpy,
             commands::device_frame_control,
+            commands::device_frame_ack,
             commands::recenter_scrcpy_window,
             commands::set_active_device,
             commands::download_scrcpy,

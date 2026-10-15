@@ -35,6 +35,34 @@ assert "'ink_clear'" in bar
 assert "window.__TAURI__?.core?.invoke" in bar
 assert "device_frame_control" in bar
 
+# V4.4.0 could light up the pen button without a working canvas:
+# WebViewWindow.eval() only QUEUES JavaScript; it does not acknowledge that the
+# canvas has loaded, enabled input, or stayed above scrcpy's SDL window.
+# Tauri 2.10 WebviewWindow has no eval_with_callback: the Canvas must
+# acknowledge its execution via a dedicated one-time native IPC command.
+assert "ink_acks()" in native and "INK_ACK_NONCE.fetch_add" in native
+assert "device_frame_ack" in native and "acknowledge_ink(" in native
+assert "tokio::time::timeout(Duration::from_secs(3), rx)" in native
+assert "caller.label()" in native and "phone-frame-" in native
+assert "commands::device_frame_ack" in (root / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+frame_perms = (root / "src-tauri/capabilities/frame-ack.json").read_text(encoding="utf-8")
+assert '"phone-frame-*"' in frame_perms
+assert '"shell:default"' not in frame_perms and '"dialog:default"' not in frame_perms
+assert "on_page_load" in native and "PageLoadEvent::Finished" in native
+assert "ready_to_ink(device)" in native and "InkTransitionGuard::begin(device)" in native
+assert "evaluate_ink(&overlay" in native
+assert "promote_drawing_windows" in native
+assert "drawing &&" in native and "toolbar_hwnd == Some(focused)" in native
+assert "window.scrcpyInk.isEnabled() === true" in native
+assert "window.scrcpyInk.isEnabled() === false" in native
+assert "ink_status" in native
+assert "ready: true" in frame and "isEnabled()" in frame
+assert "let switching = false;" in bar and "inkButton.disabled = true" in bar
+assert "displayInkState(await invoke('ink_status'))" in bar
+assert "const actual = await invoke('ink_toggle')" in bar
+assert "enabled = !enabled" not in bar
+assert "aria-pressed" in bar and "report(error, true)" in bar
+
 assert "set_ignore_cursor_events(true)" in native, "Pass-through must be restored when leaving ink mode"
 assert "set_ignore_cursor_events(false)" in native, "Pen mode must capture mouse events"
 assert "fn ink_action_script" in native and "fn control_ink" in native
@@ -62,4 +90,4 @@ assert "config: {" in hook
 assert "adb shell wm size" not in control, "Do not change Android's global system resolution"
 assert "onResolutionChange" in control and "isSwitchingResolution" in control
 
-print("Annotation: pointer isolation, palette, sizing & session restart handshake verified")
+print("Annotation: scoped native IPC ack, window focus, input recovery and state sync verified")

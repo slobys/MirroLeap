@@ -2,7 +2,7 @@ name: Desktop CI
 
 on:
   push:
-    branches: [main, 'feat/v4.4-resolution-annotations']
+    branches: [main, 'fix/v4.4.1-stable-ink']
   workflow_dispatch:
 
 permissions:
@@ -92,7 +92,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: scrcpygui-v4.4.0-preview.${{ github.run_number }}
+          RELEASE_TAG: scrcpygui-v4.4.1-preview.${{ github.run_number }}
         run: |
           set -euo pipefail
           mapfile -d '' installers < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' \) -print0)
@@ -100,19 +100,22 @@ jobs:
             echo "No Windows installers found"; exit 1
           fi
           cat > release-notes.md <<'NOTES'
-          ## ScrcpyGUI v4.4.0 — 一键分辨率切换 + 投屏画笔标注（Windows）
+          ## ScrcpyGUI v4.4.1 — 修复画笔偶发不能绘制（Windows）
 
-          - **一键应用分辨率**：在运行中的普通镜像会话里直接选 480p / 720p / 1080p / 2K / 4K / 原始分辨率。程序自动停止旧流，等待退出确认，再以新的 scrcpy --max-size 参数启动，不需再手工点击停止和启动。会短暂黑屏；不会执行 adb wm size，不会修改安卓系统自身分辨率。
-          - **安全切换与恢复**：限制并发切换、保留窗口上次位置、录屏时禁止自动切换；新参数启动失败时尽力恢复旧配置。此版本不支持真正“不中断的编码分辨率切换”，该能力需修改 scrcpy 核心协议。
-          - **新增隐藏式画笔**：手机右侧悬浮栏加入画笔按钮；开启后在实时画面上绘制、选择黄/红/白/青色、切换笔刷粗细、橡皮擦、撤销和清空；关闭后恢复原生触控。标注仅覆盖电脑上的投屏画面，**不会写入安卓系统**。
-          - **标注随窗口缩放**：采用按画面比例记录的透明 canvas；调整投屏窗口大小时笔迹保持位置，断开投屏或自动切换分辨率后标注清空。
-          - **保留真机外框**：维持黑钛窄边框、隐藏悬浮拖动/最小化/关闭以及之前的圆角修复。
+          针对 v4.4.0 真机使用反馈：画笔按钮有时能用，有时失效。
 
-          **使用方式**：Windows 下打开镜像，直接改分辨率选择框即可自动切换。把鼠标移到手机右边缘，点击新画笔按钮；退出画笔即可恢复点击手机应用。
+          - **画布真实状态确认**：改用 WebView2 JS 执行结果回调，先确认 Canvas 已加载且已进入画笔模式，才启用鼠标捕获。旧版仅向窗口投递 JS 就将按钮显示为开启，可能导致工具栏亮起但无法绘制。
+          - **窗口前后层级修复**：点右侧工具栏后，即使工具栏处于前台，持续保持画笔透明窗口位于 scrcpy 实时画面之上，并让工具栏位于画笔层之上。
+          - **防连点和状态同步**：画笔按钮切换期间暂时禁用，避免连续点击造成 Rust/JavaScript 状态不一致；窗口重新获得焦点时同步真实状态，不再凭本地变量猜测。
+          - **自动恢复触控**：关闭标注时先恢复 scrcpy 鼠标穿透；如画布还没准备好或窗口加载中，明确提示错误而不会启用无效捕获。
+          - **新交互回归测试**：增加画笔快速连点、加载失败、真实状态回读、重新获得焦点恢复等测试。
+          - **原有功能完整保留**：四色画笔、画笔粗细、橡皮擦、撤销、清空、隐藏式拖动/最小化/关闭、一键自动切换分辨率和黑钛真机外框。
 
-          **预览版限制**：自动化检查可验证代码与安装包，但透明窗口的鼠标捕获、Windows 不同 DPI、短暂重启及各手机编码器兼容性仍需在真实 Windows 电脑上测试。此程序是桌面 GUI，不是 Android APK。
+          **使用**：退出旧版本后安装 Windows x64 EXE（或 MSI），启动竖屏投屏，将鼠标移到手机右侧，点击画笔按钮，再直接在手机实时画面书写。关闭画笔后可恢复正常点击手机应用。
+
+          **预览版提醒**：CI 会检查前端、Rust、窗口 API 和安装包，但用户电脑上的 WebView2 鼠标捕获与多 DPI 仍须实测。如果出现红色错误提示点，可悬停查看说明或根据弹窗提示重试。
           NOTES
           gh release create "$RELEASE_TAG" "${installers[@]}" \
             --target "$GITHUB_SHA" \
-            --title "ScrcpyGUI v4.4.0 · Quick Resolution & Pen Preview #${{ github.run_number }} (Windows)" \
+            --title "ScrcpyGUI v4.4.1 · Reliable Pen Hotfix Preview #${{ github.run_number }} (Windows)" \
             --notes-file release-notes.md --prerelease --latest=false
