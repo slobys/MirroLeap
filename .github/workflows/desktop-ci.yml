@@ -64,6 +64,12 @@ jobs:
       - name: Stage extract-and-run portable version
         shell: pwsh
         run: ./scripts/windows-stage-portable.ps1
+      # Regression gate for v4.6.3: compiler/build tests passed even while
+      # the installed Windows app showed an entirely blank UI. Boot the
+      # actual WebView2 executable and read the rendered React DOM via CDP.
+      - name: Windows WebView2 packaged homepage startup smoke
+        shell: pwsh
+        run: ./scripts/windows-smoke-webview.ps1
       - name: Build Windows NSIS and MSI installers
         run: npm run tauri build
       - name: Optional Authenticode signing and mandatory SHA256 verification
@@ -154,6 +160,9 @@ jobs:
           基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 投屏核心。
 
           ### 主要更新
+          - **v4.6.4 白屏恢复**：修复 v4.6.3 在部分 Windows WebView2 环境中安装后只显示空白背景的问题。暂时回退新增的全局 CSP 到此前可用版本的设置，保留其它 Tauri 权限隔离、日志与更新完整性保护。
+          - **真实启动验收**：Windows CI 不再只检查 EXE 能否构建；打包程序会在 WebView2 中真实启动，并通过页面 DOM 检查确认 MirroLeap 首页、设备卡片和投屏控制已经渲染，防止空白版再次进入 Releases。
+          - **故障提示**：即使前端 JS 启动异常，也有独立于 React 的初始提示，不再只显示毫无说明的空白窗口。严格 CSP 将在完成兼容性验证后重新引入。
           - **v4.6.3 稳定与安全**：修复 npm 依赖安全公告，自动测试增加依赖漏洞扫描；配置 Tauri CSP 并将主界面、悬浮控制栏和启动画面分权隔离。
           - **保护导出与高级终端**：只允许主窗口调用终端和报告导出，限制报告文件名/体积及终端执行时间；诊断报告按白名单保存非敏感设置并对常见设备地址做脱敏。
           - **一键场景预设**：均衡、演示、流畅、高清四个视频预设，运行中的投屏不会因切换预设而自动重启；其它设置不受影响。

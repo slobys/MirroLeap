@@ -13,11 +13,45 @@
       padding: 0;
       overflow: hidden;
     }
+    #startup-fallback {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      background: #f5f1ff;
+      color: #252436;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      font: 15px system-ui, sans-serif;
+      padding: 25px;
+      text-align: center;
+    }
+    #startup-fallback p {
+      font-size: 12px;
+      line-height: 1.8;
+      color: #626477;
+      max-width: 440px;
+    }
+    #startup-fallback .delayed-hint {
+      opacity: 0;
+      animation: fallback-hint 0s 10s forwards;
+    }
+    @keyframes fallback-hint { to { opacity: 1; } }
   </style>
 </head>
 
 <body>
   <div id="root"></div>
+  <!-- This static fallback is intentionally independent of React and Tauri
+       IPC. If Windows WebView2 blocks our JS bundle, show an explanation
+       instead of another blank purple rectangle. React removes it only once
+       a real app element has been committed into #root. -->
+  <div id="startup-fallback" role="status">
+    <strong>MirroLeap 正在启动…</strong>
+    <p class="delayed-hint">界面未能正常加载。请先关闭本窗口，再使用最新修复版。无需清除手机配对记录或禁用 Windows 安全防护。</p>
+  </div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

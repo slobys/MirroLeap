@@ -10,10 +10,13 @@ caps = {
     for p in (root / "src-tauri/capabilities").glob("*.json")
 }
 csp = config["app"]["security"]["csp"]
-assert isinstance(csp, str) and "default-src 'self'" in csp
-for critical in ("object-src 'none'", "frame-src 'none'", "connect-src", "script-src"):
-    assert critical in csp, f"Missing CSP restriction: {critical}"
-assert "'unsafe-eval'" not in csp
+# v4.6.3 introduced a production CSP that correlated with a real user's
+# completely blank Windows WebView2 screen. Until a future policy is tested in
+# a *running packaged WebView2*, prevent a static config check from declaring
+# CSP safe merely because the JSON contains attractive-looking directives.
+# Fail if anyone silently re-enables CSP without deliberately updating the
+# Windows startup regression and this explicit rollback decision.
+assert csp is None, "Do not re-enable CSP without packaged WebView2 startup testing"
 assert not any('https://fonts.googleapis.com' in line for line in
                (root / "index.html").read_text().splitlines())
 assert caps["default"]["windows"] == ["main"]
@@ -41,4 +44,7 @@ assert "safeDiagnosticSettings" in diagnostic and "redactDiagnosticText" in diag
 assert "localStorage:" not in (root / "src/components/ErrorBoundary.tsx").read_text()
 assert "localStorage:" not in (root / "src/components/LogPanel.tsx").read_text()
 assert "场景预设" in (root / "README.md").read_text()
-print("Security: CSP, scoped Tauri capabilities, safe reports, bounded terminal and diagnostics passed")
+assert 'id="startup-fallback"' in (root / "index.html").read_text()
+assert "scripts/windows-smoke-webview.ps1" in (
+    root / ".github/workflows/desktop-ci.yml").read_text()
+print("Security: WebView2 startup rollback, scoped Tauri capabilities, safe reports, bounded terminal and diagnostics passed")

@@ -18,6 +18,7 @@
 - **悬浮栏防越界（v4.6.1）**：始终约束在手机投屏的可见上下范围、当前显示器工作区内，避开 Windows 任务栏；短横屏时自动切换双排按钮，避免画笔和关闭键被遮挡。
 - **场景预设（v4.6.3）**：均衡、演示、流畅、高清四种一键预设，只改变下次投屏的分辨率、帧率与码率，保留设备、音频、录制和手机边框选项。
 - **安全加固（v4.6.3）**：逐项更新有安全公告的前端依赖、添加持续审计；启动页/悬浮栏的 Tauri 权限与主窗口隔离，限制 CSP、报告文件名和终端命令，诊断数据默认排除设备地址与本地路径。
+- **白屏修复（v4.6.4）**：恢复与 Windows WebView2 兼容的启动策略，增加不依赖 React 的故障提示，并在 CI 实际启动打包程序验证界面已渲染。v4.6.3 的 CSP 已临时回退，其他 IPC/导出/核心校验加固保留，详见 [安全说明](SECURITY_CN.md)。
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
@@ -27,9 +28,9 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_4.6.3_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_4.6.3_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_4.6.3_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_4.6.4_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_4.6.4_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_4.6.4_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
 从 **[MirroLeap GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest)** 的 Assets 下载，不要从 Tags 页面下载源码 ZIP 当作安装包。
 
