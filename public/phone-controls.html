@@ -52,7 +52,16 @@
     }
     .swatches button.selected { outline: 2px solid white; outline-offset: 1px; }
     #size { font-size: 10px; font-weight: 700; }
-    #status { display: none; }
+    /* A visible red warning dot, with full diagnostic in the tooltip.
+       Only shown on native/JS activation failures; ordinary use stays tidy. */
+    #status {
+      display: none; position: absolute; top: 3px; right: 3px;
+      width: 11px; height: 11px; padding: 0; overflow: hidden;
+      border-radius: 50%; background: #fb7185; z-index: 5;
+      border: 2px solid #171a22;
+    }
+    #status[data-error="true"] { display: block; }
+    #ink-toggle[disabled] { opacity: .52; cursor: wait; }
   </style>
 </head>
 <body>
@@ -92,63 +101,141 @@
       <button id="clear" aria-label="清空所有标注" title="清空 / Clear">⌧</button>
     </div>
   </div>
-  <div id="status" role="status" aria-live="polite"></div>
+  <div id="status" role="status" aria-live="assertive" title=""></div>
   <script>
     (() => {
+      'use strict';
       const invoke = action => {
         const handler = window.__TAURI__?.core?.invoke;
         if (!handler) return Promise.reject(new Error('Native controls unavailable'));
         return handler('device_frame_control', { action });
       };
       const status = document.getElementById('status');
-      const act = action => invoke(action).catch(e => { status.textContent = String(e); });
-      let enabled = false;
       const inkButton = document.getElementById('ink-toggle');
-      inkButton.addEventListener('click', async () => {
+      let enabled = false;
+      let switching = false;
+
+      // The native process is the single source of truth. Previously this
+      // HTML toggled an independent boolean even when WebView2 had not loaded
+      // the drawing script. The button could look green but not actually draw.
+      function displayInkState(value) {
+        enabled = Boolean(value);
+        document.body.classList.toggle('inking', enabled);
+        inkButton.classList.toggle('active', enabled);
+        inkButton.setAttribute('aria-pressed', String(enabled));
+        inkButton.title = enabled
+          ? '画笔已开启：直接在手机画面上书写；再次点击恢复手机触控'
+          : '开启画笔：在投屏画面上标注';
+      }
+
+      function report(error, showDialog = false) {
+        const message = String(error);
+        status.textContent = message;
+        status.title = message;
+        status.dataset.error = 'true';
+        console.error('[ScrcpyGUI Ink]', message);
+        if (showDialog) window.alert('画笔暂时无法启用：\n' + message);
+      }
+      function clearReport() {
+        status.textContent = '';
+        status.title = '';
+        delete status.dataset.error;
+      }
+
+      async function syncInkState() {
+        if (switching) return;
         try {
-          await invoke('ink_toggle');
-          enabled = !enabled;
-          document.body.classList.toggle('inking', enabled);
-          inkButton.classList.toggle('active', enabled);
-          inkButton.setAttribute('aria-pressed', String(enabled));
-        } catch (e) { status.textContent = String(e); }
+          displayInkState(await invoke('ink_status'));
+        } catch (error) {
+          report(error);
+        }
+      }
+
+      async function act(action, success) {
+        try {
+          const result = await invoke(action);
+          clearReport();
+          if (action.startsWith('ink_')) displayInkState(result);
+          if (success) success();
+          return result;
+        } catch (error) {
+          report(error);
+          return null;
+        }
+      }
+
+      inkButton.addEventListener('click', async () => {
+        if (switching) return;
+        switching = true;
+        inkButton.disabled = true;
+        inkButton.setAttribute('aria-busy', 'true');
+        try {
+          // Acknowledge the ACTUAL JS canvas enabled state, and native hit-test
+          // state, before changing the palette. Repeated clicks cannot race.
+          const actual = await invoke('ink_toggle');
+          clearReport();
+          displayInkState(actual);
+        } catch (error) {
+          report(error, true);
+          // The native mode may have been reset on navigation or lost focus.
+          // Do not optimistically flip the tool button on failure.
+        } finally {
+          inkButton.disabled = false;
+          inkButton.removeAttribute('aria-busy');
+          switching = false;
+          await syncInkState();
+        }
       });
+
       document.getElementById('drag').addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
         event.preventDefault();
-        act('drag');
+        void act('drag');
       });
-      document.getElementById('minimize').addEventListener('click', () => act('minimize'));
-      document.getElementById('close').addEventListener('click', () => act('close'));
+      document.getElementById('minimize').addEventListener('click', () => void act('minimize'));
+      document.getElementById('close').addEventListener('click', () => void act('close'));
+
       document.getElementById('pen').addEventListener('click', () => {
-        act('ink_pen');
-        document.getElementById('pen').classList.add('active');
-        document.getElementById('eraser').classList.remove('active');
+        void act('ink_pen', () => {
+          document.getElementById('pen').classList.add('active');
+          document.getElementById('eraser').classList.remove('active');
+        });
       });
       document.getElementById('eraser').addEventListener('click', () => {
-        act('ink_erase');
-        document.getElementById('eraser').classList.add('active');
-        document.getElementById('pen').classList.remove('active');
+        void act('ink_erase', () => {
+          document.getElementById('eraser').classList.add('active');
+          document.getElementById('pen').classList.remove('active');
+        });
       });
       for (const name of ['yellow', 'red', 'white', 'cyan']) {
         document.getElementById(name).addEventListener('click', () => {
-          act('ink_color_' + name);
-          document.querySelectorAll('.swatches button').forEach(el => el.classList.remove('selected'));
-          document.getElementById(name).classList.add('selected');
-          document.getElementById('pen').classList.add('active');
-          document.getElementById('eraser').classList.remove('active');
+          void act('ink_color_' + name, () => {
+            document.querySelectorAll('.swatches button').forEach(el => el.classList.remove('selected'));
+            document.getElementById(name).classList.add('selected');
+            document.getElementById('pen').classList.add('active');
+            document.getElementById('eraser').classList.remove('active');
+          });
         });
       }
       const sizes = [3, 5, 9];
       let sizeIndex = 1;
       document.getElementById('size').addEventListener('click', () => {
-        sizeIndex = (sizeIndex + 1) % sizes.length;
-        const size = sizes[sizeIndex];
-        act('ink_size_' + size);
-        document.getElementById('size').textContent = size + 'px';
+        const next = (sizeIndex + 1) % sizes.length;
+        void act('ink_size_' + sizes[next], () => {
+          sizeIndex = next;
+          document.getElementById('size').textContent = sizes[next] + 'px';
+        });
       });
-      document.getElementById('undo').addEventListener('click', () => act('ink_undo'));
-      document.getElementById('clear').addEventListener('click', () => act('ink_clear'));
+      document.getElementById('undo').addEventListener('click', () => void act('ink_undo'));
+      document.getElementById('clear').addEventListener('click', () => void act('ink_clear'));
+
+      // Recover UI after WebView2 reload, minimize/restore or focus changes.
+      // A switch in flight never competes with the following state query.
+      window.addEventListener('focus', () => { void syncInkState(); });
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) void syncInkState();
+      });
+      void syncInkState();
     })();
   </script>
 </body>
