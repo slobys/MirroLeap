@@ -1,7 +1,7 @@
 {
   "name": "scrcpy-gui-v3",
   "private": true,
-  "version": "4.3.4",
+  "version": "4.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
