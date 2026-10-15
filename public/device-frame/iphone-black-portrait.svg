@@ -73,30 +73,18 @@
   </g>
 
   <!--
-    Physical screen seam fix:
-    Windows SetWindowRgn creates a *hard integer* edge, while the WebView2/SVG
-    aperture is subpixel-antialiased. On a blue desktop this revealed a cyan
-    hairline and dotted blue corners. We therefore leave scrcpy's rectangular
-    native video intact and cover its FOUR screen-corner wedges with an opaque
-    matte, then overdraw the aperture by a few pixels with an antialiased black
-    gasket. The live SDL video is still directly visible through the centre.
-
-    Keep the matte under the metal rim but above the video (this is the SVG
-    visual overlay), and never clip the SDL HWND with CreateRoundRectRgn.
-    The geometry of the aperture itself stays unchanged for Rust positioning.
+    Seam-free corners require TWO coordinated masks, not a solid rectangle:
+      1. SDL's native Win32 mask has 3px *smaller* radii than this SVG aperture,
+         so hard native clip pixels remain hidden behind the casing.
+      2. This antialiased rounded gasket covers the native hard-edge staircase.
+    The independent rectangular corner matte from v4.3.3 has been REMOVED:
+    it painted a black rectangle OUTSIDE the rounded handset silhouette.
+    Never reintroduce an unrounded opaque rectangle here.
   -->
   <g id="screen-seam-seal" aria-hidden="true">
-    <!-- Occupies the four square client corners OUTSIDE the rounded aperture.
-         The original metallic body has larger outside corner radii and does
-         not paint these wedges, so the matte must be an independent layer. -->
-    <rect x="16.5" y="16.5" width="967" height="2117"
-          fill="#06080b" mask="url(#transparentScreen)"/>
-    <!-- Anti-alias guard: a 9-unit stroke overlaps ~4 screen pixels and
-         conceals ±1–2px Windows / WebView2 DPI alignment gaps without
-         creating a wide visible border or coloring the Android status bar. -->
     <rect id="video-edge-gasket"
           x="18" y="18" width="964" height="2114" rx="57"
-          fill="none" stroke="#06080b" stroke-width="9"
+          fill="none" stroke="#06080b" stroke-width="7"
           stroke-linejoin="round"/>
   </g>
 
