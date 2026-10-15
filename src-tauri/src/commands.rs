@@ -11,8 +11,6 @@ use tokio::process::Command as TokioCommand;
 use tokio::io::{BufReader, AsyncBufReadExt};
 use tokio::time::{timeout, Duration};
 use serde::Deserialize;
-use flate2::read::GzDecoder;
-use tar::Archive;
 
 const AUDIO_FALLBACK_CHAIN: &[&str] = &["aac", "flac", "raw"];
 
@@ -2266,156 +2264,14 @@ pub async fn stop_scrcpy(state: State<'_, ScrcpyState>, device: String) -> Resul
 }
 
 #[tauri::command]
-pub async fn download_scrcpy(window: Window) -> Result<(), String> {
-    use std::io::Write;
-    
-    let (os_tag, arch_tag, extension) = if cfg!(target_os = "windows") {
-        let arch = if cfg!(target_arch = "x86_64") { "win64" } else { "win32" };
-        (arch, arch, ".zip")
-    } else if cfg!(target_os = "linux") {
-        ("linux", "linux-x86_64", ".tar.gz")
-    } else if cfg!(target_os = "macos") {
-        let arch = if cfg!(target_arch = "aarch64") { "macos-aarch64" } else { "macos-x86_64" };
-        ("macos", arch, ".tar.gz")
-    } else {
-        return Err("Unsupported OS for auto-download".to_string());
-    };
-
-    window.emit("scrcpy-log", format!("[SYSTEM] Detecting platform: {} ({})", os_tag, arch_tag)).unwrap();
-    window.emit("scrcpy-status", json!({ "type": "downloading", "success": true, "message": format!("Fetching latest {} release...", arch_tag) })).unwrap();
-
-    let client = reqwest::Client::builder().user_agent("ScrcpyGui-Downloader").build().map_err(|e| e.to_string())?;
-    
-    // Attempt to get the latest release via API, but fallback to redirect scraping if rate limited
-    let mut download_url = String::new();
-    let mut filename = String::new();
-
-    let api_url = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest";
-    let api_resp = client.get(api_url).send().await;
-
-    let mut used_fallback = false;
-
-    if let Ok(resp) = api_resp {
-        if resp.status().is_success() {
-            if let Ok(json) = resp.json::<serde_json::Value>().await {
-                if let Some(assets) = json["assets"].as_array() {
-                    for asset in assets {
-                        let name = asset["name"].as_str().unwrap_or("");
-                        if name.contains(arch_tag) && name.ends_with(extension) {
-                            download_url = asset["browser_download_url"].as_str().unwrap_or("").to_string();
-                            filename = name.to_string();
-                            break;
-                        }
-                    }
-                }
-            }
-        } else if resp.status() == reqwest::StatusCode::FORBIDDEN {
-            window.emit("scrcpy-log", "[SYSTEM] API rate limited, attempting fallback discovery...").unwrap();
-            used_fallback = true;
-        }
-    } else {
-        used_fallback = true;
+pub async fn download_scrcpy(
+    window: Window,
+    state: State<'_, ScrcpyState>,
+) -> Result<(), String> {
+    if !state.processes.lock().unwrap().is_empty() {
+        return Err("Stop all running scrcpy sessions before updating the engine.".into());
     }
-
-    if used_fallback || download_url.is_empty() {
-        // Fallback: Follow redirect of /releases/latest to get the tag name
-        let redirect_res = client.get("https://github.com/Genymobile/scrcpy/releases/latest")
-            .send().await.map_err(|e| format!("Fallback failed: {}", e))?;
-        
-        let final_url = redirect_res.url().as_str();
-        // URL is like https://github.com/Genymobile/scrcpy/releases/tag/v2.7
-        if let Some(tag) = final_url.split('/').next_back() {
-            if tag.starts_with('v') {
-                filename = format!("scrcpy-{}-{}{}", arch_tag, tag, extension);
-                download_url = format!("https://github.com/Genymobile/scrcpy/releases/download/{}/{}", tag, filename);
-                window.emit("scrcpy-log", format!("[SYSTEM] Discovered latest tag via fallback: {}", tag)).unwrap();
-            }
-        }
-    }
-    
-    if download_url.is_empty() {
-        return Err(format!("Could not find {} binary. (API rate limit might be active)", arch_tag));
-    }
-
-    window.emit("scrcpy-log", format!("[SYSTEM] Found asset: {}", filename)).unwrap();
-    
-    let current_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| std::env::current_dir().unwrap());
-        
-    let temp_archive_path = current_dir.join(format!("scrcpy_temp{}", extension));
-    let extract_path = current_dir.join("scrcpy-bin");
-    
-    {
-        let mut file = std::fs::File::create(&temp_archive_path).map_err(|e| format!("Failed to create archive file: {}", e))?;
-        let mut download_resp = client.get(&download_url).send().await.map_err(|e| format!("Failed to connect to download URL: {}", e))?;
-        let total_size = download_resp.content_length().unwrap_or(0);
-        
-        window.emit("scrcpy-log", format!("[SYSTEM] Downloading: {} MB", total_size / 1024 / 1024)).unwrap();
-
-        let mut downloaded: u64 = 0;
-        while let Some(chunk) = download_resp.chunk().await.map_err(|e| e.to_string())? {
-            file.write_all(&chunk).map_err(|e| format!("Failed to write chunk: {}", e))?;
-            downloaded += chunk.len() as u64;
-            if total_size > 0 {
-                let percent = (downloaded * 100) / total_size;
-                let _ = window.emit("download-progress", json!({ "percent": percent }));
-            }
-        }
-    }
-    
-    window.emit("scrcpy-log", "[SYSTEM] Download finished. Starting extraction...").unwrap();
-    window.emit("scrcpy-status", json!({ "type": "downloading", "success": true, "message": "Extracting binaries..." })).unwrap();
-
-    if extract_path.exists() {
-        let _ = std::fs::remove_dir_all(&extract_path);
-    }
-    
-    let temp_extract_dir = current_dir.join("temp_extract");
-    if temp_extract_dir.exists() {
-        let _ = std::fs::remove_dir_all(&temp_extract_dir);
-    }
-    std::fs::create_dir_all(&temp_extract_dir).map_err(|e| e.to_string())?;
-
-    if extension == ".zip" {
-        window.emit("scrcpy-log", "[SYSTEM] Decompressing ZIP archive...").unwrap();
-        let file = std::fs::File::open(&temp_archive_path).map_err(|e| format!("Failed to open zip: {}", e))?;
-        let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Failed to read zip archive: {}", e))?;
-        archive.extract(&temp_extract_dir).map_err(|e| format!("Failed to extract: {}", e))?;
-    } else {
-        window.emit("scrcpy-log", "[SYSTEM] Decompressing TAR.GZ archive...").unwrap();
-        let file = std::fs::File::open(&temp_archive_path).map_err(|e| format!("Failed to open tar.gz: {}", e))?;
-        let tar = GzDecoder::new(file);
-        let mut archive = Archive::new(tar);
-        archive.unpack(&temp_extract_dir).map_err(|e| format!("Failed to extract tar: {}", e))?;
-    }
-    
-    // Verify entries and move to scrcpy-bin
-    let mut entries = std::fs::read_dir(&temp_extract_dir).map_err(|e| e.to_string())?;
-    if let Some(entry) = entries.next() {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        
-        if path.is_dir() {
-            // Usually scrcpy archives contain a single root folder
-            let _ = std::fs::rename(&path, &extract_path).or_else(|_| {
-                copy_dir_all(&path, &extract_path)
-            });
-        } else {
-            // If files are in root, rename the whole temp dir
-            let _ = std::fs::rename(&temp_extract_dir, &extract_path).or_else(|_| {
-                copy_dir_all(&temp_extract_dir, &extract_path)
-            });
-        }
-    }
-    
-    // Cleanup
-    if temp_extract_dir.exists() { let _ = std::fs::remove_dir_all(&temp_extract_dir); }
-    if temp_archive_path.exists() { let _ = std::fs::remove_file(&temp_archive_path); }
-
-    window.emit("scrcpy-status", json!({ "type": "download-complete", "success": true, "message": extract_path.to_string_lossy() })).unwrap();
-    Ok(())
+    crate::core_manager::install_latest(&window).await
 }
 
 #[tauri::command]
