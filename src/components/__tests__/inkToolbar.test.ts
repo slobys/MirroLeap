@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 // @ts-ignore: jsdom is available at runtime through Vitest; this project has no @types/jsdom.
 import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
 
-const html = readFileSync(new URL('../../../public/phone-controls.html', import.meta.url), 'utf8');
+const html = readFileSync(resolve(process.cwd(), 'public/phone-controls.html'), 'utf8');
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 function mount(invoke: (command: string, args: { action: string }) => Promise<boolean>) {
