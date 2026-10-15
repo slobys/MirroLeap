@@ -2,7 +2,7 @@ name: Desktop CI
 
 on:
   push:
-    branches: [main, 'fix/v4.3.3-frame-seam']
+    branches: [main, 'fix/v4.3.4-rounded-mask-overscan']
   workflow_dispatch:
 
 permissions:
@@ -88,7 +88,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: scrcpygui-v4.3.3-preview.${{ github.run_number }}
+          RELEASE_TAG: scrcpygui-v4.3.4-preview.${{ github.run_number }}
         run: |
           set -euo pipefail
           mapfile -d '' installers < <(find release-assets -type f \( -iname '*.exe' -o -iname '*.msi' \) -print0)
@@ -96,22 +96,21 @@ jobs:
             echo "No Windows installers found"; exit 1
           fi
           cat > release-notes.md <<'NOTES'
-          ## ScrcpyGUI v4.3.3 — 无蓝线真机圆角优化（Windows）
+          ## ScrcpyGUI v4.3.4 — 修复手机外框四角突出黑块
 
-          根据用户实际截图，重点修复四角与手机边框之间的蓝色锯齿线，以及侧边 / 底部的细亮线。
+          根据真实 Windows 实测截图，修复 v4.3.3 的四角黑色矩形块，同时避免恢复 v4.3.2 的蓝色接缝。
 
-          - **去掉 Windows GDI 的硬圆角剪裁**：原版 SetWindowRgn 使用整数像素裁剪，而独立 WebView2 SVG 圆角使用抗锯齿，叠加时会漏出 Windows 桌面的蓝色壁纸。本版保留完整的 scrcpy 原生视频窗口，避免背景穿透。
-          - **增加 SVG 实体圆角遮片**：在屏幕透明开口外，将原生矩形视频的四个小角覆盖为深黑色，呈现平滑自然的圆角。
-          - **密封屏幕边缘**：增加内侧极窄深色遮片，盖住不同 DPI 下 1–2 像素的亚像素缝隙，消除蓝线和白色亮边。
-          - **减少高光**：将金属外框渐变压暗，保留窄边框与手机轮廓，避免过亮镶边。
-          - **保留所有控制功能**：边缘悬停出现操作栏，支持按住拖动、最小化、关闭；原生触控、快捷键和低延迟投屏不受影响。
-          - **仅 Windows 竖屏真机外框**：横屏、全屏及其他模式继续原生 scrcpy。
+          - **删除矩形遮片**：移除 v4.3.3 用来盖蓝线的不透明黑色矩形。这个遮片超出了手机金属外壳的圆弧轮廓，导致四角突出的黑块。
+          - **真实视频圆角预留余量**：对 scrcpy 原生 SDL 窗口恢复 Windows 圆角剪裁，但把 GDI 裁剪半径比 SVG 可见屏幕的圆角半径缩小 3 物理像素。真实画面延伸到黑钛外框内部，被 SVG 平滑边缘自然覆盖，不会直接露出硬裁剪线。
+          - **调整内沿压边**：保留窄幅 7 单位 SVG 深色圆角细线，降低 DPI 下的白线/蓝线风险；不扩大手机金属边框整体尺寸。
+          - **保留悬停控制条**：靠近手机边缘显示拖动、最小化、关闭按钮，保持鼠标穿透和低延迟实时控制。
+          - **横屏兼容**：横屏、最小化和最大化时恢复普通 SDL 窗口，竖屏再套用外框。
 
-          升级方法：退出旧版与投屏窗口，下载安装下方 EXE 或 MSI，重新启动竖屏投屏。
+          **下载安装**：Windows 64 位优先选择 EXE，另外提供 MSI。退出旧版本及所有投屏窗口后安装。此程序不是 Android APK。
 
-          **预览版与实测说明**：CI 验证 Python SVG/Rust 静态约束、Rust 及前端测试、Windows 正式打包，不能代替你的 Windows 电脑上的真实 DPI 与视觉检测。请继续用蓝色或浅色桌面壁纸观察四角，必要时可关闭外框恢复普通 scrcpy。
+          **预览与人工测试**：自动化通过只能保证代码、像素几何和 Windows 安装包可编译。请用原来蓝色桌面壁纸检查四角是否自然、边缘是否还有蓝白漏光，并测试鼠标拖动/最小化/关闭。
           NOTES
           gh release create "$RELEASE_TAG" "${installers[@]}" \
             --target "$GITHUB_SHA" \
-            --title "ScrcpyGUI v4.3.3 · Seamless Phone Frame Preview #${{ github.run_number }} (Windows)" \
+            --title "ScrcpyGUI v4.3.4 · Corrected Rounded Corners Preview #${{ github.run_number }} (Windows)" \
             --notes-file release-notes.md --prerelease --latest=false
