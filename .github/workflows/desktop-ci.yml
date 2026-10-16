@@ -131,8 +131,8 @@ jobs:
           if (-not (Test-Path "release-checksums/latest.json")) {
             throw "No signed Windows updater latest.json"
           }
-          foreach ($kind in @('nsis/MirroLeap_${version}_x64-setup.exe.sig',
-                               'msi/MirroLeap_${version}_x64_en-US.msi.sig')) {
+          foreach ($kind in @("nsis/MirroLeap_${version}_x64-setup.exe.sig",
+                               "msi/MirroLeap_${version}_x64_en-US.msi.sig")) {
             if (-not (Test-Path "src-tauri/target/release/bundle/$kind")) {
               throw "Missing signed updater asset $kind"
             }

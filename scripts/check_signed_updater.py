@@ -76,5 +76,8 @@ assert "check_signed_updater_release.py" in ci
 assert "windows-phone-toolbar-layout.mjs" in ci
 assert "release-checksums/latest.json" in ci
 assert 'release-assets' in ci and 'verified-assets/latest.json' in ci
+assert "'nsis/MirroLeap_${version}" not in ci, (
+    "PowerShell single quotes prevent expanding installer version placeholders"
+)
 assert not list((root / "src-tauri").glob("*.key")), "Never ship a private signer key"
 print("Signed in-app updater and live, device-scoped floating phone shortcuts guards passed")
