@@ -78,7 +78,7 @@ pub fn expand_screen(screen: ScreenRect) -> Option<FrameRect> {
 
 
 pub const TOOLBAR_WIDTH: i32 = 62;
-pub const TOOLBAR_HEIGHT: i32 = 270;
+pub const TOOLBAR_HEIGHT: i32 = 322;
 /// Breathing room both below the display's top edge and above the taskbar,
 /// AND inside the visible top/bottom edge of the mirrored phone.
 pub const TOOLBAR_SAFE_MARGIN: i32 = 12;
@@ -87,7 +87,7 @@ pub const TOOLBAR_SAFE_MARGIN: i32 = 12;
 /// margins it docks BELOW the rail rather than obscuring the Android screen.
 pub const ANNOTATION_TOOLBAR_WIDTH: i32 = 268;
 pub const ANNOTATION_STACK_WIDTH: i32 = 168;
-pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 486;
+pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 538;
 /// A short (or partly off-screen) landscape video does not have enough
 /// vertical space for the usual 270px rail. Keep the five actions in two ROWS
 /// rather than cropping the last buttons or overlapping the Windows taskbar.

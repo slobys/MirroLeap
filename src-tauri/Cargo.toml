@@ -1,6 +1,6 @@
 [package]
 name = "mirroleap"
-version = "5.0.2"
+version = "5.0.3"
 authors = ["slobys", "KB-kil0bit contributors"]
 description = "MirroLeap: a lightweight Android mirroring desktop client powered by scrcpy"
 edition = "2021"
@@ -37,6 +37,8 @@ png = "0.17"
 # (all platforms) and Ctrl+Alt+Shift+W to drag the borderless scrcpy window
 # with the mouse (Windows-only). See src/shortcuts.rs and src/grab.rs.
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = { version = "=2.14.0", default-features = false, features = ["rustls-tls"] }
+tauri-plugin-process = "2.4.0"
 
 # Windows-only: read the scrcpy mirror window's client-area position natively
 # (EnumWindows + ClientToScreen) to persist it across sessions. Pinned to the

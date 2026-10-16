@@ -11,6 +11,7 @@ const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 function setup({ failToggle = false } = {}) {
   const actions = [];
   let enabled = false;
+  let quick = false;
   const dom = new JSDOM(html, {
     url: 'http://localhost/phone-controls.html',
     runScripts: 'dangerously',
@@ -23,9 +24,12 @@ function setup({ failToggle = false } = {}) {
         if (action === 'ink_toggle') {
           if (failToggle) throw new Error('native canvas not ready');
           enabled = !enabled;
+          quick = false;
         }
-        if (action === 'ink_reset') enabled = false;
-        return enabled;
+        if (action === 'ink_reset') { enabled = false; quick = false; }
+        if (action === 'quick_toggle') { quick = !quick; enabled = false; }
+        if (action === 'quick_status') return quick;
+        return action.startsWith('quick_') ? true : enabled;
       } } };
     },
   });
@@ -38,7 +42,7 @@ describe('real Tauri phone-controls HTML', () => {
     const ids = [...document.querySelectorAll('.session-actions button')].map(b => b.id);
     expect(ids).toEqual(['drag', 'minimize', 'close']);
     expect([...document.querySelectorAll('.annotation-actions button')].map(b => b.id))
-      .toEqual(['ink-toggle', 'restore']);
+      .toEqual(['ink-toggle', 'quick-toggle', 'restore']);
     expect(dom.window.getComputedStyle(document.querySelector('#ink-tools')).display).toBe('none');
     document.getElementById('ink-toggle').click();
     await nextTask();
@@ -70,6 +74,27 @@ describe('real Tauri phone-controls HTML', () => {
     dom.window.scrcpyControls.setLayout('invalid-layout');
     expect(document.body.dataset.layout).toBe('short-ink-left');
     expect(document.documentElement.style.zoom).toBe('1');
+    dom.window.close();
+  });
+
+  it('shows bounded Android quick controls with native acknowledgement', async () => {
+    const { dom, document, actions } = setup();
+    document.getElementById('quick-toggle').click();
+    await nextTask(); await nextTask();
+    expect(document.body.classList.contains('quick-open')).toBe(true);
+    expect(document.getElementById('quick-toggle').getAttribute('aria-pressed')).toBe('true');
+    for (const action of ['fullscreen', 'home', 'back', 'recents', 'power', 'rotate', 'paste', 'screen_off']) {
+      document.getElementById('quick-' + action).click();
+      await nextTask();
+    }
+    expect(actions).toEqual(expect.arrayContaining([
+      'quick_fullscreen','quick_home','quick_back','quick_recents','quick_power',
+      'quick_rotate','quick_paste','quick_screen_off',
+    ]));
+    document.getElementById('ink-toggle').click();
+    await nextTask(); await nextTask();
+    expect(document.body.classList.contains('quick-open')).toBe(false);
+    expect(document.body.classList.contains('inking')).toBe(true);
     dom.window.close();
   });
 

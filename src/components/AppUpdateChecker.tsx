@@ -5,21 +5,25 @@ import { useI18n } from '../i18n';
 import { explainUpdateError, trustedReleaseDownload, trustedReleaseUrl,
   type AppUpdateInfo } from '../utils/appUpdate';
 
-interface Props { version: string; }
+interface Props { version: string; running?: boolean; }
 
 /**
- * Intentionally explicit/read-only. No polling, no installer execution and no
- * elevated privileges: code signing is not configured for Windows installer
- * updates. App version != scrcpy core version; they update independently.
+ * Stable release metadata is checked only after a user click. Installation is
+ * separately opt-in and uses Tauri's pinned-key signature verification; never
+ * execute a GitHub-downloaded file directly. Portable ZIP remains manual.
  */
-export default function AppUpdateChecker({version}: Props) {
+export default function AppUpdateChecker({version, running = false}: Props) {
   const {locale} = useI18n();
   const zh = locale.startsWith('zh');
   const [pending, setPending] = useState(false);
   const [info, setInfo] = useState<AppUpdateInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
+  const [upgradeProgress, setUpgradeProgress] = useState<number | null>(null);
+  const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null);
   const generation = useRef(0);
   const lock = useRef(false);
+  const upgradeLock = useRef(false);
 
   useEffect(() => {
     // Settings tab unmounts on navigation. Old IPC responses may never update
@@ -56,6 +60,60 @@ export default function AppUpdateChecker({version}: Props) {
   const downloads = info?.downloads.filter(asset => trustedReleaseDownload(info, asset)) || [];
   const updateAvailable = info?.status === 'update_available';
 
+  const installUpdate = async () => {
+    if (lock.current || upgradeLock.current || !updateAvailable || !info || running) return;
+    // The update must be both present in the official stable release metadata
+    // and signed by the Tauri updater private key. A release ZIP or EXE cannot
+    // bypass the updater signature simply because GitHub served it.
+    upgradeLock.current = true;
+    setUpgrading(true);
+    setUpgradeMessage(null);
+    setUpgradeProgress(null);
+    try {
+      const kind = await invoke<string>('get_app_install_kind');
+      if (kind !== 'installed') {
+        throw Error(zh
+          ? '免安装版请使用下方 Portable ZIP 手动替换；一键安装只支持安装版。'
+          : 'Portable ZIP requires a manual replacement. One-click install is for installed versions.');
+      }
+      const {check} = await import('@tauri-apps/plugin-updater');
+      const signedUpdate = await check({timeout: 12000});
+      if (!signedUpdate || signedUpdate.version !== info.latestVersion) {
+        throw Error(zh
+          ? '签名更新清单与官方正式版本不一致，已取消安装。'
+          : 'Signed updater metadata does not match the official stable release.');
+      }
+      let received = 0;
+      let length = 0;
+      setUpgradeMessage(zh ? '正在下载并验证签名更新包…' : 'Downloading and verifying signed update…');
+      await signedUpdate.downloadAndInstall(event => {
+        if (event.event === 'Started') {
+          length = Number(event.data.contentLength) || 0;
+          received = 0;
+          setUpgradeProgress(0);
+        } else if (event.event === 'Progress') {
+          received += event.data.chunkLength;
+          if (length > 0) {
+            setUpgradeProgress(Math.min(100, Math.floor(100 * received / length)));
+          }
+        } else if (event.event === 'Finished') {
+          setUpgradeProgress(100);
+          setUpgradeMessage(zh ? '签名验证已完成，正在安装…' : 'Signature verified. Installing…');
+        }
+      });
+      setUpgradeMessage(zh ? '安装完成，正在重新启动…' : 'Installed. Restarting…');
+      const {relaunch} = await import('@tauri-apps/plugin-process');
+      await relaunch();
+    } catch (reason) {
+      setError((zh ? '在线更新未完成：' : 'One-click update not completed: ') +
+        (reason instanceof Error ? reason.message : String(reason)));
+      setUpgradeMessage(null);
+    } finally {
+      upgradeLock.current = false;
+      setUpgrading(false);
+    }
+  };
+
   return <section className="ml-card flex flex-col gap-3" aria-label={zh ? 'MirroLeap 软件更新' : 'MirroLeap software updates'}>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2">
@@ -66,8 +124,8 @@ export default function AppUpdateChecker({version}: Props) {
     </div>
     <p className="ml-muted text-xs leading-relaxed">
       {zh
-        ? '手动检查 GitHub 正式版；不会自动下载安装。'
-        : 'Check stable GitHub releases manually. No automatic installation.'}
+        ? '检查 GitHub 正式版；安装版支持经签名验证的一键更新。'
+        : 'Check GitHub stable releases. Installed editions support signed one-click updates.'}
     </p>
     <div className="flex flex-wrap items-center gap-3">
       <button type="button" onClick={() => void check()} disabled={pending}
@@ -82,7 +140,21 @@ export default function AppUpdateChecker({version}: Props) {
         <ExternalLink size={13}/>
         {zh ? '官方发布页面' : 'Official releases'}
       </a>
+      {updateAvailable && <button type="button" onClick={() => void installUpdate()}
+        disabled={upgrading || pending || running}
+        aria-label={zh ? '下载验证并安装 MirroLeap 更新' : 'Download, verify and install MirroLeap update'}
+        className="ml-secondary-action inline-flex items-center gap-2 px-4">
+        {upgrading ? <LoaderCircle size={16} className="animate-spin"/> : <Download size={16}/>}
+        {upgrading ? (zh ? '正在安全更新…' : 'Updating securely…') :
+          (zh ? '一键安装并重启' : 'Install update and restart')}
+      </button>}
     </div>
+    {running && updateAvailable && <p role="note" className="text-xs text-amber-600">
+      {zh ? '先结束正在运行的投屏，再安装更新。' : 'Stop the active phone mirror before installing the update.'}
+    </p>}
+    {upgradeMessage && <p role="status" className="text-xs text-emerald-600">
+      {upgradeMessage}{upgradeProgress !== null ? ` ${upgradeProgress}%` : ''}
+    </p>}
     {error && <p role="alert" className="text-xs text-amber-600 leading-relaxed">{error}</p>}
     {info && <div role="status" aria-live="polite" className="flex flex-col gap-3 rounded-lg border border-[var(--border-base)] p-3">
       <div className="flex items-start gap-2">
@@ -130,8 +202,9 @@ export default function AppUpdateChecker({version}: Props) {
     </div>}
     <details className="ml-settings-help-details">
       <summary className="inline-flex items-center gap-2"><ShieldCheck size={14}/>{zh ? '下载与安全说明' : 'Download & safety'}</summary>
-      <p>{zh ? '目前尚未配置可信 Windows 代码签名；本功能只做版本检查与官方链接引导，不会静默安装，也不要求关闭 Windows 安全防护。' :
-        'Trusted Windows code signing is not configured. This feature never installs silently or asks you to disable system protection.'}</p>
+      <p>{zh
+        ? '一键更新使用 Tauri 签名公钥验证更新包，签名缺失或不匹配则拒绝安装。当前尚未配置受信任的 Windows 系统代码签名证书；SmartScreen 可能提示。免安装版请自行更新 ZIP，不要求关闭 Windows 安全防护。'
+        : 'One-click updates require a Tauri-signed package; invalid or missing signatures fail closed. Windows Authenticode signing is not configured and SmartScreen may warn. Portable ZIP upgrades remain manual. Do not disable Windows security.'}</p>
     </details>
   </section>;
 }

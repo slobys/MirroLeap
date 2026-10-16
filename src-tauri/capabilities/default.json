@@ -9,6 +9,9 @@
     "core:default",
     "core:window:default",
     "dialog:default",
-    "clipboard-manager:allow-write-image"
+    "clipboard-manager:allow-write-image",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:allow-relaunch"
   ]
 }

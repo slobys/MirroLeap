@@ -14,7 +14,7 @@
     }
     .controls-root { position: relative; width: 100%; height: 100%; overflow: hidden; }
     .rail {
-      position: absolute; left: 0; top: 0; width: 62px; height: 270px;
+      position: absolute; left: 0; top: 0; width: 62px; height: 322px;
       padding: 7px 6px; display: flex; flex-direction: column;
       align-items: center; gap: 4px; overflow: hidden;
       border-radius: 15px; background: rgba(13, 17, 24, .96);
@@ -67,10 +67,12 @@
       flex-direction: column; gap: 6px;
     }
     body.inking #ink-tools { display: flex; }
-    body[data-layout="side-left"] #ink-tools { left: auto; right: 68px; }
+    body.quick-open #quick-tools { display: flex; }
+    body[data-layout="side-left"] #ink-tools,
+    body[data-layout="side-left"] #quick-tools { left: auto; right: 68px; }
     body[data-layout="stack-right"] #ink-tools,
     body[data-layout="stack-left"] #ink-tools {
-      width: 168px; height: 202px; top: 276px; left: 0; right: auto; padding: 8px;
+      width: 168px; height: 202px; top: 328px; left: 0; right: auto; padding: 8px;
     }
     /* A landscape window or a partly off-screen phone may have less than
        270px of vertical space. Preserve large 44px button targets by
@@ -105,12 +107,37 @@
        condensed palette hides headings, never controls or colors. The native
        code only applies whole-window CSS zoom below this height. */
     body[data-layout^="tight-ink"] #ink-tools { height: 136px; padding: 8px; gap: 6px; }
+    body[data-layout^="tight-ink"] #quick-tools { height: 136px; padding: 6px; gap: 4px; }
+    body[data-layout^="tight-ink"] .quick-grid button { height: 46px; min-height: 46px; font-size: 10px; gap: 0; }
     body[data-layout^="tight-ink"] .palette-heading { display: none; }
     body[data-layout^="tight-ink"] .palette-actions button {
       height: 33px; min-height: 33px;
     }
     body[data-layout^="tight-ink"] .swatches button { height: 26px; min-height: 26px; }
     body[data-layout^="tight-ink"] .sizes button { height: 27px; min-height: 27px; }
+    #quick-tools {
+      display: none; position: absolute; top: 10px; left: 68px;
+      width: 200px; height: 202px; padding: 9px;
+      overflow: hidden; border-radius: 15px;
+      background: rgba(13,17,24,.97);
+      border: 1px solid rgba(160,168,180,.32);
+      box-shadow: 0 6px 20px rgba(0,0,0,.35);
+      flex-direction: column; gap: 9px;
+    }
+    body[data-layout="stack-right"] #quick-tools,
+    body[data-layout="stack-left"] #quick-tools {
+      width: 168px; height: 202px; top: 328px; left: 0; right: auto;
+    }
+    body[data-layout^="short-ink"] #quick-tools,
+    body[data-layout^="tight-ink"] #quick-tools {
+      left: 174px; top: 0; width: 200px; height: 202px;
+    }
+    body[data-layout="short-ink-left"] #quick-tools,
+    body[data-layout="tight-ink-left"] #quick-tools { left:auto; right:174px; }
+    .quick-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; }
+    .quick-grid button { width:100%; height:68px; min-height:68px; gap:3px; font-size:11px;
+      background:rgba(113,129,147,.17); }
+    .quick-grid button svg { width:18px; height:18px; }
     .palette-heading {
       font-size: 11px; line-height: 15px; font-weight: 600; letter-spacing: .04em;
       color: #b7c3d2; flex: none;
@@ -177,6 +204,11 @@
     </button>
 
 
+    <button id="quick-toggle" aria-label="手机快捷操作" aria-pressed="false" title="手机快捷操作">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9h3m4 0h3M7 15h3m4 0h3"/>
+      </svg>
+    </button>
     <button id="restore" aria-label="一键恢复原始画面和手机触控" title="一键恢复画面和手机触控">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -224,6 +256,35 @@
         <button id="size-9" aria-label="粗笔 9 像素" aria-pressed="false" title="粗笔 9px">粗</button>
       </div>
     </div>
+    <div id="quick-tools" role="group" aria-label="手机快捷操作">
+      <div class="palette-heading">快捷操作 · 手机</div>
+      <div class="quick-grid">
+        <button id="quick-fullscreen" aria-label="全屏" title="切换 scrcpy 全屏 (Alt+F)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>全屏
+        </button>
+        <button id="quick-home" aria-label="手机主页" title="返回手机主页">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></svg>主页
+        </button>
+        <button id="quick-back" aria-label="手机返回" title="返回上一页">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m15 5-7 7 7 7"/></svg>返回
+        </button>
+        <button id="quick-recents" aria-label="最近任务" title="查看最近任务">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="4" y="4" width="12" height="16" rx="2"/><path d="M19 7v10"/></svg>最近任务
+        </button>
+        <button id="quick-power" aria-label="电源键" title="手机电源键：切换亮屏/息屏">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v9m-5-6a9 9 0 1 0 10 0"/></svg>电源
+        </button>
+        <button id="quick-rotate" aria-label="旋转画面" title="scrcpy 旋转 (Alt+R)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 3a9 9 0 1 1-11 2M17 3v6h-6"/></svg>旋转
+        </button>
+        <button id="quick-paste" aria-label="粘贴" title="粘贴电脑剪贴板文本 (Alt+V)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2M9 10h6M9 14h6"/></svg>粘贴
+        </button>
+        <button id="quick-screen_off" aria-label="关闭手机屏幕" title="关闭手机显示（投屏不中断）(Alt+O)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m5 5 14 12M8 21h8"/></svg>息屏
+        </button>
+      </div>
+    </div>
   </div>
   <div id="status" role="status" aria-live="assertive" title=""></div>
   <script>
@@ -236,8 +297,25 @@
       };
       const status = document.getElementById('status');
       const inkButton = document.getElementById('ink-toggle');
+      const quickButton = document.getElementById('quick-toggle');
       let enabled = false;
       let switching = false;
+      let quickSwitching = false;
+
+      function displayQuickState(open) {
+        const expanded = Boolean(open);
+        document.body.classList.toggle('quick-open', expanded);
+        quickButton.classList.toggle('active', expanded);
+        quickButton.setAttribute('aria-pressed', String(expanded));
+      }
+      async function syncQuickState() {
+        if (quickSwitching) return;
+        try {
+          displayQuickState(await invoke('quick_status'));
+        } catch (error) {
+          report(error);
+        }
+      }
 
       // The native process is the single source of truth. Previously this
       // HTML toggled an independent boolean even when WebView2 had not loaded
@@ -293,7 +371,10 @@
             }
           }
         },
-        sync: syncInkState,
+        sync() {
+          void syncInkState();
+          void syncQuickState();
+        },
       });
 
       function chooseTool(which) {
@@ -338,8 +419,42 @@
           inkButton.removeAttribute('aria-busy');
           switching = false;
           await syncInkState();
+          await syncQuickState();
         }
       });
+
+      quickButton.addEventListener('click', async () => {
+        if (switching || quickSwitching) return;
+        quickSwitching = true;
+        quickButton.disabled = true;
+        try {
+          // Native ACK, not an optimistic local-only toggle.
+          displayQuickState(await invoke('quick_toggle'));
+          clearReport();
+        } catch (error) {
+          report(error);
+        } finally {
+          quickSwitching = false;
+          quickButton.disabled = false;
+          await syncQuickState();
+          await syncInkState();
+        }
+      });
+      for (const action of ['fullscreen','home','back','recents','power','rotate','paste','screen_off']) {
+        const button = document.getElementById('quick-' + action);
+        button.addEventListener('click', async () => {
+          if (button.disabled || !document.body.classList.contains('quick-open')) return;
+          button.disabled = true;
+          try {
+            await invoke('quick_' + action);
+            clearReport();
+          } catch (error) {
+            report(error);
+          } finally {
+            button.disabled = false;
+          }
+        });
+      }
 
       document.getElementById('drag').addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
@@ -386,11 +501,18 @@
 
       // Recover UI after WebView2 reload, minimize/restore or focus changes.
       // A switch in flight never competes with the following state query.
-      window.addEventListener('focus', () => { void syncInkState(); });
+      window.addEventListener('focus', () => {
+        void syncInkState();
+        void syncQuickState();
+      });
       document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) void syncInkState();
+        if (!document.hidden) {
+          void syncInkState();
+          void syncQuickState();
+        }
       });
       void syncInkState();
+      void syncQuickState();
     })();
   </script>
 </body>

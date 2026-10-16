@@ -21,7 +21,10 @@ use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
     MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, SetWindowRgn,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD,
+    KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_LBUTTON, VK_LMENU,
+};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
@@ -41,6 +44,13 @@ static ACTIVE_DRAGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static PRESENTATION_MODES: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
 static PRESENTATION_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static QUICK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+fn quick_sessions() -> &'static Mutex<HashSet<String>> {
+    QUICK_ENABLED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+fn is_quick_open(device: &str) -> bool {
+    quick_sessions().lock().map(|guard| guard.contains(device)).unwrap_or(false)
+}
 static INK_READY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 // Tauri 2.10.x WebviewWindow.eval() has no eval_with_callback API. Instead
@@ -529,7 +539,9 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let toolbar_hwnd = toolbar.hwnd().ok();
         let overlay_hwnd = overlay.hwnd().ok();
         let foreground = unsafe { GetForegroundWindow() };
-        let inking = is_inking(&device);
+        // Quick Android navigation uses the same native expanded rail
+        // geometry as the pen palette, but never intercepts phone touches.
+        let inking = is_inking(&device) || is_quick_open(&device);
         let presenting = presentation_mode(&device) != "off";
         let active = foreground == hwnd
             || toolbar_hwnd == Some(foreground)
@@ -1083,6 +1095,48 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
 
 /// The dedicated phone-controls-* window is the ONLY trusted caller.
 /// The SVG overlay captures pointer events solely during annotation mode.
+fn send_video_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
+    // scrcpy's default MOD + key shortcuts: F/R/V/O. Only the matched
+    // scrcpy SDL HWND may receive synthetic keys, never an arbitrary app.
+    let key = match action {
+        "quick_fullscreen" => b'F',
+        "quick_rotate" => b'R',
+        "quick_paste" => b'V',
+        "quick_screen_off" => b'O',
+        _ => return Err("Unsupported scrcpy shortcut".into()),
+    };
+    if unsafe { IsIconic(hwnd).as_bool() } {
+        return Err("Restore the mirrored phone before using a shortcut".into());
+    }
+    let _ = unsafe { SetForegroundWindow(hwnd) };
+    if unsafe { GetForegroundWindow() } != hwnd {
+        return Err("Could not safely focus the scrcpy video window".into());
+    }
+    let keyboard = |key: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: key,
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let inputs = [
+        keyboard(VK_LMENU, KEYBD_EVENT_FLAGS(0)),
+        keyboard(VIRTUAL_KEY(key as u16), KEYBD_EVENT_FLAGS(0)),
+        keyboard(VIRTUAL_KEY(key as u16), KEYEVENTF_KEYUP),
+        keyboard(VK_LMENU, KEYEVENTF_KEYUP),
+    ];
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent != inputs.len() as u32 {
+        return Err("Windows refused to send the scrcpy shortcut".into());
+    }
+    Ok(())
+}
+
 pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<bool, String> {
     let device = device_for_controls(app, caller)?;
     let pid = app.state::<ScrcpyState>().processes.lock()
@@ -1091,7 +1145,30 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         .ok_or("scrcpy 会话已结束")?;
     let hwnd = crate::commands::find_window_by_pid(pid).ok_or("投屏窗口不可见")?;
 
+    if action == "quick_status" { return Ok(is_quick_open(&device)); }
+    if action == "quick_toggle" {
+        if !is_quick_open(&device) && is_inking(&device) {
+            control_ink(app, &device, "ink_toggle").await?;
+        }
+        let mut guard = quick_sessions().lock().map_err(|e| e.to_string())?;
+        if !guard.insert(device.clone()) { guard.remove(&device); }
+        return Ok(guard.contains(&device));
+    }
+    if action.starts_with("quick_") {
+        if !is_quick_open(&device) {
+            return Err("Open the phone quick-control panel first".into());
+        }
+        if matches!(action, "quick_fullscreen" | "quick_rotate" | "quick_paste" | "quick_screen_off") {
+            send_video_shortcut(hwnd, action)?;
+        } else {
+            crate::commands::phone_toolbar_keyevent(&device, action).await?;
+        }
+        return Ok(true);
+    }
     if action.starts_with("ink_") {
+        if action == "ink_toggle" || action == "ink_reset" {
+            quick_sessions().lock().map_err(|e| e.to_string())?.remove(&device);
+        }
         return control_ink(app, &device, action).await;
     }
     match action {
@@ -1100,6 +1177,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             Ok(is_inking(&device))
         }
         "close" => {
+            quick_sessions().lock().map_err(|e| e.to_string())?.remove(&device);
             crate::commands::stop_scrcpy_impl(app.state::<ScrcpyState>(), device).await?;
             Ok(false)
         }
@@ -1150,6 +1228,7 @@ fn begin_drag(device: String, hwnd: HWND) -> Result<(), String> {
 }
 
 pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), String> {
+    if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
     let shell_name = label(device);
     let controls_name = toolbar_label(device);
     if let Some(old) = app.get_webview_window(&shell_name) { let _ = old.close(); }
@@ -1225,6 +1304,7 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
 }
 
 pub fn close(app: &AppHandle, device: &str) {
+    if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
     if let Ok(mut set) = ink_sessions().lock() { set.remove(device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(device); }
     update_presentation_mode(app, device, "off");

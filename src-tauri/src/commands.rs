@@ -22,6 +22,22 @@ fn require_main_window(window: &Window) -> Result<(), String> {
     Ok(())
 }
 
+/// Portable installs have a launcher beside the executable. The signed NSIS
+/// updater cannot update an extracted ZIP in place, so keep it on the manual
+/// portable-upgrade path rather than installing a second unrelated app.
+#[tauri::command]
+pub fn get_app_install_kind(window: Window) -> Result<&'static str, String> {
+    require_main_window(&window)?;
+    let exe = std::env::current_exe()
+        .map_err(|error| format!("Could not identify application location: {error}"))?;
+    let dir = exe.parent().ok_or("Application directory missing")?;
+    Ok(if dir.join("Run-MirroLeap.cmd").is_file() {
+        "portable"
+    } else {
+        "installed"
+    })
+}
+
 fn is_audio_codec_error(text: &str) -> bool {
     let lower = text.to_lowercase();
     if lower.contains("could not create default audio encoder")
@@ -135,6 +151,33 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result
 }
 
 
+
+/// Bounded navigation shortcuts used by the verified phone-toolbar window.
+/// Never accept shell input or arbitrary Android keycodes from web content.
+#[cfg(target_os = "windows")]
+pub(crate) async fn phone_toolbar_keyevent(device: &str, action: &str) -> Result<(), String> {
+    validate_capture_device(device)?;
+    let keycode = match action {
+        "quick_home" => "3",
+        "quick_back" => "4",
+        "quick_recents" => "187",
+        "quick_power" => "26",
+        _ => return Err("Unsupported Android navigation shortcut".into()),
+    };
+    let adb_path = get_binary_path("adb", None);
+    let output = tokio::time::timeout(Duration::from_secs(6),
+        create_command(adb_path)
+            .arg("-s").arg(device)
+            .arg("shell").arg("input").arg("keyevent").arg(keycode)
+            .kill_on_drop(true).output()
+    ).await.map_err(|_| "Android shortcut timed out".to_string())?
+        .map_err(|e| format!("Could not send Android shortcut: {e}"))?;
+    if !output.status.success() {
+        return Err(format!("Android shortcut failed: {}",
+            String::from_utf8_lossy(&output.stderr).chars().take(160).collect::<String>()));
+    }
+    Ok(())
+}
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
