@@ -51,7 +51,7 @@ assert "window.scrcpyFrame?.setOrientation" in native
 
 # Controls order is a UX guarantee; one-click restore is visible even when
 # pen tools are collapsed, and close must stay immediately after minimize.
-expected_order = ["drag", "minimize", "close", "ink-toggle", "restore", "ink-tools"]
+expected_order = ["drag", "minimize", "close", "ink-toggle", "quick-toggle", "restore", "quick-tools", "ink-tools"]
 offsets = [toolbar.index('id="' + element + '"') for element in expected_order]
 assert offsets == sorted(offsets), f"Toolbar order regressed: {expected_order}"
 assert 'class="session-actions"' in toolbar and 'class="annotation-actions"' in toolbar
@@ -67,10 +67,13 @@ assert "let actually_visible = toolbar.hwnd().ok()" in native
 assert "Repositioning toolbar on next tick" in native
 assert "let wanted = close_to_edge ||" in native
 assert "pub const TOOLBAR_WIDTH: i32 = 62;" in layout
-assert "pub const TOOLBAR_HEIGHT: i32 = 270;" in layout
+assert "pub const TOOLBAR_HEIGHT: i32 = 318;" in layout
 assert "pub const ANNOTATION_TOOLBAR_WIDTH: i32 = 268;" in layout
 assert "pub const ANNOTATION_STACK_WIDTH: i32 = 168;" in layout
-assert "pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 486;" in layout
+assert "pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 534;" in layout
+assert 'action == "quick_toggle"' in native and 'action.starts_with("quick_")' in native
+assert 'send_quick_shortcut(hwnd, action)' in native
+assert 'id="quick-toggle"' in toolbar and 'id="quick-tools"' in toolbar
 assert "pub fn toolbar_placement(" in layout and "ToolbarLayout::StackRight" in layout
 assert "visible_top = frame.y.max(desktop.y)" in layout
 assert "visible_bottom = frame.y.saturating_add(frame.height).min(desktop_bottom)" in layout

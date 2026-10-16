@@ -11,6 +11,7 @@ const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 function setup({ failToggle = false } = {}) {
   const actions = [];
   let enabled = false;
+  let quickOpen = false;
   const dom = new JSDOM(html, {
     url: 'http://localhost/phone-controls.html',
     runScripts: 'dangerously',
@@ -23,8 +24,18 @@ function setup({ failToggle = false } = {}) {
         if (action === 'ink_toggle') {
           if (failToggle) throw new Error('native canvas not ready');
           enabled = !enabled;
+          quickOpen = false;
         }
-        if (action === 'ink_reset') enabled = false;
+        if (action === 'ink_reset') { enabled = false; quickOpen = false; }
+        if (action === 'quick_toggle') {
+          if (enabled && !quickOpen) throw new Error('Exit pen mode first');
+          quickOpen = !quickOpen;
+        }
+        if (action === 'quick_status') return quickOpen;
+        if (action.startsWith('quick_') && action !== 'quick_toggle') {
+          if (!quickOpen) throw new Error('Quick palette closed');
+          return true;
+        }
         return enabled;
       } } };
     },
@@ -38,7 +49,7 @@ describe('real Tauri phone-controls HTML', () => {
     const ids = [...document.querySelectorAll('.session-actions button')].map(b => b.id);
     expect(ids).toEqual(['drag', 'minimize', 'close']);
     expect([...document.querySelectorAll('.annotation-actions button')].map(b => b.id))
-      .toEqual(['ink-toggle', 'restore']);
+      .toEqual(['ink-toggle', 'quick-toggle', 'restore']);
     expect(dom.window.getComputedStyle(document.querySelector('#ink-tools')).display).toBe('none');
     document.getElementById('ink-toggle').click();
     await nextTask();
@@ -114,6 +125,26 @@ describe('real Tauri phone-controls HTML', () => {
     expect(document.body.classList.contains('inking')).toBe(false);
     expect(document.getElementById('status').dataset.error).toBe('true');
     expect(document.getElementById('ink-toggle').disabled).toBe(false);
+    dom.window.close();
+  });
+
+  it('opens quick controls independently and invokes only fixed shortcuts', async () => {
+    const {dom, document, actions} = setup();
+    document.getElementById('quick-toggle').click();
+    await nextTask(); await nextTask();
+    expect(document.body.classList.contains('quick-open')).toBe(true);
+    expect(document.body.classList.contains('inking')).toBe(false);
+    expect(document.getElementById('quick-toggle').getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelectorAll('#quick-tools [data-quick]')).toHaveLength(8);
+    document.querySelector('#quick-tools [data-quick="home"]').click();
+    await nextTask();
+    expect(actions).toContain('quick_home');
+    document.querySelector('#quick-tools [data-quick="rotate"]').click();
+    await nextTask();
+    expect(actions).toContain('quick_rotate');
+    document.getElementById('restore').click();
+    await nextTask();
+    expect(document.body.classList.contains('quick-open')).toBe(false);
     dom.window.close();
   });
 });

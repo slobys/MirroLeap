@@ -70,6 +70,8 @@ jobs:
         run: node scripts/windows-dashboard-layout.mjs
       - name: Real Edge settings geometry (100%, 125%, 150% DPI)
         run: node scripts/windows-settings-layout.mjs
+      - name: Real Edge phone shortcut flyout geometry (portrait, landscape, DPI)
+        run: node scripts/windows-quick-toolbar-layout.mjs
       - name: Build original standalone desktop executable (unpatched, without any installer)
         run: npm run tauri build -- --no-bundle
       - name: Stage extract-and-run portable version

@@ -38,6 +38,7 @@ pub struct AppUpdateInfo {
     pub published_at: Option<String>,
     pub changelog: String,
     pub downloads: Vec<ReleaseDownload>,
+    pub signed_update_supported: bool,
 }
 
 fn stable_version(input: &str) -> Option<[u32; 3]> {
@@ -123,6 +124,7 @@ fn interpret_release(current: &str, release: &Value) -> Result<AppUpdateInfo, St
         published_at,
         changelog,
         downloads: official_assets(release, tag, version),
+        signed_update_supported: false,
     })
 }
 
@@ -164,7 +166,17 @@ pub async fn check_mirroleap_update(
     }
     let data: Value = serde_json::from_slice(&payload).map_err(|_| "invalid_release")?;
     let local = app_handle.package_info().version.to_string();
-    interpret_release(&local, &data)
+    let mut info = interpret_release(&local, &data)?;
+    info.signed_update_supported = signed_update_available();
+    Ok(info)
+}
+
+fn signed_update_available() -> bool {
+    // NSIS updater must not claim to update a standalone portable folder.
+    let portable = std::env::current_exe().ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("Run-MirroLeap.cmd").is_file()))
+        .unwrap_or(false);
+    cfg!(feature = "signed-updates") && !portable
 }
 
 #[cfg(test)]

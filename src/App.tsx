@@ -10,7 +10,6 @@ import DecoderPerformance from "./components/DecoderPerformance";
 import MirroPresentPanel from "./components/MirroPresentPanel";
 import Header from "./components/Header";
 import SessionBehavior from "./components/SessionBehavior";
-import ShortcutsPanel from "./components/ShortcutsPanel";
 import Footer from "./components/Footer";
 import CompactDashboard from "./components/CompactDashboard";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -458,7 +457,6 @@ function App() {
                   {settingsTab === 'behavior' && (
                     <div className="ml-behavior-layout">
                       <SessionBehavior config={config} setConfig={setConfig}/>
-                      <ShortcutsPanel/>
                     </div>
                   )}
                   {settingsTab === 'appearance' && (

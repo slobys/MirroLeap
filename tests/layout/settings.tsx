@@ -11,7 +11,6 @@ import '../../src/settings-center.css';
 import { I18nProvider } from '../../src/i18n';
 import ControlPanel from '../../src/components/ControlPanel';
 import SessionBehavior from '../../src/components/SessionBehavior';
-import ShortcutsPanel from '../../src/components/ShortcutsPanel';
 import DecoderPerformance from '../../src/components/DecoderPerformance';
 import Header from '../../src/components/Header';
 import AppUpdateChecker from '../../src/components/AppUpdateChecker';
@@ -80,7 +79,6 @@ function SettingsFixture() {
           </div>}
           {tab === 'behavior' && <div className="ml-behavior-layout">
             <SessionBehavior config={config} setConfig={setConfig}/>
-            <ShortcutsPanel/>
           </div>}
           {tab === 'appearance' && <div className="ml-settings-columns ml-appearance-layout">
             <Header onThemeChange={()=>{}} currentTheme="ultraviolet" colorMode="light"
