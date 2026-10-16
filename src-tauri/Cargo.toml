@@ -41,11 +41,10 @@ tauri-plugin-updater = { version = "=2.14.0", default-features = false, features
 tauri-plugin-process = "2.4.0"
 
 # Windows-only: read the scrcpy mirror window's client-area position natively
-# (EnumWindows + ClientToScreen) to persist it across sessions. Pinned to the
-# 0.61 line already resolved transitively by tao/wry, so Cargo unifies onto a
-# single compiled copy (no duplicate `windows` version).
+# (EnumWindows + ClientToScreen) to persist it across sessions. Match
+# Tauri 2.12's 0.62 HWND types; mixing 0.61 and 0.62 breaks native HWND APIs.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_HiDpi",
