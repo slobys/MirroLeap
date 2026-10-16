@@ -17,6 +17,7 @@ export interface AppUpdateInfo {
   publishedAt: string | null;
   changelog: string;
   downloads: ReleaseDownload[];
+  signedUpdateSupported?: boolean;
 }
 
 /** Accept only exact canonical GitHub Release paths. This is defense-in-depth

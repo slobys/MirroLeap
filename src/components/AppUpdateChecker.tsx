@@ -8,9 +8,8 @@ import { explainUpdateError, trustedReleaseDownload, trustedReleaseUrl,
 interface Props { version: string; }
 
 /**
- * Intentionally explicit/read-only. No polling, no installer execution and no
- * elevated privileges: code signing is not configured for Windows installer
- * updates. App version != scrcpy core version; they update independently.
+ * Signed updater is opt-in and only present in explicitly signed installed
+ * builds. Portable and unsigned builds preserve trusted manual downloads.
  */
 export default function AppUpdateChecker({version}: Props) {
   const {locale} = useI18n();
@@ -18,6 +17,8 @@ export default function AppUpdateChecker({version}: Props) {
   const [pending, setPending] = useState(false);
   const [info, setInfo] = useState<AppUpdateInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState(0);
   const generation = useRef(0);
   const lock = useRef(false);
 
@@ -55,6 +56,45 @@ export default function AppUpdateChecker({version}: Props) {
   const releasePage = info && trustedReleaseUrl(info);
   const downloads = info?.downloads.filter(asset => trustedReleaseDownload(info, asset)) || [];
   const updateAvailable = info?.status === 'update_available';
+  const signedInstallReady = updateAvailable && info?.signedUpdateSupported === true;
+  const installSigned = async () => {
+    if (!signedInstallReady || installing || !info || !trustedReleaseUrl(info)) return;
+    const {ask} = await import('@tauri-apps/plugin-dialog');
+    const accepted = await ask(zh
+      ? `确认从 MirroLeap 官方签名更新源下载并安装 v${info.latestVersion}？请先保存正在进行的工作。`
+      : `Install MirroLeap v${info.latestVersion} from the signed update feed? Save your work first.`, {
+      title: zh ? '确认更新' : 'Confirm update', kind: 'warning'
+    });
+    if (!accepted) return;
+    setInstalling(true);
+    setError(null);
+    setProgress(0);
+    try {
+      const {check} = await import('@tauri-apps/plugin-updater');
+      const update = await check();
+      if (!update || update.version !== info.latestVersion) {
+        throw Error(zh ? '签名更新版本与官方 Release 不匹配，请稍后重试。'
+          : 'Signed update version does not match the official release.');
+      }
+      let downloaded = 0, total = 0;
+      await update.downloadAndInstall(event => {
+        if (event.event === 'Started') {
+          total = event.data.contentLength || 0;
+        } else if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength;
+          if (total > 0) setProgress(Math.min(99, Math.floor(downloaded * 100 / total)));
+        } else if (event.event === 'Finished') {
+          setProgress(100);
+        }
+      });
+      const {relaunch} = await import('@tauri-apps/plugin-process');
+      await relaunch();
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setInstalling(false);
+    }
+  };
 
   return <section className="ml-card flex flex-col gap-3" aria-label={zh ? 'MirroLeap 软件更新' : 'MirroLeap software updates'}>
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -82,6 +122,14 @@ export default function AppUpdateChecker({version}: Props) {
         <ExternalLink size={13}/>
         {zh ? '官方发布页面' : 'Official releases'}
       </a>
+      {signedInstallReady && <button type="button"
+        disabled={pending || installing}
+        className="ml-secondary-action inline-flex items-center gap-2 px-4"
+        onClick={() => void installSigned()}>
+        {installing ? <LoaderCircle size={16} className="animate-spin"/> : <Download size={16}/>}
+        {installing ? (zh ? `正在验证并安装 ${progress}%` : `Verifying & installing ${progress}%`) :
+          (zh ? '一键安全更新' : 'Install signed update')}
+      </button>}
     </div>
     {error && <p role="alert" className="text-xs text-amber-600 leading-relaxed">{error}</p>}
     {info && <div role="status" aria-live="polite" className="flex flex-col gap-3 rounded-lg border border-[var(--border-base)] p-3">

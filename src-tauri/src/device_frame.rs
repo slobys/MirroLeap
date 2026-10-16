@@ -21,7 +21,10 @@ use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
     MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, SetWindowRgn,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+    KEYEVENTF_KEYUP, VK_LBUTTON, VK_MENU, VIRTUAL_KEY,
+};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
@@ -43,6 +46,50 @@ static PRESENTATION_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_READY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static QUICK_OPEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+fn quick_sessions() -> &'static Mutex<HashSet<String>> {
+    QUICK_OPEN.get_or_init(|| Mutex::new(HashSet::new()))
+}
+fn is_quick_open(device: &str) -> bool {
+    quick_sessions().lock().is_ok_and(|sessions| sessions.contains(device))
+}
+fn quick_shortcut_key(action: &str) -> Option<u16> {
+    match action {
+        "quick_fullscreen" => Some(b'F' as u16),
+        "quick_home" => Some(b'H' as u16),
+        "quick_back" => Some(b'B' as u16),
+        "quick_recents" => Some(b'S' as u16),
+        "quick_power" => Some(b'P' as u16),
+        "quick_rotate" => Some(b'R' as u16),
+        "quick_paste" => Some(b'V' as u16),
+        "quick_screen_off" => Some(b'O' as u16),
+        _ => None,
+    }
+}
+fn send_quick_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
+    let key = quick_shortcut_key(action).ok_or("不支持的快捷操作")?;
+    if !unsafe { SetForegroundWindow(hwnd) }.as_bool() ||
+        unsafe { GetForegroundWindow() } != hwnd {
+        return Err("投屏窗口未取得键盘焦点，请点击投屏窗口后重试".into());
+    }
+    let input = |vk: u16, up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT {
+            wVk: VIRTUAL_KEY(vk), wScan: 0,
+            dwFlags: if up { KEYEVENTF_KEYUP } else { Default::default() },
+            time: 0, dwExtraInfo: 0,
+        }},
+    };
+    let keys = [input(VK_MENU.0, false), input(key, false),
+        input(key, true), input(VK_MENU.0, true)];
+    let count = unsafe { SendInput(&keys, std::mem::size_of::<INPUT>() as i32) };
+    if count != keys.len() as u32 {
+        let release = [input(key, true), input(VK_MENU.0, true)];
+        let _ = unsafe { SendInput(&release, std::mem::size_of::<INPUT>() as i32) };
+        return Err("投屏快捷操作未完整发送，请重试".into());
+    }
+    Ok(())
+}
 // Tauri 2.10.x WebviewWindow.eval() has no eval_with_callback API. Instead
 // frame.html calls a narrow native acknowledgement command after running a
 // specific drawing operation. Match the nonce and caller window label.
@@ -530,6 +577,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let overlay_hwnd = overlay.hwnd().ok();
         let foreground = unsafe { GetForegroundWindow() };
         let inking = is_inking(&device);
+        let quick_open = is_quick_open(&device);
         let presenting = presentation_mode(&device) != "off";
         let active = foreground == hwnd
             || toolbar_hwnd == Some(foreground)
@@ -610,7 +658,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // hover over the phone bezel should STILL reveal its control handle.
         let recent_restore = restored_at.map(|t| t.elapsed() < Duration::from_millis(2200))
             .unwrap_or(false);
-        let wanted = close_to_edge || dragging || inking || presenting || inside_controls || recent_restore;
+        let wanted = close_to_edge || dragging || inking || quick_open || presenting || inside_controls || recent_restore;
         if wanted { last_nearby = Some(Instant::now()); }
         let lingering = last_nearby.map(|t| t.elapsed() < Duration::from_millis(550))
             .unwrap_or(false);
@@ -634,7 +682,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             // The top of the compact rail is stable as the phone moves; the
             // expanded flyout is allowed to move UP to fit within the desktop.
             let top = frame.y + controls_y_offset.unwrap_or(0);
-            let Some(placement) = toolbar_placement(frame, top, desktop, inking, dpi) else {
+            let Some(placement) = toolbar_placement(frame, top, desktop, inking || quick_open, dpi) else {
                 // If scrcpy has no visible intersection with the monitor's
                 // work area, hide controls rather than show a floating ghost.
                 if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
@@ -1090,7 +1138,27 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         .get(&device).and_then(|child| child.id())
         .ok_or("scrcpy 会话已结束")?;
     let hwnd = crate::commands::find_window_by_pid(pid).ok_or("投屏窗口不可见")?;
+    if action == "quick_status" { return Ok(is_quick_open(&device)); }
+    if action == "quick_toggle" {
+        if is_inking(&device) && !is_quick_open(&device) {
+            return Err("请先关闭画笔，再打开快捷控制".into());
+        }
+        let mut sessions = quick_sessions().lock().map_err(|e| e.to_string())?;
+        if !sessions.insert(device.clone()) { sessions.remove(&device); }
+        return Ok(sessions.contains(&device));
+    }
+    if action.starts_with("quick_") {
+        if !is_quick_open(&device) || is_inking(&device) ||
+            presentation_mode(&device) != "off" {
+            return Err("请先退出画笔或演示模式".into());
+        }
+        send_quick_shortcut(hwnd, action)?;
+        return Ok(true);
+    }
 
+    if matches!(action, "ink_toggle" | "ink_reset") {
+        if let Ok(mut sessions) = quick_sessions().lock() { sessions.remove(&device); }
+    }
     if action.starts_with("ink_") {
         return control_ink(app, &device, action).await;
     }
@@ -1225,6 +1293,7 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
 }
 
 pub fn close(app: &AppHandle, device: &str) {
+    if let Ok(mut set) = quick_sessions().lock() { set.remove(device); }
     if let Ok(mut set) = ink_sessions().lock() { set.remove(device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(device); }
     update_presentation_mode(app, device, "off");
@@ -1235,6 +1304,18 @@ pub fn close(app: &AppHandle, device: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shortcut_commands_are_strictly_allowlisted() {
+        for action in ["quick_fullscreen", "quick_home", "quick_back",
+            "quick_recents", "quick_power", "quick_rotate", "quick_paste",
+            "quick_screen_off"] {
+            assert!(quick_shortcut_key(action).is_some());
+        }
+        for action in ["quick_shell", "quick_status", "quick_toggle",
+            "quick_home;exit", "ink_toggle", "quick_"] {
+            assert!(quick_shortcut_key(action).is_none());
+        }
+    }
 
     #[test]
     fn presenter_modes_are_strict_and_off_does_not_capture_input() {

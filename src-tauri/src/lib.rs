@@ -86,6 +86,13 @@ pub fn run() {
         // shortcuts are registered below in setup.
         .plugin(shortcuts::plugin());
 
+    // The updater is enabled only in signed builds with a pinned key.
+    // Ordinary/portable development builds remain read-only for updates.
+    #[cfg(feature = "signed-updates")]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
     builder
         .setup(|app| {
             app.manage(ScrcpyState {

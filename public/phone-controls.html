@@ -14,7 +14,7 @@
     }
     .controls-root { position: relative; width: 100%; height: 100%; overflow: hidden; }
     .rail {
-      position: absolute; left: 0; top: 0; width: 62px; height: 270px;
+      position: absolute; left: 0; top: 0; width: 62px; height: 318px;
       padding: 7px 6px; display: flex; flex-direction: column;
       align-items: center; gap: 4px; overflow: hidden;
       border-radius: 15px; background: rgba(13, 17, 24, .96);
@@ -67,6 +67,33 @@
       flex-direction: column; gap: 6px;
     }
     body.inking #ink-tools { display: flex; }
+    #quick-tools {
+      display: none; position: absolute; top: 10px; left: 68px;
+      width: 200px; height: 202px; padding: 9px; overflow: hidden;
+      border-radius: 15px; background: rgba(13,17,24,.97);
+      border: 1px solid rgba(160,168,180,.32);
+      box-shadow: 0 6px 20px rgba(0,0,0,.35);
+      flex-direction: column; gap: 7px;
+    }
+    body.quick-open #quick-tools { display: flex; }
+    .quick-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
+    .quick-grid button {
+      display:flex; flex-direction:column; gap:2px; width:100%;
+      height:69px; min-height:69px; background:rgba(117,134,156,.14);
+      font-size:11px; font-weight:600; border-radius:9px;
+    }
+    .quick-grid button kbd { font-size:13px; font-weight:700; color:#9af3e5; }
+    body[data-layout="side-left"] #quick-tools { left:auto; right:68px; }
+    body[data-layout="stack-right"] #quick-tools,
+    body[data-layout="stack-left"] #quick-tools {width:168px;top:324px;left:0;right:auto;}
+    body[data-layout^="short-ink"] #quick-tools,
+    body[data-layout^="tight-ink"] #quick-tools {left:174px;top:0;width:200px;}
+    body[data-layout="short-ink-left"] #quick-tools,
+    body[data-layout="tight-ink-left"] #quick-tools {left:auto;right:174px;}
+    body[data-layout^="tight-ink"] #quick-tools {height:136px;gap:3px;padding:5px;}
+    body[data-layout^="tight-ink"] #quick-tools .palette-heading {display:none;}
+    body[data-layout^="tight-ink"] .quick-grid {gap:3px;}
+    body[data-layout^="tight-ink"] .quick-grid button {height:58px;min-height:58px;font-size:10px;}
     body[data-layout="side-left"] #ink-tools { left: auto; right: 68px; }
     body[data-layout="stack-right"] #ink-tools,
     body[data-layout="stack-left"] #ink-tools {
@@ -88,7 +115,11 @@
     body[data-layout^="short"] .annotation-actions,
     body[data-layout^="tight"] .annotation-actions {
       flex-direction: row; justify-content: center;
-      gap: 12px; padding-bottom: 0;
+      gap: 3px; padding-bottom: 0;
+    }
+    body[data-layout^="short"] .annotation-actions button,
+    body[data-layout^="tight"] .annotation-actions button {
+      width: 44px;
     }
     body[data-layout="short-left"] .rail,
     body[data-layout="short-ink-left"] .rail,
@@ -169,7 +200,7 @@
     </button>
     </div>
     <!-- Quick restore is always available: clear ink AND return phone input. -->
-    <div class="annotation-actions" role="group" aria-label="画笔与快速恢复">
+    <div class="annotation-actions" role="group" aria-label="画笔、快捷操作与快速恢复">
     <button id="ink-toggle" aria-label="画笔标注开关" title="画笔标注">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 20h9M15.5 3.5l5 5-12 12H3.5v-5zM14 5l5 5"/>
@@ -177,6 +208,13 @@
     </button>
 
 
+    <button id="quick-toggle" aria-label="快捷控制面板" aria-pressed="false" title="快捷控制">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="5" width="18" height="14" rx="2"/>
+        <path d="M7 9h2m3 0h2m3 0h1M7 13h2m3 0h2m3 0h1M8 16h8"/>
+      </svg>
+    </button>
     <button id="restore" aria-label="一键恢复原始画面和手机触控" title="一键恢复画面和手机触控">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -185,6 +223,20 @@
     </button>
     </div>
   </div>
+
+    <div id="quick-tools" role="group" aria-label="手机快捷控制">
+      <div class="palette-heading">快捷控制（Alt +）</div>
+      <div class="quick-grid">
+        <button data-quick="fullscreen" title="全屏 Alt+F"><kbd>F</kbd>全屏</button>
+        <button data-quick="home" title="主页 Alt+H"><kbd>H</kbd>主页</button>
+        <button data-quick="back" title="返回 Alt+B"><kbd>B</kbd>返回</button>
+        <button data-quick="recents" title="最近任务 Alt+S"><kbd>S</kbd>任务</button>
+        <button data-quick="power" title="电源 Alt+P"><kbd>P</kbd>电源</button>
+        <button data-quick="rotate" title="旋转 Alt+R"><kbd>R</kbd>旋转</button>
+        <button data-quick="paste" title="粘贴 Alt+V"><kbd>V</kbd>粘贴</button>
+        <button data-quick="screen_off" title="关屏 Alt+O"><kbd>O</kbd>关屏</button>
+      </div>
+    </div>
 
     <div id="ink-tools" role="group" aria-label="画笔工具">
       <div class="palette-heading">画笔操作</div>
@@ -236,7 +288,9 @@
       };
       const status = document.getElementById('status');
       const inkButton = document.getElementById('ink-toggle');
+      const quickButton = document.getElementById('quick-toggle');
       let enabled = false;
+      let quickOpen = false;
       let switching = false;
 
       // The native process is the single source of truth. Previously this
@@ -250,6 +304,12 @@
         inkButton.title = enabled
           ? '退出画笔'
           : '开启画笔';
+      }
+      function displayQuickState(value) {
+        quickOpen = Boolean(value);
+        document.body.classList.toggle('quick-open', quickOpen);
+        quickButton.classList.toggle('active', quickOpen);
+        quickButton.setAttribute('aria-pressed', String(quickOpen));
       }
 
       function report(error, showDialog = false) {
@@ -270,6 +330,7 @@
         if (switching) return;
         try {
           displayInkState(await invoke('ink_status'));
+          displayQuickState(await invoke('quick_status'));
         } catch (error) {
           report(error);
         }
@@ -329,6 +390,7 @@
           const actual = await invoke('ink_toggle');
           clearReport();
           displayInkState(actual);
+          displayQuickState(false);
         } catch (error) {
           report(error, true);
           // The native mode may have been reset on navigation or lost focus.
@@ -341,6 +403,38 @@
         }
       });
 
+      quickButton.addEventListener('click', async () => {
+        if (switching) return;
+        switching = true;
+        quickButton.disabled = true;
+        quickButton.setAttribute('aria-busy', 'true');
+        try {
+          displayQuickState(await invoke('quick_toggle'));
+          clearReport();
+        } catch (error) {
+          report(error);
+        } finally {
+          switching = false;
+          quickButton.disabled = false;
+          quickButton.removeAttribute('aria-busy');
+          await syncInkState();
+        }
+      });
+      for (const button of document.querySelectorAll('#quick-tools button[data-quick]')) {
+        button.addEventListener('click', async () => {
+          if (button.disabled || switching || !quickOpen) return;
+          const action = 'quick_' + button.dataset.quick;
+          button.disabled = true;
+          try {
+            await invoke(action);
+            clearReport();
+          } catch (error) {
+            report(error);
+          } finally {
+            button.disabled = false;
+          }
+        });
+      }
       document.getElementById('drag').addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
         event.preventDefault();
@@ -381,7 +475,10 @@
       document.getElementById('restore').addEventListener('click', () => {
         // Single click clears temporary annotations and restores native touch,
         // regardless of whether the pen palette is currently expanded.
-        void act('ink_reset', () => chooseTool('pen'));
+        void act('ink_reset', () => {
+          chooseTool('pen');
+          displayQuickState(false);
+        });
       });
 
       // Recover UI after WebView2 reload, minimize/restore or focus changes.
