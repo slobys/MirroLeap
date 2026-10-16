@@ -1,6 +1,7 @@
 mod commands;
 mod app_update;
 mod capture_compositor;
+mod video_decoder;
 mod core_manager;
 mod frame_layout;
 #[cfg(target_os = "windows")]
@@ -134,6 +135,7 @@ pub fn run() {
             commands::download_scrcpy,
             commands::list_scrcpy_options,
             commands::get_render_drivers,
+            commands::get_video_decoder_support,
             commands::get_videos_dir,
             commands::save_report,
             commands::save_device_screenshot,

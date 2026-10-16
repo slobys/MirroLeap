@@ -16,6 +16,15 @@ export interface RenderDriverSupport {
     supportedDrivers: RenderDriverOption[];
 }
 
+export interface VideoDecoderSupport {
+    hostOs: string;
+    scrcpyVersion: string | null;
+    supportsHwdec: boolean;
+    modes: string[];
+    supportsPrintFps: boolean;
+    diagnostics: string;
+}
+
 export interface MdnsDevice {
     name: string;
     service: string;
@@ -78,6 +87,10 @@ export interface ScrcpyConfig {
     hidKeyboard?: boolean;
     hidMouse?: boolean;
     renderDriver?: string;
+    /** Host decoder (not Android encoder or SDL renderer). Auto is the old default. */
+    hardwareDecoder?: 'auto' | 'disabled' | 'd3d11va' | 'vaapi' | 'videotoolbox';
+    /** Ask scrcpy to log actual FPS; never report the configured cap as measured. */
+    printFps?: boolean;
     // v4 features
     flexDisplay?: boolean;
     cameraTorch?: boolean;
@@ -136,6 +149,8 @@ export function useScrcpy() {
         supportsRenderDriver: false,
         supportedDrivers: []
     });
+    const [videoDecoderSupport, setVideoDecoderSupport] = useState<VideoDecoderSupport | null>(null);
+    const [observedDecoders, setObservedDecoders] = useState<Record<string, string>>({});
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
     const [mdnsDevices, setMdnsDevices] = useState<MdnsDevice[]>([]);
@@ -178,6 +193,8 @@ export function useScrcpy() {
         rememberWindowPosition: true,
         // v4.1 features
         ignoreVideoEncoderConstraints: false,
+        hardwareDecoder: 'auto',
+        printFps: false,
     });
     const [windowPositions, setWindowPositions] = useState<WindowPositions>({});
     const prevDevicesRef = useRef<string[]>([]);
@@ -311,9 +328,24 @@ export function useScrcpy() {
             setLogs(prev => [...prev.slice(-(100 - newLines.length)), ...newLines]);
         });
 
+        const unlistenDecoder = listen<{device:string, mode:string}>(
+            'scrcpy-video-decoder', ({payload}) => {
+                if (payload?.device && /^(starting|retrying|d3d11va|vaapi|videotoolbox|software|unknown)$/.test(payload.mode)) {
+                    setObservedDecoders(prev => ({...prev, [payload.device]:payload.mode}));
+                }
+            }
+        );
+
         const unlistenStatus = listen<any>('scrcpy-status', (event) => {
             const data = event.payload;
             if (data.device && typeof data.running === 'boolean') {
+                if (!data.running) {
+                    setObservedDecoders(prev => {
+                        const next = {...prev};
+                        delete next[data.device];
+                        return next;
+                    });
+                }
                 setRunningDevices(prev => {
                     if (data.running) {
                         return [...new Set([...prev, data.device])];
@@ -372,6 +404,7 @@ export function useScrcpy() {
 
         return () => {
             unlistenLog.then(f => f());
+            unlistenDecoder.then(f => f());
             unlistenStatus.then(f => f());
             unlistenProgress.then(f => f());
             unlistenWindowPos.then(f => f());
@@ -833,6 +866,14 @@ export function useScrcpy() {
 
             if (res.found) {
                 try {
+                    const support: VideoDecoderSupport = await invoke('get_video_decoder_support', {
+                        customPath: pathToCheck
+                    });
+                    setVideoDecoderSupport(support);
+                } catch {
+                    setVideoDecoderSupport(null);
+                }
+                try {
                     const renderRes: any = await invoke('get_render_drivers', { customPath: pathToCheck });
                     setRenderDriverSupport({
                         hostOs: renderRes?.hostOs || 'unknown',
@@ -847,6 +888,7 @@ export function useScrcpy() {
                     });
                 }
             } else {
+                setVideoDecoderSupport(null);
                 setRenderDriverSupport({
                     hostOs: 'unknown',
                     supportsRenderDriver: false,
@@ -1106,6 +1148,8 @@ export function useScrcpy() {
         defaultRecordPath,
         detectedCameras,
         renderDriverSupport,
+        videoDecoderSupport,
+        observedDecoders,
         isRefreshing,
         mdnsDevices,
         config,

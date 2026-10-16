@@ -34,6 +34,8 @@ jobs:
         run: python3 scripts/check_wireless_center.py
       - name: Verify read-only MirroLeap desktop update checker
         run: python3 scripts/check_app_update.py
+      - name: GPU decoder capability and fallback safety
+        run: python3 scripts/check_video_decoder.py
 
       - name: Lint Frontend
         run: npm run lint
@@ -92,6 +94,8 @@ jobs:
         run: python3 scripts/check_wireless_center.py
       - name: Verify read-only MirroLeap desktop update checker
         run: python3 scripts/check_app_update.py
+      - name: GPU decoder capability and fallback safety
+        run: python3 scripts/check_video_decoder.py
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

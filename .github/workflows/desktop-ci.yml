@@ -46,6 +46,7 @@ jobs:
       - run: python3 scripts/check_preview_clipboard.py
       - run: python3 scripts/check_wireless_center.py
       - run: python3 scripts/check_app_update.py
+      - run: python3 scripts/check_video_decoder.py
       - run: python3 scripts/check_repository_migration.py
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
@@ -174,6 +175,9 @@ jobs:
           - **v4.8.1 应用内安全检查更新（第四阶段独立功能）**：在「设置 → 外观与引擎」提供手动检查 MirroLeap 正式版本，读取独立仓库 GitHub Latest 的 Release 信息；准确比较本机版本、新正式版与高于正式版的开发构建，展示发布说明及只允许当前仓库官方标签与确定文件名的下载链接。
           - **不自动执行安装器**：仅将经过校验的 Portable ZIP / EXE / MSI / SHA256SUMS 链接交给用户在浏览器手动打开；不上传用户设备、配置、日志或手机画面。代码签名尚未配置，因此不启动自动安装、不请求提权，也不关闭 SmartScreen。
           - **网络和输入保护**：检查只在用户点击时发起；固定 HTTPS GitHub API 地址、禁止跳转、5 秒连接超时与 12 秒总超时、最多读取 512 KiB 元数据，拒绝测试版/草稿、恶意标签或跨仓库下载地址；离线、限流、异常版本都有独立错误提示。
+          - **v4.9.0 GPU 视频解码与性能诊断（第五阶段独立草稿）**：设置 → 投屏参数新增主机 GPU 解码能力检测，使用本机 scrcpy --version / --help 判断是否真正支持 scrcpy 5.x 的 --hwdec。按平台提供自动、纯软件和显式 GPU 解码（Windows D3D11VA）；默认不新增启动参数以保留旧核心兼容。
+          - **安全回退与可验证反馈**：只在用户强制 GPU 模式且出现明确硬件解码失败日志时自动重试一次 scrcpy 默认解码，不因普通 ADB 掉线频繁重启；日志单独展示每台设备实际报告的解码方式。可按需开启 --print-fps 真实帧率日志，配置于下次投屏才生效，旧版不发送不支持的参数。
+          - **兼容性边界**：命令支持并不代表特定 GPU 驱动可用，硬件加速是否降低 CPU/延迟需要实机测量；scrcpy 5.0.1 修复过 Windows H.265 硬解问题，遇到 v5.0.0 会给出升级核心建议，但不会自动升级或修改其安装目录。
           - **v4.7.2 窗口稳定性 3.0 第一阶段**：优化 Windows SDL 视频与透明手机外框、悬浮栏的 HWND 跟随，不再在位置/层级完全稳定时每 50ms 重复调用 SetWindowPos。发生拖动、旋转、任务栏/多屏 DPI、最小化恢复或层级异常时立即调整，另外每 2 秒进行一次轻量健康校验。保留原有画笔、窗口控制和视频功能，并增加纯 Rust 决策回归测试。
           - **明确六项功能路线图**：后续依次推进 MirroCapture 截图预览复制、智能无线连接中心、软件内检查更新、GPU 解码优化和 MirroPresent 演示工具；新功能与高风险窗口改造拆分发布，避免互相影响。
           - **v4.7.1 MirroCapture 批注图片导出**：在手机投屏画面完成画笔圈画后，到「设置 → 工具与日志」点击「保存含画笔截图」。截取当前选定 Android 手机的原始 PNG，并将当前手机的透明画笔图层按像素比例合成到原分辨率，生成单独的 MirroLeap-Annotated-*.png 文件，保留原始截图按钮。
