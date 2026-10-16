@@ -805,6 +805,115 @@ pub async fn save_device_screenshot(
     save_screenshot_to_downloads(&app_handle, &png, "MirroLeap-Screenshot")
 }
 
+/// Preview ONLY screenshots previously saved by MirroCapture under the
+/// canonical Downloads folder. A caller may not fetch arbitrary local image
+/// paths (or exploit a symlink/junction to read outside the Downloads area).
+fn allowed_capture_preview_name(filename: &str) -> bool {
+    if filename.len() > 128 || filename.is_empty() {
+        return false;
+    }
+    let body = filename.strip_suffix(".png").unwrap_or("");
+    let suffix = body.strip_prefix("MirroLeap-Screenshot-")
+        .or_else(|| body.strip_prefix("MirroLeap-Annotated-"));
+    suffix.is_some_and(|value| {
+        let parts: Vec<&str> = value.split('-').collect();
+        (parts.len() == 2 || parts.len() == 3) &&
+        parts[0].len() == 8 && parts[0].bytes().all(|b| b.is_ascii_digit()) &&
+        parts[1].len() == 6 && parts[1].bytes().all(|b| b.is_ascii_digit()) &&
+        (parts.len() == 2 || (
+            (1..=2).contains(&parts[2].len()) &&
+            parts[2].bytes().all(|b| b.is_ascii_digit()) &&
+            parts[2].parse::<u32>().is_ok_and(|n| (1..100).contains(&n))
+        ))
+    })
+}
+
+fn trusted_preview_path(downloads: &std::path::Path, requested: &str)
+    -> Result<std::path::PathBuf, String>
+{
+    let path = std::path::Path::new(requested);
+    let name = path.file_name().and_then(|name| name.to_str())
+        .ok_or("Screenshot path has no valid filename")?;
+    if !path.is_absolute() || !allowed_capture_preview_name(name) {
+        return Err("Only files created by MirroCapture may be previewed".into());
+    }
+    let home = downloads.canonicalize()
+        .map_err(|e| format!("Downloads folder unavailable: {e}"))?;
+    let file = path.canonicalize()
+        .map_err(|e| format!("Screenshot is no longer available: {e}"))?;
+    // A generated-looking filename symlink must never reveal a different
+    // local image, even when both happen to be under the Downloads folder.
+    if file.file_name().and_then(|name| name.to_str()) != Some(name) {
+        return Err("Screenshot was moved or replaced; capture it again".into());
+    }
+    if file.parent() != Some(home.as_path()) {
+        return Err("Screenshot must be directly inside your Downloads folder".into());
+    }
+    Ok(file)
+}
+
+#[tauri::command]
+pub async fn preview_saved_screenshot(
+    window: Window,
+    app_handle: tauri::AppHandle,
+    path: String,
+) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    require_main_window(&window)?;
+    if path.len() > 1200 {
+        return Err("Screenshot path is too long".into());
+    }
+    let folder = app_handle.path().download_dir()
+        .map_err(|e| format!("Cannot resolve Downloads folder: {e}"))?;
+    let source = trusted_preview_path(&folder, &path)?;
+    const PREVIEW_LIMIT: u64 = 12 * 1024 * 1024;
+    let bytes = std::fs::metadata(&source)
+        .map_err(|e| format!("Cannot inspect screenshot: {e}"))?
+        .len();
+    if bytes > PREVIEW_LIMIT {
+        return Err("Screenshot was saved, but exceeds the 12 MiB preview limit.".into());
+    }
+    let screenshot = tokio::fs::read(&source).await
+        .map_err(|e| format!("Could not load preview: {e}"))?;
+    if screenshot.len() as u64 > PREVIEW_LIMIT || !valid_android_screenshot_png(&screenshot) {
+        return Err("Saved PNG is invalid or too large to preview.".into());
+    }
+    Ok(format!("data:image/png;base64,{}", STANDARD.encode(&screenshot)))
+}
+
+#[cfg(test)]
+mod saved_screenshot_preview_tests {
+    use super::{allowed_capture_preview_name, trusted_preview_path};
+
+    #[test]
+    fn only_generated_screenshot_names_are_allowed() {
+        for name in [
+            "MirroLeap-Screenshot-20261016-120000.png",
+            "MirroLeap-Annotated-20261016-120000-42.png",
+        ] {
+            assert!(allowed_capture_preview_name(name));
+        }
+        for name in [
+            "secret.png", ".hidden.png", "MirroLeap-Screenshot-abc.png",
+            "MirroLeap-Screenshot-20261016-120000.exe", "../MirroLeap-Screenshot-20261016-120000.png",
+            "MirroLeap-Screenshot-20261016-120000.png:stream",
+            "MirroLeap-Screenshot-20261016-120000-000.png",
+            "MirroLeap-Annotated-20261016-120000-999.png",
+            "MirroLeap-Screenshot-20261016-120000-.png",
+        ] {
+            assert!(!allowed_capture_preview_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn rejects_relative_paths_and_directories_before_opening() {
+        let cwd = std::env::current_dir().unwrap();
+        assert!(trusted_preview_path(&cwd,
+            "MirroLeap-Screenshot-20261016-120000.png").is_err());
+        assert!(trusted_preview_path(&cwd, "../secret.png").is_err());
+    }
+}
+
 /// Export only user-drawn annotations composited onto an Android screencap.
 /// If no active Windows phone frame/drawing exists, return a clear error;
 /// never silently save an unannotated or incorrectly rotated screenshot.

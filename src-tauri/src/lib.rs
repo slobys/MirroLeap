@@ -78,6 +78,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         // The global-shortcut plugin must be registered on the builder (its
         // setup wires the OS hotkey manager on the main thread). Individual
         // shortcuts are registered below in setup.
@@ -135,6 +136,7 @@ pub fn run() {
             commands::get_videos_dir,
             commands::save_report,
             commands::save_device_screenshot,
+            commands::preview_saved_screenshot,
             commands::save_annotated_screenshot,
             commands::get_scrcpy_bin_dir,
             commands::run_terminal_command,

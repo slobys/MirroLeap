@@ -8,6 +8,7 @@
   "permissions": [
     "core:default",
     "core:window:default",
-    "dialog:default"
+    "dialog:default",
+    "clipboard-manager:allow-write-image"
   ]
 }
