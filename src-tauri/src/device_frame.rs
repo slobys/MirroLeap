@@ -38,6 +38,8 @@ use crate::frame_layout::{
 use crate::ScrcpyState;
 
 static ACTIVE_DRAGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static PRESENTATION_MODES: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
+static PRESENTATION_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_READY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -207,6 +209,52 @@ fn ink_sessions() -> &'static Mutex<HashSet<String>> {
 }
 fn is_inking(device: &str) -> bool {
     ink_sessions().lock().map(|set| set.contains(device)).unwrap_or(false)
+}
+
+fn presentation_modes() -> &'static Mutex<HashMap<String, &'static str>> {
+    PRESENTATION_MODES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn presentation_busy() -> &'static Mutex<HashSet<String>> {
+    PRESENTATION_BUSY.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+struct PresentationTransitionGuard(String);
+impl PresentationTransitionGuard {
+    fn begin(device: &str) -> Result<Self, String> {
+        let mut busy = presentation_busy().lock().map_err(|e| e.to_string())?;
+        if !busy.insert(device.to_string()) {
+            return Err("MirroPresent is already switching modes. Retry shortly.".into());
+        }
+        Ok(Self(device.to_string()))
+    }
+}
+impl Drop for PresentationTransitionGuard {
+    fn drop(&mut self) {
+        if let Ok(mut busy) = presentation_busy().lock() { busy.remove(&self.0); }
+    }
+}
+
+fn known_present_mode(mode: &str) -> Option<&'static str> {
+    match mode {
+        "off" => Some("off"),
+        "spotlight" => Some("spotlight"),
+        "magnifier" => Some("magnifier"),
+        _ => None,
+    }
+}
+pub(crate) fn presentation_mode(device: &str) -> String {
+    presentation_modes().lock().ok()
+        .and_then(|modes| modes.get(device).copied())
+        .unwrap_or("off").to_string()
+}
+fn update_presentation_mode(app: &AppHandle, device: &str, mode: &'static str) {
+    if let Ok(mut modes) = presentation_modes().lock() {
+        if mode == "off" { modes.remove(device); }
+        else { modes.insert(device.to_string(), mode); }
+    }
+    let _ = app.emit("mirroleap-present-mode", serde_json::json!({
+        "device": device, "mode": mode,
+    }));
 }
 
 fn drags() -> &'static Mutex<HashSet<String>> {
@@ -482,6 +530,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let overlay_hwnd = overlay.hwnd().ok();
         let foreground = unsafe { GetForegroundWindow() };
         let inking = is_inking(&device);
+        let presenting = presentation_mode(&device) != "off";
         let active = foreground == hwnd
             || toolbar_hwnd == Some(foreground)
             || overlay_hwnd == Some(foreground);
@@ -495,6 +544,10 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let needs_restore = !shell_visible || !actual_visible;
         if needs_restore {
             if overlay.show().is_ok() {
+                // Tauri/WebView2 may reset HWND hit-testing across hide/show.
+                // Presenter and ink are the only modes allowed to intercept
+                // Android mouse events after the SDL window is restored.
+                let _ = overlay.set_ignore_cursor_events(!(inking || presenting));
                 shell_visible = true;
                 previous_frame = None;
                 // Re-establish HWND z-order AFTER making WebView visible.
@@ -557,7 +610,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // hover over the phone bezel should STILL reveal its control handle.
         let recent_restore = restored_at.map(|t| t.elapsed() < Duration::from_millis(2200))
             .unwrap_or(false);
-        let wanted = close_to_edge || dragging || inking || inside_controls || recent_restore;
+        let wanted = close_to_edge || dragging || inking || presenting || inside_controls || recent_restore;
         if wanted { last_nearby = Some(Instant::now()); }
         let lingering = last_nearby.map(|t| t.elapsed() < Duration::from_millis(550))
             .unwrap_or(false);
@@ -662,6 +715,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
 
     if let Ok(mut set) = ink_sessions().lock() { set.remove(&device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(&device); }
+    update_presentation_mode(&app, &device, "off");
     let _ = overlay.set_ignore_cursor_events(true);
     if let Some(pid) = clipped_pid {
         if let Some(hwnd) = crate::commands::find_window_by_pid(pid) {
@@ -767,6 +821,165 @@ fn promote_drawing_windows(
     Ok(())
 }
 
+/// This is the ONLY code path enabling a native SDL-covering presentation
+/// overlay. The ordinary phone shell stays mouse-through. Spotlight and
+/// snapshot magnifier intentionally intercept Android input until exited.
+pub(crate) async fn set_presentation_mode(
+    app: &AppHandle, device: &str, requested: &str,
+) -> Result<String, String> {
+    let mode = known_present_mode(requested).ok_or("Unknown MirroPresent mode")?;
+    let _guard = PresentationTransitionGuard::begin(device)?;
+    if ink_busy().lock().map_err(|e| e.to_string())?.contains(device) {
+        return Err("Please wait for the pen mode to finish switching".into());
+    }
+    let overlay = app.get_webview_window(&label(device))
+        .ok_or("Start a framed Windows phone mirror before enabling MirroPresent")?;
+
+    if mode == "off" {
+        // Always restore Android taps FIRST, even when WebView2 reloaded.
+        overlay.set_ignore_cursor_events(true)
+            .map_err(|e| format!("Cannot restore phone touch: {e}"))?;
+        update_presentation_mode(app, device, "off");
+        if ready_to_ink(device) {
+            let _ = evaluate_ink(&overlay,
+                "return window.scrcpyPresent?.setMode('off') === 'off';").await;
+        }
+        return Ok("off".into());
+    }
+    let pid = app.state::<ScrcpyState>().processes.lock()
+        .map_err(|e| e.to_string())?
+        .get(device).and_then(|child| child.id())
+        .ok_or("The selected Android mirror is not running")?;
+    // HWND contains a raw pointer; convert it to a plain integer BEFORE
+    // the async WebView ACK so this command remains Send in Tauri's executor.
+    let video_hwnd = capture_screen(pid)
+        .ok_or("Restore the phone projection before starting the presentation")?
+        .hwnd.0 as usize;
+    if !ready_to_ink(device) {
+        return Err("Phone presentation layer is still loading".into());
+    }
+
+    if is_inking(device) {
+        // Mutually exclusive POINTER modes. Preserve existing ink strokes,
+        // but stop routing mouse input to drawing before activating focus.
+        evaluate_ink(&overlay,
+            "window.scrcpyInk.setEnabled(false); return window.scrcpyInk.isEnabled() === false;"
+        ).await?;
+        ink_sessions().lock().map_err(|e| e.to_string())?.remove(device);
+    }
+    let js = match mode {
+        "spotlight" => "return window.scrcpyPresent?.setMode('spotlight') === 'spotlight';",
+        "magnifier" => "return window.scrcpyPresent?.setMode('magnifier') === 'magnifier';",
+        _ => unreachable!(),
+    };
+    if let Err(error) = evaluate_ink(&overlay, js).await {
+        // If activation fails after leaving pen mode, immediately return
+        // input to Android. Never keep an invisible hit-test window active.
+        let _ = overlay.set_ignore_cursor_events(true);
+        let _ = overlay.eval("window.scrcpyPresent?.setMode('off')");
+        update_presentation_mode(app, device, "off");
+        return Err(error);
+    }
+    if let Err(error) = overlay.set_ignore_cursor_events(false) {
+        let _ = overlay.eval("window.scrcpyPresent?.setMode('off')");
+        update_presentation_mode(app, device, "off");
+        return Err(format!("Could not enable presenter focus pointer: {error}"));
+    }
+    if let Err(error) = promote_drawing_windows(app, device, &overlay) {
+        let _ = overlay.set_ignore_cursor_events(true);
+        let _ = overlay.eval("window.scrcpyPresent?.setMode('off')");
+        update_presentation_mode(app, device, "off");
+        return Err(error);
+    }
+    let _ = unsafe { SetForegroundWindow(HWND(video_hwnd as *mut _)) };
+    if let Err(error) = promote_drawing_windows(app, device, &overlay) {
+        let _ = overlay.set_ignore_cursor_events(true);
+        let _ = overlay.eval("window.scrcpyPresent?.setMode('off')");
+        update_presentation_mode(app, device, "off");
+        return Err(error);
+    }
+    update_presentation_mode(app, device, mode);
+    Ok(mode.to_string())
+}
+
+/// Transfer ONE explicit Android PNG to the current phone's presentation
+/// WebView. This is a FROZEN snapshot, not scrcpy's live SDL image. Reuse the
+/// nonce/Window-label acknowledgement already trusted by ink operations, and
+/// wait for Image.onload before reporting success to the user.
+pub(crate) async fn set_presentation_snapshot(
+    app: &AppHandle, device: &str, png: &[u8],
+) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    if presentation_mode(device) != "magnifier" {
+        return Err("Switch to MirroPresent snapshot magnifier before capturing".into());
+    }
+    if !ready_to_ink(device) {
+        return Err("Phone presentation view has not loaded".into());
+    }
+    // A very large PNG expanded into a JS eval string can freeze WebView2.
+    const MAX_PRESENTER_BYTES: usize = 8 * 1024 * 1024;
+    if png.len() < 45 || png.len() > MAX_PRESENTER_BYTES ||
+        !png.starts_with(b"\x89PNG\r\n\x1a\n")
+    {
+        return Err("Snapshot is not a supported PNG (8 MiB limit)".into());
+    }
+    let width = u32::from_be_bytes(png[16..20].try_into().unwrap_or([0; 4])) as u64;
+    let height = u32::from_be_bytes(png[20..24].try_into().unwrap_or([0; 4])) as u64;
+    if width == 0 || height == 0 || width.saturating_mul(height) > 16_000_000 {
+        return Err("Snapshot dimensions are outside safe bounds".into());
+    }
+    let pid = app.state::<ScrcpyState>().processes.lock()
+        .map_err(|e| e.to_string())?
+        .get(device).and_then(|child| child.id())
+        .ok_or("Phone session ended before snapshot capture")?;
+    let screenshot_ratio = width as f64 / height as f64;
+    let video_ratio = {
+        let actual = capture_screen(pid).ok_or("Restore the phone projection first")?;
+        actual.screen.width as f64 / actual.screen.height as f64
+    };
+    if (screenshot_ratio / video_ratio - 1.0).abs() > .06 {
+        return Err("Phone rotated while capturing snapshot. Wait for landscape to settle and retry.".into());
+    }
+    let orientation = if width > height { "landscape" } else { "portrait" };
+    let overlay = app.get_webview_window(&label(device))
+        .ok_or("Phone presentation layer closed")?;
+    let token = INK_ACK_NONCE.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    ink_acks().lock().map_err(|e| e.to_string())?
+        .insert(token, (overlay.label().to_string(), tx));
+    let encoded = STANDARD.encode(png);
+    let js = format!(r#"(() => {{
+      void (async () => {{
+        let success = false;
+        try {{
+          success = await window.scrcpyPresent?.loadSnapshot(
+            'data:image/png;base64,{encoded}', '{orientation}'
+          ) === true;
+        }} catch (error) {{
+          console.error('[MirroPresent] Snapshot rejected', error);
+        }}
+        const invoke = window.__TAURI__?.core?.invoke;
+        if (invoke) {{
+          await invoke('device_frame_ack', {{token: {token}, success}})
+            .catch(error => console.error('[MirroPresent] Snapshot acknowledgement failed', error));
+        }}
+      }})();
+    }})()"#);
+    if let Err(error) = overlay.eval(js) {
+        ink_acks().lock().map_err(|e| e.to_string())?.remove(&token);
+        return Err(format!("Cannot transfer phone screenshot to magnifier: {error}"));
+    }
+    let reply = tokio::time::timeout(Duration::from_secs(8), rx).await;
+    ink_acks().lock().map_err(|e| e.to_string())?.remove(&token);
+    let accepted = reply
+        .map_err(|_| "Phone snapshot preview timed out after 8 seconds".to_string())?
+        .map_err(|_| "Presentation view closed before the snapshot appeared".to_string())?;
+    if !accepted {
+        return Err("Snapshot could not load or the phone rotated. Retry after the screen settles.".into());
+    }
+    Ok(())
+}
+
 async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool, String> {
     // UI asks native state instead of a separate toggle flag which could drift.
     if action == "ink_status" { return Ok(is_inking(device)); }
@@ -779,6 +992,8 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
         // Recover Android input first even if the canvas has reloaded.
         overlay.set_ignore_cursor_events(true)
             .map_err(|e| format!("恢复手机鼠标输入失败: {e}"))?;
+        update_presentation_mode(app, device, "off");
+        let _ = overlay.eval("window.scrcpyPresent?.setMode('off')");
         ink_sessions().lock().map_err(|e| e.to_string())?.remove(device);
         let clear = if ready_to_ink(device) {
             evaluate_ink(&overlay,
@@ -808,6 +1023,13 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
         if turn_on {
             if !ready_to_ink(device) {
                 return Err("画笔画布尚未加载完毕，请稍后重试。".into());
+            }
+            if presentation_mode(device) != "off" {
+                overlay.set_ignore_cursor_events(true)
+                    .map_err(|e| format!("Cannot leave presentation mode: {e}"))?;
+                evaluate_ink(&overlay,
+                    "return window.scrcpyPresent?.setMode('off') === 'off';").await?;
+                update_presentation_mode(app, device, "off");
             }
             // Verify JS has entered ink mode before intercepting SDL clicks.
             evaluate_ink(&overlay, "window.scrcpyInk.setEnabled(true); return window.scrcpyInk.isEnabled() === true;").await?;
@@ -942,6 +1164,9 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
                 PageLoadEvent::Started => {
                     if let Ok(mut ready) = ink_ready().lock() { ready.remove(&page_device); }
                     if let Ok(mut sessions) = ink_sessions().lock() { sessions.remove(&page_device); }
+                    // JS mode resets on reload; never keep native cursor
+                    // capture or presentation status referring to old state.
+                    update_presentation_mode(view.app_handle(), &page_device, "off");
                     // On navigation/reload never leave an opaque input-capturing
                     // overlay ahead of native scrcpy when its canvas script resets.
                     let _ = view.set_ignore_cursor_events(true);
@@ -1002,6 +1227,7 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
 pub fn close(app: &AppHandle, device: &str) {
     if let Ok(mut set) = ink_sessions().lock() { set.remove(device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(device); }
+    update_presentation_mode(app, device, "off");
     if let Some(shell) = app.get_webview_window(&label(device)) { let _ = shell.close(); }
     if let Some(toolbar) = app.get_webview_window(&toolbar_label(device)) { let _ = toolbar.close(); }
 }
@@ -1009,6 +1235,18 @@ pub fn close(app: &AppHandle, device: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presenter_modes_are_strict_and_off_does_not_capture_input() {
+        assert_eq!(known_present_mode("off"), Some("off"));
+        assert_eq!(known_present_mode("spotlight"), Some("spotlight"));
+        assert_eq!(known_present_mode("magnifier"), Some("magnifier"));
+        for value in ["", "snapshot", "live", "magnifier();alert(1)", "../run",
+            "Off", "spotlight\n", "ink_toggle"] {
+            assert_eq!(known_present_mode(value), None, "{value}");
+        }
+        assert_eq!(presentation_mode("device-unknown"), "off");
+    }
 
     #[test]
     fn one_click_restore_is_part_of_strict_ink_action_namespace() {
