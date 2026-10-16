@@ -47,6 +47,7 @@ jobs:
       - run: python3 scripts/check_wireless_center.py
       - run: python3 scripts/check_app_update.py
       - run: python3 scripts/check_video_decoder.py
+      - run: python3 scripts/check_mirropresent.py
       - run: python3 scripts/check_repository_migration.py
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
@@ -178,6 +179,9 @@ jobs:
           - **v4.9.0 GPU 视频解码与性能诊断（第五阶段独立草稿）**：设置 → 投屏参数新增主机 GPU 解码能力检测，使用本机 scrcpy --version / --help 判断是否真正支持 scrcpy 5.x 的 --hwdec。按平台提供自动、纯软件和显式 GPU 解码（Windows D3D11VA）；默认不新增启动参数以保留旧核心兼容。
           - **安全回退与可验证反馈**：只在用户强制 GPU 模式且出现明确硬件解码失败日志时自动重试一次 scrcpy 默认解码，不因普通 ADB 掉线频繁重启；日志单独展示每台设备实际报告的解码方式。可按需开启 --print-fps 真实帧率日志，配置于下次投屏才生效，旧版不发送不支持的参数。
           - **兼容性边界**：命令支持并不代表特定 GPU 驱动可用，硬件加速是否降低 CPU/延迟需要实机测量；scrcpy 5.0.1 修复过 Windows H.265 硬解问题，遇到 v5.0.0 会给出升级核心建议，但不会自动升级或修改其安装目录。
+          - **v5.0.0 MirroPresent 专业演示模式（第六阶段独立草稿）**：设置 → 工具与日志增加聚光灯、定格放大镜和居中演示窗口按钮。Windows 透明手机边框的演示图层只在用户开启时拦截手机指针，聚光灯实时跟随鼠标；定格放大镜使用一次 ADB 手机截图并在原生设备像素对齐后画圆形约 2.3 倍放大，**手动刷新，不是实时视频放大**。
+          - **触控与方向安全**：演示聚光灯/放大镜与画笔触控互斥，离开演示恢复 Android 触控；原悬浮栏「一键恢复」也能退出演示。投屏关闭/页面重载/横竖屏变化自动清理演示状态与旧快照；快照仅在指定手机、主窗口调用并校验尺寸、比例、一次性 WebView ACK 和限时加载。
+          - **截图边界说明**：MirroCapture 原始截图与画笔批注合成导出保持原行为，当前不会导出 MirroPresent 聚光灯遮罩/静态镜头；不截取电脑桌面、不上传手机画面，也不为了演示强制改动编码码率或核心。
           - **v4.7.2 窗口稳定性 3.0 第一阶段**：优化 Windows SDL 视频与透明手机外框、悬浮栏的 HWND 跟随，不再在位置/层级完全稳定时每 50ms 重复调用 SetWindowPos。发生拖动、旋转、任务栏/多屏 DPI、最小化恢复或层级异常时立即调整，另外每 2 秒进行一次轻量健康校验。保留原有画笔、窗口控制和视频功能，并增加纯 Rust 决策回归测试。
           - **明确六项功能路线图**：后续依次推进 MirroCapture 截图预览复制、智能无线连接中心、软件内检查更新、GPU 解码优化和 MirroPresent 演示工具；新功能与高风险窗口改造拆分发布，避免互相影响。
           - **v4.7.1 MirroCapture 批注图片导出**：在手机投屏画面完成画笔圈画后，到「设置 → 工具与日志」点击「保存含画笔截图」。截取当前选定 Android 手机的原始 PNG，并将当前手机的透明画笔图层按像素比例合成到原分辨率，生成单独的 MirroLeap-Annotated-*.png 文件，保留原始截图按钮。

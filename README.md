@@ -27,6 +27,7 @@
 - **智能无线连接中心（v4.8.0，开发中）**：复用原有的 USB 转无线、Android 11+ 配对、mDNS 发现和退避重连，在无线页增加连接阶段、成功/失败状态和自动诊断。发现同一 IP 的新端口可手动选择；区分配对端口与连接端口，并展示历史地址是已连接、离线还是等待授权。所有连接均只针对用户选择的地址，不扫描局域网。
 - **软件内检查更新（v4.8.1，独立草稿）**：设置 → 外观与引擎 → MirroLeap 软件更新。用户点击后才联网读取本项目的 GitHub Latest 正式 Release，区分有新版本、已是最新版和超前的开发构建；展示更新说明、官方发布页面及经过校验的 Portable ZIP、EXE、MSI、SHA-256 清单入口。遇到 GitHub 限流、断网、超时或版本信息异常会明确提示。**仅检查与引导下载，不做静默安装或绕过 Windows 安全提示；与 scrcpy 引擎自动升级分离。**
 - **GPU 解码与性能检测（v4.9.0，独立草稿）**：设置 → 投屏参数 →「GPU 解码与性能」会检测已安装的 scrcpy 版本与 --help 中的实际支持能力。scrcpy 5.0+ 才开放平台对应的 --hwdec 模式（Windows D3D11VA、Linux VA-API、macOS VideoToolbox）；旧版核心保持原启动方式。默认自动兼容，也可选纯软件或显式 GPU 解码。强制硬解失败后仅在日志识别到硬件解码错误时重试一次自动模式，可选输出真实 FPS 日志；不假称每台机器的显卡都可用，也不自动升级 scrcpy。
+- **MirroPresent 专业演示工具（v5.0.0 独立草稿）**：在「设置 → 工具与日志」可为当前 Windows 带真机边框的投屏开启实时鼠标聚光灯、手机**定格截图**放大镜（约 2.3 倍，手动刷新，不是实时视频），或将演示窗口居中。聚光灯跟随鼠标突出重点，放大镜不接触其他电脑窗口；切换横竖屏自动丢弃旧快照，退出演示恢复手机触控。画笔与演示指针互斥但保留已有笔迹；悬浮栏一键恢复可以紧急退出。**现有 MirroCapture 原始/含画笔 PNG 不包含聚光灯或放大镜镜头。**
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
@@ -36,12 +37,9 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_4.7.3_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_4.7.3_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_4.7.3_x64_en-US.msi` | 使用 Windows Installer 安装 |
-| **免安装版（推荐）** | `MirroLeap_4.8.0_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_4.8.0_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_4.8.0_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.0_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.0_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.0_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
 从 **[MirroLeap GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest)** 的 Assets 下载，不要从 Tags 页面下载源码 ZIP 当作安装包。
 

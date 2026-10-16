@@ -975,6 +975,65 @@ mod saved_screenshot_preview_tests {
     }
 }
 
+/// Main-window-only presentation tools, scoped to an existing Android session
+/// and its own native phone-frame-*. Never inject an arbitrary device/JS label.
+#[tauri::command]
+pub async fn presentation_set_mode(
+    window: Window,
+    app_handle: tauri::AppHandle,
+    device: String,
+    mode: String,
+) -> Result<String, String> {
+    require_main_window(&window)?;
+    validate_capture_device(&device)?;
+    #[cfg(target_os = "windows")]
+    {
+        crate::device_frame::set_presentation_mode(&app_handle, &device, &mode).await
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app_handle, mode);
+        Err("MirroPresent requires the Windows live phone frame".into())
+    }
+}
+
+#[tauri::command]
+pub fn presentation_get_mode(window: Window, device: String) -> Result<String, String> {
+    require_main_window(&window)?;
+    validate_capture_device(&device)?;
+    #[cfg(target_os = "windows")]
+    { Ok(crate::device_frame::presentation_mode(&device)) }
+    #[cfg(not(target_os = "windows"))]
+    { Ok("off".into()) }
+}
+
+/// The snapshot magnifier is EXPLICITLY STILL (not a frame stream). Fetch
+/// one Android screencap in memory, verify its dimensions & orientation,
+/// then wait for WebView2 Image.onload before reporting success.
+#[tauri::command]
+pub async fn presentation_refresh_snapshot(
+    window: Window,
+    app_handle: tauri::AppHandle,
+    device: String,
+    custom_path: Option<String>,
+) -> Result<(), String> {
+    require_main_window(&window)?;
+    validate_capture_device(&device)?;
+    #[cfg(target_os = "windows")]
+    {
+        if crate::device_frame::presentation_mode(&device) != "magnifier" {
+            return Err("Enable the MirroPresent magnifier before refreshing its still image".into());
+        }
+        let png = capture_device_png(&device, custom_path).await?;
+        crate::device_frame::set_presentation_snapshot(&app_handle, &device, &png).await
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app_handle, custom_path);
+        Err("MirroPresent snapshot magnifier requires Windows".into())
+    }
+}
+
 /// Export only user-drawn annotations composited onto an Android screencap.
 /// If no active Windows phone frame/drawing exists, return a clear error;
 /// never silently save an unannotated or incorrectly rotated screenshot.
