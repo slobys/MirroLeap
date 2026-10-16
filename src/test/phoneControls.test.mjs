@@ -12,6 +12,7 @@ function setup({ failToggle = false } = {}) {
   const actions = [];
   let enabled = false;
   let quick = false;
+  let topmost = false;
   const dom = new JSDOM(html, {
     url: 'http://localhost/phone-controls.html',
     runScripts: 'dangerously',
@@ -29,6 +30,12 @@ function setup({ failToggle = false } = {}) {
         if (action === 'ink_reset') { enabled = false; quick = false; }
         if (action === 'quick_toggle') { quick = !quick; enabled = false; }
         if (action === 'quick_status') return quick;
+        if (action === 'quick_topmost_status') return topmost;
+        if (action === 'quick_topmost') {
+          if (!quick) throw new Error('Open the quick controls first');
+          topmost = !topmost;
+          return topmost;
+        }
         return action.startsWith('quick_') ? true : enabled;
       } } };
     },
@@ -95,6 +102,31 @@ describe('real Tauri phone-controls HTML', () => {
     await nextTask(); await nextTask();
     expect(document.body.classList.contains('quick-open')).toBe(false);
     expect(document.body.classList.contains('inking')).toBe(true);
+    dom.window.close();
+  });
+
+  it('controls window pinning live from the flyout and retains the native state', async () => {
+    const {dom,document,actions} = setup();
+    await nextTask(); await nextTask();
+    const pin = document.getElementById('quick-pin');
+    expect(pin.getAttribute('aria-pressed')).toBe('false');
+    pin.click();
+    await nextTask();
+    expect(actions).not.toContain('quick_topmost');
+    document.getElementById('quick-toggle').click();
+    await nextTask(); await nextTask();
+    pin.click();
+    await nextTask(); await nextTask();
+    expect(actions).toContain('quick_topmost');
+    expect(pin.getAttribute('aria-pressed')).toBe('true');
+    document.getElementById('quick-toggle').click();
+    await nextTask(); await nextTask();
+    document.getElementById('quick-toggle').click();
+    await nextTask(); await nextTask();
+    expect(pin.getAttribute('aria-pressed')).toBe('true');
+    pin.click();
+    await nextTask(); await nextTask();
+    expect(pin.getAttribute('aria-pressed')).toBe('false');
     dom.window.close();
   });
 

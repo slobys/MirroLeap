@@ -11,7 +11,7 @@ function syntheticSignature(payload) {
   const digest = createHash('blake2b512').update(payload).digest();
   const contentsSignature = sign(null, digest, privateKey);
   const signatureRecord = Buffer.concat([Buffer.from('ED'), keyId, contentsSignature]);
-  const comment = 'timestamp:1792157124\tfile:MirroLeap_5.0.3_x64-setup.exe';
+  const comment = 'timestamp:1792157124\tfile:MirroLeap_5.0.4_x64-setup.exe';
   const globalSignature = sign(null, Buffer.concat([
     contentsSignature, Buffer.from(comment, 'utf8')]), privateKey);
   const sigFile = [
@@ -32,7 +32,7 @@ describe('minisign updater verification', () => {
     const packageBytes = Buffer.from('official Windows installer fixture');
     const { key, signature } = syntheticSignature(packageBytes);
     expect(verifyUpdaterSignature(packageBytes, signature, key))
-      .toContain('MirroLeap_5.0.3_x64-setup.exe');
+      .toContain('MirroLeap_5.0.4_x64-setup.exe');
   });
 
   it('rejects a modified package and tampered trusted comment', () => {

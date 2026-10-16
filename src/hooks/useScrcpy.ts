@@ -402,12 +402,25 @@ export function useScrcpy() {
             }
         );
 
+        // Pin/unpin from the phone floating toolbar is a LIVE native action,
+        // unlike the old launch-only behavior checkbox. Persist the chosen
+        // state for the next session without restarting a running scrcpy.
+        const unlistenTopmost = listen<{device: string; enabled: boolean}>(
+            'mirroleap-window-topmost', ({payload}) => {
+                if (typeof payload?.device !== 'string' ||
+                    typeof payload.enabled !== 'boolean') return;
+                if (!liveRunningDevicesRef.current.includes(payload.device)) return;
+                setConfig(prev => prev.alwaysOnTop === payload.enabled
+                    ? prev : {...prev, alwaysOnTop: payload.enabled});
+            }
+        );
         return () => {
             unlistenLog.then(f => f());
             unlistenDecoder.then(f => f());
             unlistenStatus.then(f => f());
             unlistenProgress.then(f => f());
             unlistenWindowPos.then(f => f());
+            unlistenTopmost.then(f => f());
         };
     }, [t]);
 
