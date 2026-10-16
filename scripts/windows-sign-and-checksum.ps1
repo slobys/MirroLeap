@@ -55,6 +55,29 @@ if ($pfxBase64 -and $pfxPassword) {
     Write-Host '::warning::Installers and portable EXE are unsigned: no CA code-signing identity configured. Windows SmartScreen can warn. Do not disable protection.'
 }
 
+# Tauri's Ed25519 updater signature and Windows Authenticode are different
+# trust roots. Sign the FINAL bytes after optional PFX signing, otherwise the
+# plugin will reject the update as tampered with. Never expose the signing key
+# or allow the build to proceed with missing updater credentials.
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY -or -not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+    throw 'Required MirroLeap updater signing identity is missing'
+}
+foreach ($asset in $installers) {
+    & npm run tauri signer sign -- $asset.FullName | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Tauri updater signature failed for $($asset.Name)"
+    }
+    $signatureFile = "$($asset.FullName).sig"
+    if (-not (Test-Path -LiteralPath $signatureFile -PathType Leaf)) {
+        throw "Updater signature file missing: $signatureFile"
+    }
+    $signatureText = (Get-Content -LiteralPath $signatureFile -Raw).Trim()
+    if ($signatureText.Length -lt 60 -or $signatureText.Length -gt 1024) {
+        throw "Updater signature has an unexpected length for $($asset.Name)"
+    }
+}
+Write-Host 'Signed updater installers: Tauri update signatures generated for final bytes'
+
 # Compress *after* optional Authenticode signing. The ZIP therefore contains
 # the exact binary (signed or unsigned) that was verified by SignTool.
 $portableBundle = Join-Path $bundle 'portable'

@@ -167,6 +167,35 @@ pub async fn check_mirroleap_update(
     interpret_release(&local, &data)
 }
 
+/// Do not turn a portable/extract-and-run ZIP into an opaque machine-wide
+/// installer upgrade. Signed one-click NSIS/MSI updates are for installed
+/// Windows applications; portable users keep the explicit ZIP workflow.
+#[tauri::command]
+pub fn can_install_signed_update(window: Window) -> Result<bool, String> {
+    if window.label() != "main" { return Err("main_window_only".into()); }
+    #[cfg(target_os = "windows")]
+    {
+        let executable = std::env::current_exe()
+            .map_err(|_| "cannot_identify_install_type".to_string())?;
+        let parent = executable.parent().ok_or("cannot_identify_install_type")?;
+        let portable = parent.join("Run-MirroLeap.cmd").exists() ||
+            parent.join("README-PORTABLE.txt").exists();
+        // An EXE copied out of a ZIP may have lost its portable launcher.
+        // Require an installed-system directory instead of treating every
+        // file without Run-MirroLeap.cmd as an installed application.
+        let installation_roots = ["LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"];
+        let looks_installed = installation_roots.iter()
+            .filter_map(|key| std::env::var_os(key))
+            .map(std::path::PathBuf::from)
+            .any(|root| parent.starts_with(&root));
+        Ok(!portable && looks_installed)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

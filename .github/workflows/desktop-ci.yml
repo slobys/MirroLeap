@@ -39,6 +39,7 @@ jobs:
       - run: python3 scripts/check_device_frame.py
       - run: python3 scripts/check_annotations.py
       - run: python3 scripts/check_landscape_toolbar.py
+      - run: python3 scripts/check_signed_updater.py
       - run: python3 scripts/check_portable_release.py
       - run: python3 scripts/check_compact_home.py
       - run: python3 scripts/check_security_baseline.py
@@ -70,6 +71,8 @@ jobs:
         run: node scripts/windows-dashboard-layout.mjs
       - name: Real Edge settings geometry (100%, 125%, 150% DPI)
         run: node scripts/windows-settings-layout.mjs
+      - name: Real Edge floating shortcuts across 20 portrait and landscape layouts
+        run: node scripts/windows-phone-toolbar-layout.mjs
       - name: Build original standalone desktop executable (unpatched, without any installer)
         run: npm run tauri build -- --no-bundle
       - name: Stage extract-and-run portable version
@@ -82,13 +85,21 @@ jobs:
         shell: pwsh
         run: ./scripts/windows-smoke-webview.ps1
       - name: Build Windows NSIS and MSI installers
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
       - name: Optional Authenticode signing and mandatory SHA256 verification
         shell: pwsh
         env:
           SCRCPY_SIGNING_PFX_BASE64: ${{ secrets.SCRCPY_SIGNING_PFX_BASE64 }}
           SCRCPY_SIGNING_PFX_PASSWORD: ${{ secrets.SCRCPY_SIGNING_PFX_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: ./scripts/windows-sign-and-checksum.ps1
+      - name: Produce signed Windows updater latest.json
+        shell: pwsh
+        run: ./scripts/windows-updater-manifest.ps1
       - name: Confirm phone SVG shipped with Tauri dist
         shell: pwsh
         run: |
@@ -117,15 +128,28 @@ jobs:
           if (-not (Test-Path "release-checksums/SHA256SUMS.txt")) {
             throw "No signed-and-hashed release manifest"
           }
+          if (-not (Test-Path "release-checksums/latest.json")) {
+            throw "No signed Windows updater latest.json"
+          }
+          foreach ($kind in @('nsis/MirroLeap_${version}_x64-setup.exe.sig',
+                               'msi/MirroLeap_${version}_x64_en-US.msi.sig')) {
+            if (-not (Test-Path "src-tauri/target/release/bundle/$kind")) {
+              throw "Missing signed updater asset $kind"
+            }
+          }
+          python scripts/check_signed_updater_release.py release-checksums src-tauri/target/release/bundle
       - uses: actions/upload-artifact@v4
         with:
           name: MirroLeap-Windows-Installer
           if-no-files-found: error
           path: |
             src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/msi/*.msi.sig
             src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
             src-tauri/target/release/bundle/portable/*_x64_Portable.zip
             release-checksums/SHA256SUMS.txt
+            release-checksums/latest.json
 
   publish-release:
     name: Publish stable MirroLeap release
@@ -165,12 +189,28 @@ jobs:
               echo "Missing MirroLeap_${VERSION}${suffix}"; exit 1;
             }
           done
+          for suffix in "_x64-setup.exe.sig" "_x64_en-US.msi.sig"; do
+            signed_asset="$(find release-assets -type f -name "MirroLeap_${VERSION}${suffix}" -print -quit)"
+            test -n "$signed_asset" || { echo "Missing updater signature: $suffix"; exit 1; }
+            cp "$signed_asset" verified-assets/
+          done
+          signed_feed="$(find release-assets -type f -name latest.json -print -quit)"
+          test -n "$signed_feed" || { echo "Missing updater latest.json"; exit 1; }
+          cp "$signed_feed" verified-assets/latest.json
+          python3 scripts/check_signed_updater_release.py verified-assets verified-assets
           cat > release-notes.md <<'NOTES'
           ## MirroLeap — 轻盈投屏，专注当下
 
           基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 投屏核心。
 
           ### 主要更新
+          ### v5.0.3 签名一键更新和悬浮手机快捷操作
+          - **软件内用户确认更新**：安装版通过 Tauri Updater 从本项目 GitHub 正式 Release 的 latest.json 获取版本信息，检查 Ed25519 更新包签名后安装 Windows NSIS EXE；应用不会后台自动下载或运行安装器。
+          - **Portable 仍可免安装**：自动识别解压运行模式，不会将便携版擅自升级为安装版；旧版首次需要手动安装包含更新器的版本，后续安装版可一键更新。
+          - **悬浮快捷栏**：画笔旁新增实时快捷控制面板，提供 Alt+F/H/B/S/P/R/V/O 八项手机操作；与画笔互斥、按当前设备和真实 SDL 投屏窗口范围发送输入，焦点失败则停止，不触碰其他电脑窗口。
+          - **发布完整性**：Windows CI 对最终 EXE/MSI 签名并生成 latest.json 与 SHA-256 清单，签名凭据仅在 Actions Secrets 存储；候选发布验证窗口恢复、真实 WebView2 和窄屏悬浮栏布局。
+          - **安全边界**：Tauri 更新签名与 Windows CA 发行商代码签名是不同的验证体系，后者目前尚未配置，SmartScreen 提示不能绕过。
+
           ### v5.0.2 全新设置中心 UI
           - **投屏参数不再局促**：宽屏左右并排显示捕获/画质设置与 GPU 解码、当前参数概览；窄窗口自动切回单列且保留滚动。
           - **行为设置重新分组**：设备与连接、窗口与显示、录制保存各自独立；开关更大且支持键盘操作，快捷键独立可视网格。

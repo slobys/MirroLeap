@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>手机投屏控制和画笔标注</title>
+  <title>手机投屏控制、快捷键与画笔标注</title>
   <style>
     :root { color-scheme: dark; }
     *, *::before, *::after { box-sizing: border-box; }
@@ -14,7 +14,7 @@
     }
     .controls-root { position: relative; width: 100%; height: 100%; overflow: hidden; }
     .rail {
-      position: absolute; left: 0; top: 0; width: 62px; height: 270px;
+      position: absolute; left: 0; top: 0; width: 62px; height: 322px;
       padding: 7px 6px; display: flex; flex-direction: column;
       align-items: center; gap: 4px; overflow: hidden;
       border-radius: 15px; background: rgba(13, 17, 24, .96);
@@ -57,7 +57,7 @@
     #drag:active { cursor: grabbing; }
     /* Separate, non-scrolling flyout. A narrow desktop margin uses stack-*
        and docks this palette beneath the unchanged session-control rail. */
-    #ink-tools {
+    #ink-tools, #shortcut-tools {
       display: none; position: absolute; top: 10px; left: 68px;
       width: 200px; height: 202px; padding: 9px;
       overflow: hidden; border-radius: 15px;
@@ -67,10 +67,14 @@
       flex-direction: column; gap: 6px;
     }
     body.inking #ink-tools { display: flex; }
-    body[data-layout="side-left"] #ink-tools { left: auto; right: 68px; }
+    body.shortcuts #shortcut-tools { display: flex; }
+    body[data-layout="side-left"] #ink-tools,
+    body[data-layout="side-left"] #shortcut-tools { left: auto; right: 68px; }
     body[data-layout="stack-right"] #ink-tools,
-    body[data-layout="stack-left"] #ink-tools {
-      width: 168px; height: 202px; top: 276px; left: 0; right: auto; padding: 8px;
+    body[data-layout="stack-left"] #ink-tools,
+    body[data-layout="stack-right"] #shortcut-tools,
+    body[data-layout="stack-left"] #shortcut-tools {
+      width: 168px; height: 202px; top: 328px; left: 0; right: auto; padding: 8px;
     }
     /* A landscape window or a partly off-screen phone may have less than
        270px of vertical space. Preserve large 44px button targets by
@@ -88,24 +92,35 @@
     body[data-layout^="short"] .annotation-actions,
     body[data-layout^="tight"] .annotation-actions {
       flex-direction: row; justify-content: center;
-      gap: 12px; padding-bottom: 0;
+      /* Three buttons must fit the 150-DIP inner rail. */
+      gap: 4px; padding-bottom: 0;
     }
     body[data-layout="short-left"] .rail,
     body[data-layout="short-ink-left"] .rail,
     body[data-layout="tight-ink-left"] .rail { left: auto; right: 0; }
     body[data-layout^="short-ink"] #ink-tools,
-    body[data-layout^="tight-ink"] #ink-tools {
+    body[data-layout^="tight-ink"] #ink-tools,
+    body[data-layout^="short-ink"] #shortcut-tools,
+    body[data-layout^="tight-ink"] #shortcut-tools {
       left: 174px; top: 0; width: 200px; height: 202px;
     }
     body[data-layout="short-ink-left"] #ink-tools,
-    body[data-layout="tight-ink-left"] #ink-tools {
+    body[data-layout="tight-ink-left"] #ink-tools,
+    body[data-layout="short-ink-left"] #shortcut-tools,
+    body[data-layout="tight-ink-left"] #shortcut-tools {
       left: auto; right: 174px;
     }
     /* Smaller videos still get ALL palette actions simultaneously. A narrow
        condensed palette hides headings, never controls or colors. The native
        code only applies whole-window CSS zoom below this height. */
-    body[data-layout^="tight-ink"] #ink-tools { height: 136px; padding: 8px; gap: 6px; }
+    body[data-layout^="tight-ink"] #ink-tools,
+    body[data-layout^="tight-ink"] #shortcut-tools { height: 136px; padding: 8px; gap: 6px; }
     body[data-layout^="tight-ink"] .palette-heading { display: none; }
+    body[data-layout^="tight-ink"] #shortcut-tools .shortcut-grid { grid-template-columns: repeat(4,minmax(0,1fr)); }
+    body[data-layout^="tight-ink"] #shortcut-tools .shortcut-grid button {
+      height: 42px; min-height: 42px; flex-direction: column; gap: 0;
+    }
+    body[data-layout^="tight-ink"] #shortcut-tools .shortcut-grid kbd { display: none; }
     body[data-layout^="tight-ink"] .palette-actions button {
       height: 33px; min-height: 33px;
     }
@@ -135,6 +150,22 @@
       background: rgba(113,129,147,.14);
     }
     .sizes button.active { background: rgba(40,177,157,.35); color: #9af3e5; }
+    .shortcut-grid {
+      display: grid; grid-template-columns: repeat(2,minmax(0,1fr));
+      gap: 5px; align-items: center; width: 100%;
+    }
+    .shortcut-grid button {
+      display: flex; justify-content: space-between; align-items: center;
+      min-width: 0; width: 100%; height: 35px; min-height: 35px;
+      padding: 0 7px; gap: 4px; background: rgba(113,129,147,.14);
+      font-size: 11px; border-radius: 9px;
+    }
+    .shortcut-grid kbd {
+      display: grid; place-items: center; width: 19px; height: 19px;
+      border: 1px solid rgba(160,168,180,.30); border-radius: 5px;
+      font-size: 10px; font-family: inherit; color: #c7d2e2;
+    }
+    #shortcut-toggle[disabled], .shortcut-grid button[disabled] { opacity: .52; cursor: wait; }
     /* A visible red warning dot, with full diagnostic in the tooltip.
        Only shown on native/JS activation failures; ordinary use stays tidy. */
     #status {
@@ -148,7 +179,7 @@
   </style>
 </head>
 <body data-layout="compact">
-  <div class="controls-root" role="toolbar" aria-label="投屏控制和标注">
+  <div class="controls-root" role="toolbar" aria-label="投屏控制、快捷键和标注">
   <div class="rail">
     <!-- Window controls always remain adjacent and ABOVE drawing tools. -->
     <div class="session-actions" role="group" aria-label="窗口移动、最小化和关闭">
@@ -169,14 +200,19 @@
     </button>
     </div>
     <!-- Quick restore is always available: clear ink AND return phone input. -->
-    <div class="annotation-actions" role="group" aria-label="画笔与快速恢复">
+    <div class="annotation-actions" role="group" aria-label="画笔、快捷键与快速恢复">
     <button id="ink-toggle" aria-label="画笔标注开关" title="画笔标注">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 20h9M15.5 3.5l5 5-12 12H3.5v-5zM14 5l5 5"/>
       </svg>
     </button>
 
-
+    <button id="shortcut-toggle" aria-label="展开手机快捷控制" aria-pressed="false" title="手机快捷操作 Alt + 键">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2" y="5" width="20" height="14" rx="2"/>
+        <path d="M6 9h1M10 9h1M14 9h1M18 9h1M6 13h1M10 13h1M14 13h1M18 13h1M8 16h8"/>
+      </svg>
+    </button>
     <button id="restore" aria-label="一键恢复原始画面和手机触控" title="一键恢复画面和手机触控">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -224,6 +260,19 @@
         <button id="size-9" aria-label="粗笔 9 像素" aria-pressed="false" title="粗笔 9px">粗</button>
       </div>
     </div>
+    <div id="shortcut-tools" role="group" aria-label="手机快捷操作">
+      <div class="palette-heading">手机快捷操作 · Alt +</div>
+      <div class="shortcut-grid">
+        <button id="shortcut-fullscreen" data-shortcut="shortcut_fullscreen" aria-label="全屏 Alt+F"><span>全屏</span><kbd>F</kbd></button>
+        <button id="shortcut-home" data-shortcut="shortcut_home" aria-label="主页 Alt+H"><span>主页</span><kbd>H</kbd></button>
+        <button id="shortcut-back" data-shortcut="shortcut_back" aria-label="返回 Alt+B"><span>返回</span><kbd>B</kbd></button>
+        <button id="shortcut-recents" data-shortcut="shortcut_recents" aria-label="最近任务 Alt+S"><span>最近任务</span><kbd>S</kbd></button>
+        <button id="shortcut-power" data-shortcut="shortcut_power" aria-label="电源 Alt+P"><span>电源</span><kbd>P</kbd></button>
+        <button id="shortcut-rotate" data-shortcut="shortcut_rotate" aria-label="旋转 Alt+R"><span>旋转</span><kbd>R</kbd></button>
+        <button id="shortcut-paste" data-shortcut="shortcut_paste" aria-label="粘贴剪贴板 Alt+V"><span>粘贴</span><kbd>V</kbd></button>
+        <button id="shortcut-screen-off" data-shortcut="shortcut_screen_off" aria-label="熄屏 Alt+O"><span>熄屏</span><kbd>O</kbd></button>
+      </div>
+    </div>
   </div>
   <div id="status" role="status" aria-live="assertive" title=""></div>
   <script>
@@ -236,20 +285,32 @@
       };
       const status = document.getElementById('status');
       const inkButton = document.getElementById('ink-toggle');
+      const shortcutButton = document.getElementById('shortcut-toggle');
+      const shortcutActions = Array.from(document.querySelectorAll('.shortcut-grid button'));
       let enabled = false;
       let switching = false;
+      let shortcutsOpen = false;
+      let shortcutSwitching = false;
 
       // The native process is the single source of truth. Previously this
       // HTML toggled an independent boolean even when WebView2 had not loaded
       // the drawing script. The button could look green but not actually draw.
       function displayInkState(value) {
         enabled = Boolean(value);
+        if (enabled) displayShortcutState(false);
         document.body.classList.toggle('inking', enabled);
         inkButton.classList.toggle('active', enabled);
         inkButton.setAttribute('aria-pressed', String(enabled));
         inkButton.title = enabled
           ? '退出画笔'
           : '开启画笔';
+      }
+
+      function displayShortcutState(value) {
+        shortcutsOpen = Boolean(value);
+        document.body.classList.toggle('shortcuts', shortcutsOpen);
+        shortcutButton.classList.toggle('active', shortcutsOpen);
+        shortcutButton.setAttribute('aria-pressed', String(shortcutsOpen));
       }
 
       function report(error, showDialog = false) {
@@ -267,12 +328,24 @@
       }
 
       async function syncInkState() {
-        if (switching) return;
+        if (switching || shortcutSwitching) return;
         try {
           displayInkState(await invoke('ink_status'));
         } catch (error) {
           report(error);
         }
+      }
+      async function syncShortcutState() {
+        if (switching || shortcutSwitching) return;
+        try {
+          displayShortcutState(await invoke('shortcuts_status'));
+        } catch (error) {
+          report(error);
+        }
+      }
+      function syncBar() {
+        void syncInkState();
+        void syncShortcutState();
       }
 
       // Native placement chooses the side or vertically docked palette.
@@ -293,7 +366,7 @@
             }
           }
         },
-        sync: syncInkState,
+        sync: syncBar,
       });
 
       function chooseTool(which) {
@@ -319,11 +392,17 @@
       }
 
       inkButton.addEventListener('click', async () => {
-        if (switching) return;
+        if (switching || shortcutSwitching) return;
         switching = true;
         inkButton.disabled = true;
+        shortcutButton.disabled = true;
         inkButton.setAttribute('aria-busy', 'true');
         try {
+          if (shortcutsOpen) {
+            const stillOpen = await invoke('shortcuts_toggle');
+            displayShortcutState(stillOpen);
+            if (stillOpen) throw new Error('快捷栏尚未关闭');
+          }
           // Acknowledge the ACTUAL JS canvas enabled state, and native hit-test
           // state, before changing the palette. Repeated clicks cannot race.
           const actual = await invoke('ink_toggle');
@@ -335,11 +414,59 @@
           // Do not optimistically flip the tool button on failure.
         } finally {
           inkButton.disabled = false;
+          shortcutButton.disabled = false;
           inkButton.removeAttribute('aria-busy');
           switching = false;
-          await syncInkState();
+          syncBar();
         }
       });
+
+      shortcutButton.addEventListener('click', async () => {
+        if (switching || shortcutSwitching) return;
+        shortcutSwitching = true;
+        shortcutButton.disabled = true;
+        inkButton.disabled = true;
+        shortcutButton.setAttribute('aria-busy', 'true');
+        try {
+          // End drawing without clearing strokes, then open the separate
+          // panel. Neither palette may intercept the other palette's input.
+          if (enabled) {
+            const inkEnabled = await invoke('ink_toggle');
+            displayInkState(inkEnabled);
+            if (inkEnabled) throw new Error('画笔尚未退出');
+          }
+          displayShortcutState(await invoke('shortcuts_toggle'));
+          clearReport();
+        } catch (error) {
+          report(error);
+        } finally {
+          shortcutButton.disabled = false;
+          inkButton.disabled = false;
+          shortcutButton.removeAttribute('aria-busy');
+          shortcutSwitching = false;
+          syncBar();
+        }
+      });
+
+      let sendingShortcut = false;
+      for (const button of shortcutActions) {
+        button.addEventListener('click', async () => {
+          if (!shortcutsOpen || switching || shortcutSwitching || sendingShortcut) return;
+          sendingShortcut = true;
+          shortcutActions.forEach(item => { item.disabled = true; });
+          try {
+            // Only literal whitelisted actions may reach device_frame_control.
+            // Paste touches the PC clipboard solely after this explicit click.
+            await invoke(button.dataset.shortcut);
+            clearReport();
+          } catch (error) {
+            report(error);
+          } finally {
+            sendingShortcut = false;
+            shortcutActions.forEach(item => { item.disabled = false; });
+          }
+        });
+      }
 
       document.getElementById('drag').addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
@@ -381,16 +508,19 @@
       document.getElementById('restore').addEventListener('click', () => {
         // Single click clears temporary annotations and restores native touch,
         // regardless of whether the pen palette is currently expanded.
-        void act('ink_reset', () => chooseTool('pen'));
+        void act('ink_reset', () => {
+          chooseTool('pen');
+          displayShortcutState(false);
+        });
       });
 
       // Recover UI after WebView2 reload, minimize/restore or focus changes.
       // A switch in flight never competes with the following state query.
-      window.addEventListener('focus', () => { void syncInkState(); });
+      window.addEventListener('focus', syncBar);
       document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) void syncInkState();
+        if (!document.hidden) syncBar();
       });
-      void syncInkState();
+      syncBar();
     })();
   </script>
 </body>
