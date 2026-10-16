@@ -165,9 +165,6 @@ pub(crate) async fn phone_toolbar_keyevent(device: &str, action: &str) -> Result
         "quick_back" => "4",
         "quick_recents" => "187",
         "quick_power" => "26",
-        // KEYCODE_SLEEP never wakes an already sleeping device; some OEMs
-        // may pause video capture while the display is asleep.
-        "quick_sleep" => "223",
         _ => return Err("Unsupported Android navigation shortcut".into()),
     };
     let adb_path = get_binary_path("adb", None);
@@ -1024,6 +1021,20 @@ mod saved_screenshot_preview_tests {
     }
 }
 
+/// Trusted toolbar and main-window presenter refresh both use the same
+/// bounded in-memory ADB screenshot path; neither writes anything to disk.
+#[cfg(target_os = "windows")]
+pub(crate) async fn refresh_presenter_image(
+    app: &tauri::AppHandle, device: &str, custom_path: Option<String>,
+) -> Result<(), String> {
+    validate_capture_device(device)?;
+    if crate::device_frame::presentation_mode(device) != "magnifier" {
+        return Err("Enable MirroPresent frozen magnifier before refreshing".into());
+    }
+    let png = capture_device_png(device, custom_path).await?;
+    crate::device_frame::set_presentation_snapshot(app, device, &png).await
+}
+
 /// Main-window-only presentation tools, scoped to an existing Android session
 /// and its own native phone-frame-*. Never inject an arbitrary device/JS label.
 #[tauri::command]
@@ -1070,11 +1081,7 @@ pub async fn presentation_refresh_snapshot(
     validate_capture_device(&device)?;
     #[cfg(target_os = "windows")]
     {
-        if crate::device_frame::presentation_mode(&device) != "magnifier" {
-            return Err("Enable the MirroPresent magnifier before refreshing its still image".into());
-        }
-        let png = capture_device_png(&device, custom_path).await?;
-        crate::device_frame::set_presentation_snapshot(&app_handle, &device, &png).await
+        refresh_presenter_image(&app_handle, &device, custom_path).await
     }
     #[cfg(not(target_os = "windows"))]
     {

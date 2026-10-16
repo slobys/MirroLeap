@@ -64,7 +64,7 @@ describe('MirroPresent opt-in tools in settings',()=>{
     await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('presentation_refresh_snapshot',{
       device:'emulator-5554',customPath:'D:/adb'
     }));
-    await waitFor(()=>expect(screen.getByText(/Still screenshot loaded/)).toBeInTheDocument());
+    await waitFor(()=>expect(screen.getByText(/Still image loaded/)).toBeInTheDocument());
     expect(screen.getByText(/This is not live video/)).toBeInTheDocument();
   });
 

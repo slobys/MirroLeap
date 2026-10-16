@@ -15,6 +15,13 @@
   let snapshot = null;
   let snapshotToken = 0;
   let drawPending = false;
+  const minRadiusRatio = .11;
+  const maxRadiusRatio = .43;
+  const defaultRadiusRatio = .22;
+  let radiusRatio = defaultRadiusRatio;
+  const zoomDefault = 2.3;
+  let zoomFactor = zoomDefault;
+  const adjustable = (value, low, high) => Math.max(low, Math.min(high, value));
 
   function paint() {
     drawPending = false;
@@ -23,7 +30,7 @@
     if (mode === 'off' || w < 1 || h < 1) return;
     const x = point.x * w;
     const y = point.y * h;
-    const radius = Math.max(20, Math.min(150, Math.min(w, h) * .22));
+    const radius = Math.max(12, Math.min(w, h) * radiusRatio);
     ctx.save();
     if (mode === 'spotlight') {
       ctx.fillStyle = 'rgba(5,9,20,.73)';
@@ -34,7 +41,7 @@
       ctx.fill();
       ctx.globalCompositeOperation = 'source-over';
     } else if (mode === 'magnifier' && snapshot) {
-      const zoom = 2.3;
+      const zoom = zoomFactor;
       const sampleW = (radius * 2 / zoom / w) * snapshot.width;
       const sampleH = (radius * 2 / zoom / h) * snapshot.height;
       const srcX = Math.max(0, Math.min(snapshot.width - sampleW,
@@ -120,6 +127,21 @@
   canvas.addEventListener('pointerdown', event => {
     if (mode !== 'off') event.preventDefault();
   });
+  // Resize the spotlight / snapshot lens directly under the mouse cursor.
+  // No browser zoom, native mirror resize, or change to saved pen layers.
+  canvas.addEventListener('wheel', event => {
+    if (mode === 'off') return;
+    event.preventDefault();
+    if (event.ctrlKey && mode === 'magnifier') {
+      zoomFactor = adjustable(
+        zoomFactor + (event.deltaY < 0 ? .15 : -.15), 1.4, 4.2);
+    } else {
+      radiusRatio = adjustable(
+        Math.round((radiusRatio + (event.deltaY < 0 ? .025 : -.025)) * 1000) / 1000,
+        minRadiusRatio, maxRadiusRatio);
+    }
+    redraw();
+  }, {passive:false});
 
   // Emergency exit can be triggered from the existing phone hover toolbar's
   // one-click restore, even if the main UI is behind another program.
@@ -127,6 +149,14 @@
     ready: true,
     mode() { return mode; },
     focusPoint() { return {...point}; },
+    size() { return radiusRatio; },
+    zoom() { return zoomFactor; },
+    resetSize() {
+      radiusRatio = defaultRadiusRatio;
+      zoomFactor = zoomDefault;
+      redraw();
+      return radiusRatio;
+    },
     setMode(value) {
       if (!modes.has(value)) throw new Error('Unknown presentation mode');
       if (value !== mode) {

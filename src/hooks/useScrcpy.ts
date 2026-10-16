@@ -233,7 +233,10 @@ export function useScrcpy() {
         if (savedConfig) {
             try {
                 const parsed = JSON.parse(savedConfig);
-                setConfig(prev => ({ ...prev, ...parsed }));
+                // Startup fullscreen/screen-off options moved to on-demand
+                // phone controls. Do not silently replay old hidden toggles
+                // after their settings switches have been removed.
+                setConfig(prev => ({ ...prev, ...parsed, fullscreen: false, turnOff: false }));
                 // Initial check with saved path if it exists
                 if (parsed.scrcpyPath) {
                     checkScrcpy(parsed.scrcpyPath);

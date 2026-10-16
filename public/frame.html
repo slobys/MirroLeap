@@ -45,6 +45,10 @@
       left: 1.8%; top: .8372093023255814%;
       width: 96.4%; height: 98.32558139534883%;
       display: block; z-index: 3; background: transparent;
+      /* Presenter darkening and lens MUST remain inside the same rounded
+         aperture as the SVG/Win32 video. A square canvas leaks solid dark
+         corners over the titanium bezel when the spotlight is enabled. */
+      clip-path: inset(0 round 7.46888% / 3.40587%);
       pointer-events: none; touch-action: none; cursor: crosshair;
     }
     /* Landscape is the same black titanium SVG rotated 90 degrees.
@@ -59,6 +63,7 @@
     html[data-orientation="landscape"] #presentation {
       left: .8372093023255814%; top: 1.8%;
       width: 98.32558139534883%; height: 96.4%;
+      clip-path: inset(0 round 3.40587% / 7.46888%);
     }
     body.inking #annotation { pointer-events: auto; }
     body.presenting #presentation { pointer-events: auto; }

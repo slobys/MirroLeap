@@ -14,7 +14,7 @@
     }
     .controls-root { position: relative; width: 100%; height: 100%; overflow: hidden; }
     .rail {
-      position: absolute; left: 0; top: 0; width: 62px; height: 322px;
+      position: absolute; left: 0; top: 0; width: 62px; height: 370px;
       padding: 7px 6px; display: flex; flex-direction: column;
       align-items: center; gap: 4px; overflow: hidden;
       border-radius: 15px; background: rgba(13, 17, 24, .96);
@@ -68,11 +68,13 @@
     }
     body.inking #ink-tools { display: flex; }
     body.quick-open #quick-tools { display: flex; }
+    body.present-open #present-tools { display: flex; }
     body[data-layout="side-left"] #ink-tools,
-    body[data-layout="side-left"] #quick-tools { left: auto; right: 68px; }
+    body[data-layout="side-left"] #quick-tools,
+    body[data-layout="side-left"] #present-tools { left: auto; right: 68px; }
     body[data-layout="stack-right"] #ink-tools,
     body[data-layout="stack-left"] #ink-tools {
-      width: 168px; height: 202px; top: 328px; left: 0; right: auto; padding: 8px;
+      width: 168px; height: 202px; top: 376px; left: 0; right: auto; padding: 8px;
     }
     /* A landscape window or a partly off-screen phone may have less than
        270px of vertical space. Preserve large 44px button targets by
@@ -90,8 +92,16 @@
     body[data-layout^="short"] .annotation-actions,
     body[data-layout^="tight"] .annotation-actions {
       flex-direction: row; justify-content: center;
-      /* Three 46px controls + two 4px gaps fit the 150px content width. */
+      /* Four 34px mode controls and three 4px gaps fit this 150px rail. */
       gap: 4px; padding-bottom: 0;
+    }
+    body[data-layout^="short"] .annotation-actions button,
+    body[data-layout^="tight"] .annotation-actions button {
+      width: 34px; height: 34px; min-height: 34px;
+    }
+    body[data-layout^="short"] .annotation-actions button svg,
+    body[data-layout^="tight"] .annotation-actions button svg {
+      width: 18px; height: 18px;
     }
     body[data-layout="short-left"] .rail,
     body[data-layout="short-ink-left"] .rail,
@@ -127,7 +137,7 @@
     }
     body[data-layout="stack-right"] #quick-tools,
     body[data-layout="stack-left"] #quick-tools {
-      width: 168px; height: 202px; top: 328px; left: 0; right: auto;
+      width: 168px; height: 202px; top: 376px; left: 0; right: auto;
     }
     body[data-layout^="short-ink"] #quick-tools,
     body[data-layout^="tight-ink"] #quick-tools {
@@ -140,6 +150,43 @@
     body[data-layout^="tight-ink"] #quick-tools {
       top: 0; height: 136px; padding: 6px; gap: 4px;
     }
+    #present-tools {
+      display: none; position: absolute; top: 10px; left: 68px;
+      width: 200px; height: 202px; padding: 9px;
+      border-radius: 15px; overflow: hidden;
+      flex-direction: column; gap: 7px;
+      background: rgba(13,17,24,.97);
+      border: 1px solid rgba(160,168,180,.32);
+      box-shadow: 0 6px 20px rgba(0,0,0,.35);
+    }
+    body[data-layout="stack-right"] #present-tools,
+    body[data-layout="stack-left"] #present-tools {
+      width:168px; height:202px; top:376px; left:0; right:auto;
+    }
+    body[data-layout^="short-ink"] #present-tools,
+    body[data-layout^="tight-ink"] #present-tools {
+      left:174px; top:0; width:200px; height:202px;
+    }
+    body[data-layout="side-left"] #present-tools {left:auto;right:68px;}
+    body[data-layout="short-ink-left"] #present-tools,
+    body[data-layout="tight-ink-left"] #present-tools {left:auto;right:174px;}
+    body[data-layout^="tight-ink"] #present-tools {
+      top:0; height:136px; padding:6px; gap:4px;
+    }
+    .present-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}
+    .present-grid button {
+      width:100%;min-width:0;height:56px;min-height:56px;gap:3px;
+      font-size:12px;background:rgba(113,129,147,.16);
+    }
+    .present-grid button svg {width:19px;height:19px;}
+    .present-hint {font-size:11px;line-height:16px;color:#98a9bb;}
+    body[data-layout^="tight-ink"] .present-grid button {
+      height:52px;min-height:52px;
+    }
+    body[data-layout^="tight-ink"] .present-hint {display:none;}
+    #present-feedback[data-feedback="error"] {color:#fda4af;}
+    #present-feedback[data-feedback="sent"] {color:#9fffea;}
+    #present-feedback[data-feedback="busy"] {color:#ffd080;}
     .quick-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
     .quick-grid button { width:100%; height:46px; min-height:46px; gap:1px; font-size:11px;
       background:rgba(113,129,147,.17); }
@@ -238,6 +285,12 @@
         <rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9h3m4 0h3M7 15h3m4 0h3"/>
       </svg>
     </button>
+    <button id="present-toggle" aria-label="MirroPresent 演示工具" aria-pressed="false" title="聚光灯 / 放大镜">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="7"/><path d="M2 12h3m14 0h3M12 2v3m0 14v3"/>
+      </svg>
+    </button>
     <button id="restore" aria-label="一键恢复原始画面和手机触控" title="一键恢复画面和手机触控">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -303,19 +356,34 @@
         <button id="quick-power" aria-label="电源键" title="手机电源键：切换亮屏/息屏">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v9m-5-6a9 9 0 1 0 10 0"/></svg>电源
         </button>
-        <button id="quick-rotate" aria-label="旋转画面" title="scrcpy 旋转 (Alt+R)">
+        <button id="quick-rotate" aria-label="旋转画面" title="旋转电脑投屏画面 (Alt+右方向键)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 3a9 9 0 1 1-11 2M17 3v6h-6"/></svg>旋转
         </button>
         <button id="quick-paste" aria-label="粘贴" title="粘贴电脑剪贴板文本 (Alt+V)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2M9 10h6M9 14h6"/></svg>粘贴
         </button>
-        <button id="quick-screen_off" aria-label="关闭手机屏幕" title="发送 Android 息屏指令；部分机型息屏会暂停投屏">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="m5 5 14 12M8 21h8"/></svg>息屏
-        </button>
         <button id="quick-top" aria-label="窗口置顶" aria-pressed="false" title="窗口置顶/取消置顶">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 21V5m-6 6 6-6 6 6M4 3h16"/></svg>置顶
         </button>
       </div>
+    </div>
+    <div id="present-tools" role="group" aria-label="MirroPresent 演示工具">
+      <div id="present-feedback" class="palette-heading" role="status" aria-live="polite">MirroPresent 演示</div>
+      <div class="present-grid">
+        <button id="present-spotlight" aria-pressed="false" aria-label="聚光灯" title="聚光灯 · 画面内滚轮调大小">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>聚光灯
+        </button>
+        <button id="present-magnifier" aria-pressed="false" aria-label="定格放大镜" title="自动读取手机静态截图 · 滚轮调大小">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="10" cy="10" r="6"/><path d="m14 14 7 7M8 10h4m-2-2v4"/></svg>放大镜
+        </button>
+        <button id="present-refresh" aria-label="刷新定格截图" title="重新读取手机静态截图">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 7v6h-6M4 17v-6h6M6 9a7 7 0 0 1 12-2M18 15a7 7 0 0 1-12 2"/></svg>刷新截图
+        </button>
+        <button id="present-off" aria-label="退出演示" title="退出演示并恢复手机触控">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="m8 8 8 8M16 8l-8 8"/></svg>退出演示
+        </button>
+      </div>
+      <div class="present-hint">画面内滚轮调大小，Ctrl+滚轮调倍率</div>
     </div>
   </div>
   <div id="status" role="status" aria-live="assertive" title=""></div>
@@ -330,10 +398,49 @@
       const status = document.getElementById('status');
       const inkButton = document.getElementById('ink-toggle');
       const quickButton = document.getElementById('quick-toggle');
+      const presenterButton = document.getElementById('present-toggle');
+      const presenterFeedback = document.getElementById('present-feedback');
       const quickFeedback = document.getElementById('quick-feedback');
       let enabled = false;
       let switching = false;
       let quickSwitching = false;
+      let presenterSwitching = false;
+      let presenterTimer = null;
+      function presentFeedback(state, message) {
+        if (presenterTimer !== null) clearTimeout(presenterTimer);
+        presenterFeedback.textContent = message;
+        presenterFeedback.title = message;
+        presenterFeedback.dataset.feedback = state;
+        presenterTimer = setTimeout(() => {
+          delete presenterFeedback.dataset.feedback;
+          presenterFeedback.textContent = 'MirroPresent 演示';
+          presenterFeedback.title = '';
+          presenterTimer = null;
+        }, state === 'error' ? 5500 : 2800);
+      }
+      function displayPresentState(open, spotlight, magnifier) {
+        document.body.classList.toggle('present-open', !!open);
+        presenterButton.classList.toggle('active', !!open);
+        presenterButton.setAttribute('aria-pressed', String(!!open));
+        for (const name of ['spotlight','magnifier']) {
+          const pressed = !!open && (name === 'spotlight' ? spotlight : magnifier);
+          const button = document.getElementById('present-' + name);
+          button.classList.toggle('active', pressed);
+          button.setAttribute('aria-pressed', String(pressed));
+        }
+        document.getElementById('present-refresh').disabled = !open || !magnifier;
+      }
+      async function syncPresentState() {
+        if (presenterSwitching) return;
+        try {
+          const open = await invoke('present_status');
+          if (!open) { displayPresentState(false, false, false); return; }
+          const [spotlight, magnifier] = await Promise.all([
+            invoke('present_is_spotlight'), invoke('present_is_magnifier'),
+          ]);
+          displayPresentState(true, spotlight, magnifier);
+        } catch (error) { report(error); }
+      }
       let feedbackTimer = null;
       function actionFeedback(button, state, message) {
         if (feedbackTimer !== null) clearTimeout(feedbackTimer);
@@ -432,6 +539,7 @@
         sync() {
           void syncInkState();
           void syncQuickState();
+          void syncPresentState();
         },
       });
 
@@ -478,6 +586,7 @@
           switching = false;
           await syncInkState();
           await syncQuickState();
+          await syncPresentState();
         }
       });
 
@@ -496,8 +605,59 @@
           quickButton.disabled = false;
           await syncQuickState();
           await syncInkState();
+          await syncPresentState();
         }
       });
+      presenterButton.addEventListener('click', async () => {
+        if (switching || quickSwitching || presenterSwitching) return;
+        presenterSwitching = true;
+        presenterButton.disabled = true;
+        presentFeedback('busy', '正在打开演示工具…');
+        try {
+          const opened = await invoke('present_toggle');
+          displayPresentState(opened, false, false);
+          presentFeedback('sent', opened ? '已打开 · 滚轮调圆圈大小' : '已退出演示并恢复触控');
+          clearReport();
+        } catch (error) {
+          report(error);
+          presentFeedback('error', '演示工具失败 · ' + String(error));
+        } finally {
+          presenterSwitching = false;
+          presenterButton.disabled = false;
+          await syncPresentState();
+          await syncQuickState();
+          await syncInkState();
+        }
+      });
+      const presentLabels = Object.freeze({
+        spotlight: '聚光灯', magnifier: '定格放大镜',
+        refresh: '刷新截图', off: '退出演示',
+      });
+      for (const action of ['spotlight','magnifier','refresh','off']) {
+        const button = document.getElementById('present-' + action);
+        button.addEventListener('click', async () => {
+          if (!document.body.classList.contains('present-open') || presenterSwitching) return;
+          presenterSwitching = true;
+          button.disabled = true;
+          button.setAttribute('aria-busy', 'true');
+          presentFeedback('busy', '正在操作：' + presentLabels[action]);
+          try {
+            await invoke('present_' + action);
+            clearReport();
+            presentFeedback('sent', action === 'off' ?
+              '演示已退出，手机触控恢复' :
+              presentLabels[action] + '已就绪 · 滚轮缩放');
+          } catch (error) {
+            report(error);
+            presentFeedback('error', presentLabels[action] + '失败 · ' + String(error));
+          } finally {
+            presenterSwitching = false;
+            button.removeAttribute('aria-busy');
+            button.disabled = false;
+            await syncPresentState();
+          }
+        });
+      }
       document.getElementById('quick-top').addEventListener('click', async () => {
         const button=document.getElementById('quick-top');
         if (button.disabled || !document.body.classList.contains('quick-open')) return;
@@ -518,9 +678,9 @@
       });
       const quickLabels = Object.freeze({
         fullscreen: '全屏', home: '主页', back: '返回', recents: '最近任务',
-        power: '电源键', rotate: '旋转', paste: '粘贴', screen_off: '息屏',
+        power: '电源键', rotate: '旋转', paste: '粘贴',
       });
-      for (const action of ['fullscreen','home','back','recents','power','rotate','paste','screen_off']) {
+      for (const action of ['fullscreen','home','back','recents','power','rotate','paste']) {
         const button = document.getElementById('quick-' + action);
         button.addEventListener('click', async () => {
           if (button.disabled || !document.body.classList.contains('quick-open')) return;
@@ -589,15 +749,18 @@
       window.addEventListener('focus', () => {
         void syncInkState();
         void syncQuickState();
+        void syncPresentState();
       });
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
           void syncInkState();
           void syncQuickState();
+          void syncPresentState();
         }
       });
       void syncInkState();
       void syncQuickState();
+      void syncPresentState();
       void syncTopState();
     })();
   </script>

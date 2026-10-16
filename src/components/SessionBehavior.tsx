@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ScrcpyConfig } from '../hooks/useScrcpy';
 import Tooltip from './Tooltip';
-import { Coffee, MonitorOff, Volume2, Layers, Maximize, Square, Circle, Folder, ChevronDown, ActivitySquare, Move, Smartphone } from 'lucide-react';
+import { Coffee, Volume2, Layers, Square, Circle, Folder, ChevronDown, ActivitySquare, Move, Smartphone } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 const AUDIO_CODEC_VALUES = ['auto', 'opus', 'aac', 'flac', 'raw'] as const;
@@ -159,13 +159,6 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                         label={t('sessionBehavior.keepActive')}
                         tooltip={t('sessionBehavior.keepActiveTooltip')}
                     />
-                    <Toggle
-                        checked={config.turnOff || false}
-                        onChange={(v) => handleChange('turnOff', v)}
-                        icon={MonitorOff}
-                        label={t('sessionBehavior.screenOff')}
-                        tooltip={t('sessionBehavior.screenOffTooltip')}
-                    />
                     <div>
                         <Toggle
                             checked={config.audioEnabled || false}
@@ -190,13 +183,6 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                     <h2>{locale.startsWith('zh') ? '窗口与显示' : 'Window & display'}</h2>
                 </div>
                 <div className="flex flex-col gap-1">
-                    <Toggle
-                        checked={config.fullscreen || false}
-                        onChange={(v) => handleChange('fullscreen', v)}
-                        icon={Maximize}
-                        label={t('sessionBehavior.fullScreen')}
-                        tooltip={t('sessionBehavior.fullScreenTooltip')}
-                    />
                     <Toggle
                         checked={config.borderless || false}
                         onChange={(v) => handleChange('borderless', v)}

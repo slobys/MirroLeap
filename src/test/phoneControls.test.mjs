@@ -12,6 +12,8 @@ function setup({ failToggle = false, failAction = null } = {}) {
   const actions = [];
   let enabled = false;
   let quick = false;
+  let presenter = false;
+  let presenterMode = 'off';
   let top = false;
   const dom = new JSDOM(html, {
     url: 'http://localhost/phone-controls.html',
@@ -27,9 +29,26 @@ function setup({ failToggle = false, failAction = null } = {}) {
           if (failToggle) throw new Error('native canvas not ready');
           enabled = !enabled;
           quick = false;
+          presenter = false;
+          presenterMode = 'off';
         }
-        if (action === 'ink_reset') { enabled = false; quick = false; }
-        if (action === 'quick_toggle') { quick = !quick; enabled = false; }
+        if (action === 'ink_reset') { enabled = false; quick = false; presenter = false; presenterMode='off'; }
+        if (action === 'quick_toggle') {
+          quick = !quick; enabled = false; presenter = false; presenterMode='off';
+        }
+        if (action === 'present_status') return presenter;
+        if (action === 'present_is_spotlight') return presenterMode === 'spotlight';
+        if (action === 'present_is_magnifier') return presenterMode === 'magnifier';
+        if (action === 'present_toggle') {
+          presenter = !presenter;
+          enabled = false;quick = false;
+          if (!presenter) presenterMode = 'off';
+          return presenter;
+        }
+        if (action === 'present_spotlight') { presenterMode = 'spotlight'; return true; }
+        if (action === 'present_magnifier') { presenterMode = 'magnifier'; return true; }
+        if (action === 'present_refresh') return true;
+        if (action === 'present_off') { presenterMode = 'off'; return false; }
         if (action === 'quick_status') return quick;
         if (action === 'quick_top_status') return top;
         if (action === 'quick_top_toggle') return (top = !top);
@@ -46,7 +65,7 @@ describe('real Tauri phone-controls HTML', () => {
     const ids = [...document.querySelectorAll('.session-actions button')].map(b => b.id);
     expect(ids).toEqual(['drag', 'minimize', 'close']);
     expect([...document.querySelectorAll('.annotation-actions button')].map(b => b.id))
-      .toEqual(['ink-toggle', 'quick-toggle', 'restore']);
+      .toEqual(['ink-toggle', 'quick-toggle', 'present-toggle', 'restore']);
     expect(dom.window.getComputedStyle(document.querySelector('#ink-tools')).display).toBe('none');
     document.getElementById('ink-toggle').click();
     await nextTask();
@@ -87,13 +106,13 @@ describe('real Tauri phone-controls HTML', () => {
     await nextTask(); await nextTask();
     expect(document.body.classList.contains('quick-open')).toBe(true);
     expect(document.getElementById('quick-toggle').getAttribute('aria-pressed')).toBe('true');
-    for (const action of ['fullscreen', 'home', 'back', 'recents', 'power', 'rotate', 'paste', 'screen_off']) {
+    for (const action of ['fullscreen', 'home', 'back', 'recents', 'power', 'rotate', 'paste']) {
       document.getElementById('quick-' + action).click();
       await nextTask();
     }
     expect(actions).toEqual(expect.arrayContaining([
       'quick_fullscreen','quick_home','quick_back','quick_recents','quick_power',
-      'quick_rotate','quick_paste','quick_screen_off',
+      'quick_rotate','quick_paste',
     ]));
     const top = document.getElementById('quick-top');
     expect(top).not.toBeNull();
@@ -113,7 +132,7 @@ describe('real Tauri phone-controls HTML', () => {
   });
 
   it('displays pending, dispatched and failure feedback for shortcut actions', async () => {
-    const { dom, document } = setup({failAction:'quick_screen_off'});
+    const { dom, document } = setup({failAction:'quick_paste'});
     document.getElementById('quick-toggle').click();
     await nextTask(); await nextTask();
     const rotate = document.getElementById('quick-rotate');
@@ -124,13 +143,60 @@ describe('real Tauri phone-controls HTML', () => {
     expect(rotate.dataset.feedback).toBe('sent');
     expect(document.getElementById('quick-feedback').textContent)
       .toContain('指令已发送：旋转');
-    const sleep = document.getElementById('quick-screen_off');
-    sleep.click();
+    const failed = document.getElementById('quick-paste');
+    failed.click();
     await nextTask();
-    expect(sleep.dataset.feedback).toBe('error');
+    expect(failed.dataset.feedback).toBe('error');
     expect(document.getElementById('quick-feedback').textContent)
-      .toContain('息屏失败');
+      .toContain('粘贴失败');
     expect(document.getElementById('status').dataset.error).toBe('true');
+    dom.window.close();
+  });
+
+  it('opens presenter palette, switches spotlight and still lens, and safely exits', async () => {
+    const {dom,document,actions}=setup();
+    const toggle=document.getElementById('present-toggle');
+    toggle.click();
+    await nextTask();await nextTask();
+    expect(document.body.classList.contains('present-open')).toBe(true);
+    expect(document.getElementById('present-refresh').disabled).toBe(true);
+    document.getElementById('present-spotlight').click();
+    await nextTask();await nextTask();
+    expect(document.getElementById('present-spotlight').getAttribute('aria-pressed')).toBe('true');
+    document.getElementById('present-magnifier').click();
+    await nextTask();await nextTask();
+    expect(document.getElementById('present-magnifier').getAttribute('aria-pressed')).toBe('true');
+    expect(document.getElementById('present-refresh').disabled).toBe(false);
+    document.getElementById('present-refresh').click();
+    await nextTask();await nextTask();
+    expect(actions).toContain('present_refresh');
+    document.getElementById('present-off').click();
+    await nextTask();await nextTask();
+    expect(document.getElementById('present-magnifier').getAttribute('aria-pressed')).toBe('false');
+    toggle.click();
+    await nextTask();await nextTask();
+    expect(document.body.classList.contains('present-open')).toBe(false);
+    expect(actions).toEqual(expect.arrayContaining([
+      'present_toggle','present_spotlight','present_magnifier','present_refresh','present_off'
+    ]));
+    dom.window.close();
+  });
+
+  it('keeps drawing, quick controls and MirroPresent mutually exclusive', async () => {
+    const {dom,document}=setup();
+    document.getElementById('present-toggle').click();
+    await nextTask();await nextTask();
+    document.getElementById('quick-toggle').click();
+    await nextTask();await nextTask();
+    expect(document.body.classList.contains('quick-open')).toBe(true);
+    expect(document.body.classList.contains('present-open')).toBe(false);
+    document.getElementById('present-toggle').click();
+    await nextTask();await nextTask();
+    expect(document.body.classList.contains('quick-open')).toBe(false);
+    document.getElementById('ink-toggle').click();
+    await nextTask();await nextTask();
+    expect(document.body.classList.contains('present-open')).toBe(false);
+    expect(document.body.classList.contains('inking')).toBe(true);
     dom.window.close();
   });
 

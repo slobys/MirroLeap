@@ -23,7 +23,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD,
-    KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_SCANCODE, KEYEVENTF_KEYUP,
+    KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_SCANCODE, KEYEVENTF_KEYUP, KEYEVENTF_EXTENDEDKEY,
     VIRTUAL_KEY, VK_LBUTTON,
 };
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
@@ -49,6 +49,13 @@ static PRESENTATION_MODES: OnceLock<Mutex<HashMap<String, &'static str>>> = Once
 static PRESENTATION_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static QUICK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static PRESENT_TOOL_OPEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+fn presenter_panels() -> &'static Mutex<HashSet<String>> {
+    PRESENT_TOOL_OPEN.get_or_init(|| Mutex::new(HashSet::new()))
+}
+fn is_present_panel_open(device: &str) -> bool {
+    presenter_panels().lock().map(|set| set.contains(device)).unwrap_or(false)
+}
 static VIDEO_TOPMOST_REQUESTS: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
 fn topmost_requests() -> &'static Mutex<HashMap<String, bool>> {
     VIDEO_TOPMOST_REQUESTS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -574,7 +581,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let foreground = unsafe { GetForegroundWindow() };
         // Quick Android navigation uses the same native expanded rail
         // geometry as the pen palette, but never intercepts phone touches.
-        let inking = is_inking(&device) || is_quick_open(&device);
+        let inking = is_inking(&device) || is_quick_open(&device) || is_present_panel_open(&device);
         let presenting = presentation_mode(&device) != "off";
         let active = foreground == hwnd
             || toolbar_hwnd == Some(foreground)
@@ -1132,10 +1139,13 @@ fn send_video_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
     // SDL polls real keyboard state. PostMessage(WM_SYSKEYDOWN) returns
     // success even when SDL ignores the synthetic event. Instead move input
     // focus to the PID-validated scrcpy video and inject real scan codes.
-    let scan = match action {
-        "quick_fullscreen" => 0x21_u16,
-        "quick_rotate" => 0x13_u16,
-        "quick_paste" => 0x2F_u16,
+    // Rotate the *mirrored display* via MOD+Right, not Android MOD+R:
+    // MOD+R rotates the device only if the foreground Android app allows
+    // orientation changes and appeared to do nothing on locked apps.
+    let (scan, extended) = match action {
+        "quick_fullscreen" => (0x21_u16, false),
+        "quick_rotate" => (0x4D_u16, true),
+        "quick_paste" => (0x2F_u16, false),
         _ => return Err("Unsupported scrcpy shortcut".into()),
     };
     if unsafe { IsIconic(hwnd).as_bool() } {
@@ -1156,16 +1166,21 @@ fn send_video_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
     if unsafe { GetForegroundWindow() } != hwnd {
         return Err("Windows did not allow scrcpy to receive keyboard focus; retry after clicking the video".into());
     }
-    let key = |scan: u16, release: bool| INPUT {
+    let key = |scan: u16, release: bool, extended: bool| INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 { ki: KEYBDINPUT {
             wVk: VIRTUAL_KEY(0), wScan: scan,
-            dwFlags: KEYEVENTF_SCANCODE | if release { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+            dwFlags: KEYEVENTF_SCANCODE
+                | if release { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) }
+                | if extended { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) },
             time: 0, dwExtraInfo: 0,
         }},
     };
     const ALT: u16 = 0x38;
-    let input = [key(ALT, false), key(scan, false), key(scan, true), key(ALT, true)];
+    let input = [
+        key(ALT, false, false), key(scan, false, extended),
+        key(scan, true, extended), key(ALT, true, false),
+    ];
     if unsafe { SendInput(&input, std::mem::size_of::<INPUT>() as i32) } != input.len() as u32 {
         return Err("Windows refused to send the scrcpy shortcut".into());
     }
@@ -1177,11 +1192,24 @@ fn video_is_topmost(hwnd: HWND) -> bool {
 }
 fn apply_video_topmost(app: &AppHandle, device: &str, hwnd: HWND, desired: bool) -> Result<(), String> {
     let placement = if desired { HWND_TOPMOST } else { HWND_NOTOPMOST };
-    unsafe { SetWindowPos(hwnd, Some(placement), 0, 0, 0, 0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) }
-        .map_err(|e| format!("Cannot update video topmost: {e}"))?;
+    // Some SDL/desktop compositions reorder windows while a transparent
+    // WebView has mouse focus. Request and verify the native state before
+    // changing companion windows, with one explicit frame refresh retry.
+    for pass in 0..2 {
+        let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE |
+            if pass == 1 { windows::Win32::UI::WindowsAndMessaging::SWP_FRAMECHANGED }
+            else { windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS(0) };
+        unsafe { SetWindowPos(hwnd, Some(placement), 0, 0, 0, 0, flags) }
+            .map_err(|e| format!("Cannot update native scrcpy video topmost: {e}"))?;
+        if video_is_topmost(hwnd) == desired { break; }
+    }
+    if video_is_topmost(hwnd) != desired {
+        return Err("Windows refused to change SDL video topmost; the request was not confirmed".into());
+    }
     for name in [label(device), toolbar_label(device)] {
         if let Some(window) = app.get_webview_window(&name) {
+            window.set_always_on_top(desired)
+                .map_err(|e| format!("Could not change phone frame topmost: {e}"))?;
             if let Ok(handle) = window.hwnd() {
                 unsafe { SetWindowPos(handle, Some(placement), 0, 0, 0, 0,
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) }
@@ -1189,16 +1217,22 @@ fn apply_video_topmost(app: &AppHandle, device: &str, hwnd: HWND, desired: bool)
             }
         }
     }
-    if video_is_topmost(hwnd) != desired {
-        return Err("Windows did not apply the requested topmost status".into());
-    }
     Ok(())
 }
 fn toggle_video_topmost(app: &AppHandle, device: &str, hwnd: HWND) -> Result<bool, String> {
-    let requested = !video_is_topmost(hwnd);
-    apply_video_topmost(app, device, hwnd, requested)?;
+    let previous = topmost_requests().lock().map_err(|e| e.to_string())?
+        .get(device).copied().unwrap_or_else(|| video_is_topmost(hwnd));
+    let requested = !previous;
+    // Store the desired state BEFORE SetWindowPos. The health follower may
+    // wake during this transition; previously it could restore the old
+    // state between our native SetWindowPos and the actual verification.
     topmost_requests().lock().map_err(|e| e.to_string())?
         .insert(device.to_string(), requested);
+    if let Err(error) = apply_video_topmost(app, device, hwnd, requested) {
+        topmost_requests().lock().map_err(|e| e.to_string())?
+            .insert(device.to_string(), previous);
+        return Err(error);
+    }
     Ok(requested)
 }
 
@@ -1210,12 +1244,75 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         .ok_or("scrcpy 会话已结束")?;
     let hwnd = crate::commands::find_window_by_pid(pid).ok_or("投屏窗口不可见")?;
 
+    if action == "present_status" { return Ok(is_present_panel_open(&device)); }
+    if action == "present_is_spotlight" { return Ok(presentation_mode(&device) == "spotlight"); }
+    if action == "present_is_magnifier" { return Ok(presentation_mode(&device) == "magnifier"); }
+    if action == "present_toggle" {
+        if is_present_panel_open(&device) {
+            if presentation_mode(&device) != "off" {
+                set_presentation_mode(app, &device, "off").await?;
+            }
+            presenter_panels().lock().map_err(|e|e.to_string())?.remove(&device);
+            return Ok(false);
+        }
+        if is_inking(&device) { control_ink(app, &device, "ink_toggle").await?; }
+        quick_sessions().lock().map_err(|e|e.to_string())?.remove(&device);
+        presenter_panels().lock().map_err(|e|e.to_string())?.insert(device);
+        return Ok(true);
+    }
+    if action.starts_with("present_") {
+        if !is_present_panel_open(&device) {
+            return Err("Open MirroPresent tools on the floating rail first".into());
+        }
+        return match action {
+            "present_spotlight" => {
+                let next = if presentation_mode(&device) == "spotlight" {"off"} else {"spotlight"};
+                set_presentation_mode(app, &device, next).await?;
+                Ok(next == "spotlight")
+            },
+            "present_magnifier" => {
+                if presentation_mode(&device) == "magnifier" {
+                    set_presentation_mode(app, &device, "off").await?;
+                    Ok(false)
+                } else {
+                    set_presentation_mode(app, &device, "magnifier").await?;
+                    // A frozen screenshot is mandatory for an immediately
+                    // useful lens. If ADB capture fails, release the overlay
+                    // immediately so a dark invisible view cannot swallow
+                    // touch input indefinitely.
+                    if let Err(error) = crate::commands::refresh_presenter_image(app, &device, None).await {
+                        let recovered = set_presentation_mode(app, &device, "off").await;
+                        if let Err(reason) = recovered {
+                            return Err(format!(
+                                "Magnifier snapshot failed: {error}; could not restore phone touch: {reason}"
+                            ));
+                        }
+                        return Err(format!("Magnifier snapshot failed and presenter was exited: {error}"));
+                    }
+                    Ok(true)
+                }
+            },
+            "present_refresh" => {
+                crate::commands::refresh_presenter_image(app, &device, None).await?;
+                Ok(true)
+            },
+            "present_off" => {
+                set_presentation_mode(app, &device, "off").await?;
+                Ok(false)
+            },
+            _ => Err("Unsupported MirroPresent toolbar action".into()),
+        };
+    }
     if action == "quick_status" { return Ok(is_quick_open(&device)); }
     if action == "quick_top_status" {
         return Ok((unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32
             & WS_EX_TOPMOST.0) != 0);
     }
     if action == "quick_toggle" {
+        if !is_quick_open(&device) && presentation_mode(&device) != "off" {
+            set_presentation_mode(app, &device, "off").await?;
+        }
+        presenter_panels().lock().map_err(|e| e.to_string())?.remove(&device);
         if !is_quick_open(&device) && is_inking(&device) {
             control_ink(app, &device, "ink_toggle").await?;
         }
@@ -1230,11 +1327,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         if action == "quick_top_toggle" {
             return toggle_video_topmost(app, &device, hwnd);
         }
-        if action == "quick_screen_off" {
-            crate::commands::phone_toolbar_keyevent(&device, "quick_sleep").await?;
-            return Ok(true);
-        }
-        if matches!(action, "quick_fullscreen" | "quick_rotate" | "quick_paste" | "quick_screen_off") {
+        if matches!(action, "quick_fullscreen" | "quick_rotate" | "quick_paste") {
             send_video_shortcut(hwnd, action)?;
         } else {
             crate::commands::phone_toolbar_keyevent(&device, action).await?;
@@ -1244,6 +1337,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
     if action.starts_with("ink_") {
         if action == "ink_toggle" || action == "ink_reset" {
             quick_sessions().lock().map_err(|e| e.to_string())?.remove(&device);
+            presenter_panels().lock().map_err(|e| e.to_string())?.remove(&device);
         }
         return control_ink(app, &device, action).await;
     }
@@ -1355,6 +1449,7 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
 
 pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), String> {
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
+    if let Ok(mut present) = presenter_panels().lock() { present.remove(device); }
     if let Ok(mut states) = topmost_requests().lock() {
         states.insert(device.to_string(), always_on_top);
     }
@@ -1435,6 +1530,7 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
 pub fn close(app: &AppHandle, device: &str) {
     if let Ok(mut topmost) = topmost_requests().lock() { topmost.remove(device); }
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
+    if let Ok(mut present) = presenter_panels().lock() { present.remove(device); }
     if let Ok(mut set) = ink_sessions().lock() { set.remove(device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(device); }
     update_presentation_mode(app, device, "off");

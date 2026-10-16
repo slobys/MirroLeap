@@ -175,9 +175,13 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
     {mode==='magnifier' && <p className="ml-muted text-xs">
       <Maximize size={14} className="inline mr-1"/>
       {snapshotReady ?
-        (zh ? '已加载静态手机截图，约 2.3 倍放大；画面改变时需手动刷新。' :
-          'Still screenshot loaded at approximately 2.3× zoom. Refresh manually after changes.') :
+        (zh ? '已加载静态手机截图。画面内滚轮调整圆形大小，Ctrl+滚轮调整放大倍率；画面变化后请刷新。' :
+          'Still image loaded. Wheel changes lens size; Ctrl+wheel adjusts magnification. Refresh after changes.') :
         (zh ? '尚未加载截图。请点击刷新放大快照。' : 'No still frame loaded. Refresh before zooming.')}
+    </p>}
+    {mode==='spotlight' && <p role="note" className="ml-muted text-xs">
+      {zh ? '在手机画面内滚动鼠标滚轮即可放大或缩小聚光灯范围。' :
+        'Scroll the mouse wheel over the phone to resize the spotlight.'}
     </p>}
     {!running && <p role="note" className="text-xs text-amber-600">
       {zh ? '请先连接手机并启动带真机边框的 Windows 投屏，再使用演示模式。' :

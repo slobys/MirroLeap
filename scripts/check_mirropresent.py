@@ -35,9 +35,13 @@ assert "presentation_set_mode" in lib and "presentation_get_mode" in lib
 assert "presentation_refresh_snapshot" in lib
 assert "require_main_window(&window)?;" in commands
 assert "validate_capture_device(&device)?;" in commands
-assert "presentation_mode(&device) != \"magnifier\"" in commands
-assert "capture_device_png(&device, custom_path).await?" in commands
-assert "set_presentation_snapshot(&app_handle, &device, &png).await" in commands
+assert "presentation_mode(device) != \"magnifier\"" in commands
+assert "capture_device_png(device, custom_path).await?" in commands
+assert "set_presentation_snapshot(app, device, &png).await" in commands
+assert "refresh_presenter_image(&app_handle, &device, custom_path).await" in commands
+assert "clip-path: inset(0 round" in html, "Presenter canvas must stay inside the rounded video aperture"
+assert "canvas.addEventListener('wheel'" in present and "zoomFactor" in present
+assert "present_is_magnifier" in native and "present_toggle" in native
 assert "known_present_mode(" in native and "PresentationTransitionGuard::begin" in native
 assert "overlay.set_ignore_cursor_events(true)" in native
 assert "overlay.set_ignore_cursor_events(false)" in native

@@ -70,6 +70,37 @@ describe('MirroPresent real phone-frame Canvas behavior', () => {
     dom.window.close();
   });
 
+  it('resizes spotlight and frozen magnifier with bounded wheel input and rounded aperture', async () => {
+    const {dom,window,operations}=boot();
+    const canvas=window.document.getElementById('presentation');
+    expect(frame).toContain('clip-path: inset(0 round 7.46888% / 3.40587%)');
+    expect(frame).toContain('clip-path: inset(0 round 3.40587% / 7.46888%)');
+    expect(window.scrcpyPresent.size()).toBe(.22);
+    expect(window.scrcpyPresent.zoom()).toBe(2.3);
+    canvas.dispatchEvent(new window.WheelEvent('wheel',{deltaY:-100,bubbles:true,cancelable:true}));
+    expect(window.scrcpyPresent.size()).toBe(.22);
+    window.scrcpyPresent.setMode('spotlight');
+    canvas.dispatchEvent(new window.WheelEvent('wheel',{deltaY:-100,bubbles:true,cancelable:true}));
+    expect(window.scrcpyPresent.size()).toBeGreaterThan(.22);
+    canvas.dispatchEvent(new window.WheelEvent('wheel',{deltaY:100,ctrlKey:true,bubbles:true,cancelable:true}));
+    expect(window.scrcpyPresent.zoom()).toBe(2.3); // magnification applies to lens only
+    for(let i=0;i<80;i++) canvas.dispatchEvent(new window.WheelEvent('wheel',{deltaY:-50,bubbles:true,cancelable:true}));
+    expect(window.scrcpyPresent.size()).toBe(.43);
+    for(let i=0;i<80;i++) canvas.dispatchEvent(new window.WheelEvent('wheel',{deltaY:50,bubbles:true,cancelable:true}));
+    expect(window.scrcpyPresent.size()).toBe(.11);
+    window.scrcpyPresent.setMode('magnifier');
+    await window.scrcpyPresent.loadSnapshot('data:image/png;base64,YWJj','portrait');
+    canvas.dispatchEvent(new window.WheelEvent('wheel',{deltaY:100,ctrlKey:true,bubbles:true,cancelable:true}));
+    expect(window.scrcpyPresent.zoom()).toBeLessThan(2.3);
+    canvas.dispatchEvent(new window.WheelEvent('wheel',{deltaY:-100,bubbles:true,cancelable:true}));
+    expect(window.scrcpyPresent.size()).toBeGreaterThan(.11);
+    expect(operations.some(row=>row[0]==='presentation'&&row[1]==='drawImage')).toBe(true);
+    window.scrcpyPresent.resetSize();
+    expect(window.scrcpyPresent.size()).toBe(.22);
+    expect(window.scrcpyPresent.zoom()).toBe(2.3);
+    dom.window.close();
+  });
+
   it('labels magnifier as a still snapshot, never live video, and accepts explicit PNG only', async () => {
     const {dom,window,operations} = boot();
     window.scrcpyPresent.setMode('magnifier');
