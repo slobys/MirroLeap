@@ -1,0 +1,196 @@
+import {useEffect, useRef, useState} from 'react';
+import {invoke} from '@tauri-apps/api/core';
+import {listen} from '@tauri-apps/api/event';
+import {Eye, Focus, Maximize, Move, RefreshCw, ScanSearch, XCircle} from 'lucide-react';
+import {useI18n} from '../i18n';
+
+type PresentMode = 'off' | 'spotlight' | 'magnifier';
+const validModes: readonly string[] = ['off', 'spotlight', 'magnifier'];
+const safeMode = (mode: unknown): PresentMode =>
+  typeof mode === 'string' && validModes.includes(mode) ? mode as PresentMode : 'off';
+
+interface Props {
+  device: string;
+  running: boolean;
+  customPath?: string;
+  onRecenter: (device: string) => Promise<void>;
+}
+
+/** MirroPresent is opt-in, only for an already-running Windows framed phone.
+ * Spotlight and snapshot magnifier temporarily take pointer input over the
+ * phone. A neutral 'off' restores the original scrcpy mouse/touch routing.
+ * The native daemon, not this React component, owns the mode across tabs.
+ */
+export default function MirroPresentPanel({device,running,customPath,onRecenter}: Props) {
+  const {locale} = useI18n();
+  const zh = locale.startsWith('zh');
+  const [mode,setMode] = useState<PresentMode>('off');
+  const [pending,setPending] = useState(false);
+  const [refreshing,setRefreshing] = useState(false);
+  const [message,setMessage] = useState<string|null>(null);
+  const [error,setError] = useState<string|null>(null);
+  const [snapshotReady,setSnapshotReady] = useState(false);
+  const generation = useRef(0);
+  const locked = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    const token = ++generation.current;
+    setMode('off');
+    setSnapshotReady(false);
+    setError(null);
+    setMessage(null);
+    if (device && running) {
+      void invoke<string>('presentation_get_mode',{device}).then(value=>{
+        if (active && token === generation.current) setMode(safeMode(value));
+      }).catch(() => {/* No Windows phone frame: controls remain disabled. */});
+    }
+    const unlisten = listen<{device:string,mode:string}>(
+      'mirroleap-present-mode',({payload})=>{
+        if (!active || payload?.device !== device) return;
+        const incoming = safeMode(payload.mode);
+        setMode(incoming);
+        if (incoming !== 'magnifier') setSnapshotReady(false);
+        if (incoming === 'off') setMessage(null);
+      });
+    return () => {
+      active = false;
+      generation.current++;
+      void unlisten.then(dispose=>dispose());
+    };
+  },[device,running]);
+
+  const switchMode = async (requested: PresentMode) => {
+    if (!device || !running || locked.current) return;
+    locked.current = true;
+    const token = generation.current;
+    setPending(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await invoke<string>('presentation_set_mode',{device,mode:requested});
+      if (token !== generation.current) return;
+      const next = safeMode(response);
+      setMode(next);
+      setSnapshotReady(false);
+      setMessage(next === 'off' ?
+        (zh ? '已退出演示，恢复手机触控。' : 'Presentation ended. Phone input restored.') :
+        next === 'spotlight' ?
+          (zh ? '聚光灯已开启。把鼠标移到投屏画面，突出讲解区域。' :
+            'Spotlight ready. Move your mouse over the phone to focus an area.') :
+          (zh ? '定格放大镜已开启。先点“刷新放大快照”取得手机画面。' :
+            'Snapshot magnifier ready. Refresh a still frame to enable zoom.'));
+    } catch(reason) {
+      if (token === generation.current) setError(String(reason));
+    } finally {
+      locked.current = false;
+      if (token === generation.current) setPending(false);
+    }
+  };
+
+  const refreshSnapshot = async () => {
+    if (!device || !running || mode !== 'magnifier' || locked.current) return;
+    locked.current = true;
+    const token = generation.current;
+    setRefreshing(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await invoke('presentation_refresh_snapshot',{device,customPath});
+      if (token !== generation.current) return;
+      setSnapshotReady(true);
+      setMessage(zh ? '已刷新手机定格画面。此放大镜不是实时视频，画面变化后请再次刷新。' :
+        'Still frame refreshed. This is not live video; refresh after the phone screen changes.');
+    } catch(reason) {
+      if (token === generation.current) {
+        setSnapshotReady(false);
+        setError(String(reason));
+      }
+    } finally {
+      locked.current = false;
+      if (token === generation.current) setRefreshing(false);
+    }
+  };
+
+  const recenter = async () => {
+    if (!running || !device || locked.current) return;
+    const token = generation.current;
+    setError(null);
+    try {
+      await onRecenter(device);
+      if (token === generation.current) setMessage(zh ?
+        '已请求将手机投屏窗口移回主屏幕中央。' : 'Requested centering the phone window on the primary screen.');
+    } catch(reason) {
+      if (token === generation.current) setError(String(reason));
+    }
+  };
+
+  const disabled = !device || !running || pending || refreshing;
+  return <section className="ml-card flex flex-col gap-3" aria-label="MirroPresent">
+    <div className="flex flex-wrap justify-between gap-2 items-center">
+      <h2 className="flex items-center gap-2 font-bold text-sm">
+        <Focus size={18} className="ml-primary"/>MirroPresent
+      </h2>
+      <span className="ml-muted text-xs">{zh ? '专业演示模式' : 'Presentation tools'}</span>
+    </div>
+    <p className="ml-muted text-xs leading-relaxed">
+      {zh ?
+        '适合课堂讲解和会议展示。工具只作用于当前选中的手机，不修改投屏码率或录屏配置。聚光灯实时跟随鼠标；放大镜使用手动刷新的手机截图。' :
+        'For teaching and demonstrations. Only the selected phone is affected. Spotlight tracks the pointer live; magnifier zooms an explicitly refreshed Android still image.'}
+    </p>
+    <div className="flex flex-wrap gap-2">
+      <button type="button" aria-label={zh ? '开启聚光灯' : 'Enable spotlight'}
+        disabled={disabled} onClick={()=>void switchMode('spotlight')}
+        aria-pressed={mode==='spotlight'}
+        className={'ml-secondary-action inline-flex gap-2 items-center px-3 ' + (mode==='spotlight' ? 'ring-2 ring-primary/60' : '')}>
+        <Eye size={16}/>{zh ? '聚光灯' : 'Spotlight'}
+      </button>
+      <button type="button" aria-label={zh ? '开启定格放大镜' : 'Enable snapshot magnifier'}
+        disabled={disabled} onClick={()=>void switchMode('magnifier')}
+        aria-pressed={mode==='magnifier'}
+        className={'ml-secondary-action inline-flex gap-2 items-center px-3 ' + (mode==='magnifier' ? 'ring-2 ring-primary/60' : '')}>
+        <ScanSearch size={16}/>{zh ? '定格放大镜' : 'Snapshot magnifier'}
+      </button>
+      <button type="button" aria-label={zh ? '退出演示并恢复手机触控' : 'Exit presentation and restore touch'}
+        disabled={disabled || mode==='off'} onClick={()=>void switchMode('off')}
+        className="ml-secondary-action inline-flex gap-2 items-center px-3">
+        <XCircle size={16}/>{zh ? '退出演示' : 'Exit presenter'}
+      </button>
+    </div>
+    <div className="flex flex-wrap gap-2">
+      <button type="button" aria-label={zh ? '刷新放大快照' : 'Refresh magnifier snapshot'}
+        disabled={disabled || mode!=='magnifier'}
+        onClick={()=>void refreshSnapshot()}
+        className="ml-secondary-action inline-flex gap-2 items-center px-3">
+        <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''}/>
+        {refreshing ? (zh ? '正在读取手机快照…' : 'Capturing phone still…') :
+          (zh ? '刷新放大快照' : 'Refresh still frame')}
+      </button>
+      <button type="button" disabled={disabled} onClick={()=>void recenter()}
+        aria-label={zh ? '居中演示窗口' : 'Center presentation window'}
+        className="ml-secondary-action inline-flex gap-2 items-center px-3">
+        <Move size={16}/>{zh ? '居中演示窗口' : 'Center phone window'}
+      </button>
+    </div>
+    {mode==='magnifier' && <p className="ml-muted text-xs">
+      <Maximize size={14} className="inline mr-1"/>
+      {snapshotReady ?
+        (zh ? '已加载静态手机截图，约 2.3 倍放大；画面改变时需手动刷新。' :
+          'Still screenshot loaded at approximately 2.3× zoom. Refresh manually after changes.') :
+        (zh ? '尚未加载截图。请点击刷新放大快照。' : 'No still frame loaded. Refresh before zooming.')}
+    </p>}
+    {!running && <p role="note" className="text-xs text-amber-600">
+      {zh ? '请先连接手机并启动带真机边框的 Windows 投屏，再使用演示模式。' :
+        'Start a Windows phone mirror with the device frame enabled before presenting.'}
+    </p>}
+    {message && <p role="status" className="text-xs text-emerald-600">{message}</p>}
+    {error && <p role="alert" className="text-xs text-red-600 break-words">
+      {zh ? '演示操作失败：' : 'Presentation action failed: '}{error}
+    </p>}
+    <p className="ml-muted text-[11px] leading-relaxed">
+      {zh ?
+        '演示聚光灯或放大镜开启时会暂时接管手机触控；退出演示后恢复。投屏右侧悬浮栏的“一键恢复”也可紧急退出（同时会清空画笔）。现有 MirroCapture 保存的是原始手机画面或画笔图层，不包含演示聚光灯和定格放大镜。' :
+        'Presenter focus temporarily intercepts phone taps. Exit to restore touch, or use the phone toolbar’s one-click reset (also clears ink). MirroCapture saves phone pixels and optional pen ink, not the temporary spotlight or snapshot lens.'}
+    </p>
+  </section>;
+}

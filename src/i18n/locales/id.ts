@@ -1,4 +1,4 @@
-import type { Translations } from './en';
+import { en, type Translations } from './en';
 
 export const id: Translations = {
 languages: {
@@ -62,6 +62,7 @@ languages: {
         gotIt: 'Mengerti'
     },
     sidebar: {
+        wirelessCenter: en.sidebar.wirelessCenter,
         deviceHub: 'Pusat Perangkat',
         killAdb: 'Matikan ADB',
         killAdbTitle: 'Paksa hentikan semua operasi adb',

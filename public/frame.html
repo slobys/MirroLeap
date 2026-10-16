@@ -40,6 +40,13 @@
       cursor: crosshair;
       touch-action: none;
     }
+    #presentation {
+      position: absolute;
+      left: 1.8%; top: .8372093023255814%;
+      width: 96.4%; height: 98.32558139534883%;
+      display: block; z-index: 3; background: transparent;
+      pointer-events: none; touch-action: none; cursor: crosshair;
+    }
     /* Landscape is the same black titanium SVG rotated 90 degrees.
        The Canvas hole is now x=18,y=18,w=2114,h=964 in a 2150x1000
        viewBox. Both percentages must match the Rust Win32 layout. */
@@ -49,7 +56,12 @@
       width: 98.32558139534883%;
       height: 96.4%;
     }
+    html[data-orientation="landscape"] #presentation {
+      left: .8372093023255814%; top: 1.8%;
+      width: 98.32558139534883%; height: 96.4%;
+    }
     body.inking #annotation { pointer-events: auto; }
+    body.presenting #presentation { pointer-events: auto; }
   </style>
 </head>
 <body aria-hidden="true">
@@ -57,11 +69,20 @@
        src="/device-frame/iphone-black-portrait.svg"
        alt="" draggable="false" decoding="sync">
   <canvas id="annotation" aria-label="手机投屏标注画布"></canvas>
+  <!-- Separate presenter layer. Not included by the ink PNG export. -->
+  <canvas id="presentation" aria-label="MirroPresent 聚光灯和定格放大镜"></canvas>
   <script>
   (() => {
     'use strict';
     const canvas = document.getElementById('annotation');
     const ctx = canvas.getContext('2d', { alpha: true });
+    const presentCanvas = document.getElementById('presentation');
+    const presentCtx = presentCanvas.getContext('2d', { alpha: true });
+    let presentationMode = 'off';
+    let presentationPoint = {x: .5, y: .5};
+    let presentationSnapshot = null;
+    let snapshotRequest = 0;
+    const presentationModes = new Set(['off', 'spotlight', 'magnifier']);
     let enabled = false;
     let tool = 'pen';
     let color = '#ffd54b';
@@ -216,5 +237,6 @@
     });
   })();
   </script>
+  <script src="/present-overlay.js"></script>
 </body>
 </html>

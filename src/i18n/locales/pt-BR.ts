@@ -1,4 +1,4 @@
-import type { Translations } from './en';
+import { en, type Translations } from './en';
 
 export const ptBR: Translations = {
  languages: {
@@ -62,6 +62,7 @@ export const ptBR: Translations = {
         gotIt: 'Entendi'
     },
     sidebar: {
+        wirelessCenter: en.sidebar.wirelessCenter,
         deviceHub: 'Hub de Dispositivos',
         killAdb: 'Matar ADB',
         killAdbTitle: 'Forçar encerramento de todas as operações adb',

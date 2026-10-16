@@ -1,4 +1,4 @@
-import type { Translations } from './en';
+import { en, type Translations } from './en';
 
 export const fr: Translations = {
    languages: {
@@ -62,6 +62,7 @@ export const fr: Translations = {
         gotIt: 'Compris'
     },
     sidebar: {
+        wirelessCenter: en.sidebar.wirelessCenter,
         deviceHub: 'Hub d\'Appareils',
         killAdb: 'Tuer ADB',
         killAdbTitle: 'Forcer l\'arrêt de toutes les opérations adb',

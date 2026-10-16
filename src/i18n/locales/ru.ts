@@ -1,4 +1,4 @@
-import type { Translations } from './en';
+import { en, type Translations } from './en';
 
 // Russian translations.
 export const ru: Translations = {
@@ -66,6 +66,8 @@ export const ru: Translations = {
   },
 
   sidebar: {
+
+      wirelessCenter: en.sidebar.wirelessCenter,
     deviceHub: 'Центр устройств',
     killAdb: 'Остановить ADB',
     killAdbTitle: 'Принудительно завершить все операции adb',

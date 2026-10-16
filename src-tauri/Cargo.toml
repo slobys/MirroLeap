@@ -1,6 +1,6 @@
 [package]
 name = "mirroleap"
-version = "4.7.2"
+version = "5.0.0"
 authors = ["slobys", "KB-kil0bit contributors"]
 description = "MirroLeap: a lightweight Android mirroring desktop client powered by scrcpy"
 edition = "2021"
@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["image-png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls"] }
@@ -28,6 +28,7 @@ tar = "0.4"
 tokio = { version = "1.49.0", features = ["full"] }
 tauri-plugin-shell = "2.3.5"
 tauri-plugin-dialog = "2.7.0"
+tauri-plugin-clipboard-manager = "=2.3.3"
 chrono = "0.4.43"
 sha2 = "0.10"
 base64 = "0.22"

@@ -1,7 +1,7 @@
 {
   "name": "mirroleap",
   "private": true,
-  "version": "4.7.2",
+  "version": "5.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -15,6 +15,7 @@
   "dependencies": {
     "@tailwindcss/postcss": "4.2.4",
     "@tauri-apps/api": "2.10.1",
+    "@tauri-apps/plugin-clipboard-manager": "2.3.2",
     "@tauri-apps/plugin-dialog": "2.7.0",
     "browserslist": "4.29.3",
     "caniuse-lite": "1.0.30001791",

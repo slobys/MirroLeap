@@ -1,5 +1,7 @@
 mod commands;
+mod app_update;
 mod capture_compositor;
+mod video_decoder;
 mod core_manager;
 mod frame_layout;
 #[cfg(target_os = "windows")]
@@ -78,6 +80,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         // The global-shortcut plugin must be registered on the builder (its
         // setup wires the OS hotkey manager on the main thread). Individual
         // shortcuts are registered below in setup.
@@ -132,13 +135,19 @@ pub fn run() {
             commands::download_scrcpy,
             commands::list_scrcpy_options,
             commands::get_render_drivers,
+            commands::get_video_decoder_support,
             commands::get_videos_dir,
             commands::save_report,
             commands::save_device_screenshot,
+            commands::preview_saved_screenshot,
+            commands::presentation_set_mode,
+            commands::presentation_get_mode,
+            commands::presentation_refresh_snapshot,
             commands::save_annotated_screenshot,
             commands::get_scrcpy_bin_dir,
             commands::run_terminal_command,
             commands::check_scrcpy_update,
+            app_update::check_mirroleap_update,
             close_splashscreen,
             get_app_version
         ])
