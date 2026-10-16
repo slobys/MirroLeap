@@ -45,14 +45,7 @@ jobs:
       - run: python3 scripts/check_annotated_capture.py
       - run: python3 scripts/check_preview_clipboard.py
       - run: python3 scripts/check_repository_migration.py
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
-      # Temporary bridge for a new Rust plugin dependency: the managed coding
-      # runner lacks cargo locally, so retrieve Cargo's exact resolved lockfile
-      # from the trusted GitHub Linux job, then commit it before review.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: v473-resolved-cargo-lock
-          path: src-tauri/Cargo.lock
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
   windows:
     runs-on: windows-latest
