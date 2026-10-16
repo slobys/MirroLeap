@@ -21,7 +21,10 @@ use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
     MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, SetWindowRgn,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD,
+    KEYBDINPUT, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS, VIRTUAL_KEY, VK_LBUTTON, VK_LMENU,
+};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
@@ -43,6 +46,69 @@ static PRESENTATION_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_READY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static SHORTCUT_PANELS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+fn shortcut_panels() -> &'static Mutex<HashSet<String>> {
+    SHORTCUT_PANELS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+fn shortcut_panel_open(device: &str) -> bool {
+    shortcut_panels().lock().is_ok_and(|panels| panels.contains(device))
+}
+fn set_shortcut_panel(device: &str, open: bool) -> Result<(), String> {
+    let mut panels = shortcut_panels().lock().map_err(|e| e.to_string())?;
+    if open { panels.insert(device.to_owned()); } else { panels.remove(device); }
+    Ok(())
+}
+
+/// Only the eight shipped scrcpy shortcuts may be sent. No arbitrary input
+/// strings, shell commands or device IDs come from this floating WebView.
+fn allowed_shortcut_key(action: &str) -> Option<VIRTUAL_KEY> {
+    let letter = match action {
+        "shortcut_fullscreen" => b'F',
+        "shortcut_home" => b'H',
+        "shortcut_back" => b'B',
+        "shortcut_recents" => b'S',
+        "shortcut_power" => b'P',
+        "shortcut_rotate" => b'R',
+        "shortcut_paste" => b'V',
+        "shortcut_screen_off" => b'O',
+        _ => return None,
+    };
+    Some(VIRTUAL_KEY(letter as u16))
+}
+
+fn send_scrcpy_shortcut(video: HWND, key: VIRTUAL_KEY) -> Result<(), String> {
+    // Deliver the same Alt + key handled by scrcpy's built-in keyboard
+    // shortcuts. Never send keystrokes unless its exact live SDL HWND owns
+    // foreground focus; a failed focus switch must not type in another app.
+    let _ = unsafe { SetForegroundWindow(video) };
+    if unsafe { GetForegroundWindow() } != video {
+        return Err("Cannot focus the current phone window. Click the video and try again.".into());
+    }
+    let event = |virtual_key: VIRTUAL_KEY, released: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT {
+            wVk: virtual_key,
+            wScan: 0,
+            dwFlags: if released { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+            time: 0,
+            dwExtraInfo: 0,
+        }},
+    };
+    let keys = [
+        event(VK_LMENU, false),
+        event(key, false),
+        event(key, true),
+        event(VK_LMENU, true),
+    ];
+    let sent = unsafe { SendInput(&keys, std::mem::size_of::<INPUT>() as i32) };
+    if sent != keys.len() as u32 {
+        // A partial Win32 input batch must not leave Left Alt stuck down.
+        let release_alt = [event(VK_LMENU, true)];
+        let _ = unsafe { SendInput(&release_alt, std::mem::size_of::<INPUT>() as i32) };
+        return Err("Windows could not deliver the scrcpy shortcut.".into());
+    }
+    Ok(())
+}
 // Tauri 2.10.x WebviewWindow.eval() has no eval_with_callback API. Instead
 // frame.html calls a narrow native acknowledgement command after running a
 // specific drawing operation. Match the nonce and caller window label.
@@ -610,7 +676,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // hover over the phone bezel should STILL reveal its control handle.
         let recent_restore = restored_at.map(|t| t.elapsed() < Duration::from_millis(2200))
             .unwrap_or(false);
-        let wanted = close_to_edge || dragging || inking || presenting || inside_controls || recent_restore;
+        let shortcuts = shortcut_panel_open(&device);
+        let wanted = close_to_edge || dragging || inking || shortcuts || presenting || inside_controls || recent_restore;
         if wanted { last_nearby = Some(Instant::now()); }
         let lingering = last_nearby.map(|t| t.elapsed() < Duration::from_millis(550))
             .unwrap_or(false);
@@ -634,7 +701,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             // The top of the compact rail is stable as the phone moves; the
             // expanded flyout is allowed to move UP to fit within the desktop.
             let top = frame.y + controls_y_offset.unwrap_or(0);
-            let Some(placement) = toolbar_placement(frame, top, desktop, inking, dpi) else {
+            let Some(placement) = toolbar_placement(frame, top, desktop, inking || shortcuts, dpi) else {
                 // If scrcpy has no visible intersection with the monitor's
                 // work area, hide controls rather than show a floating ghost.
                 if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
@@ -713,6 +780,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         }
     }
 
+    if let Ok(mut set) = shortcut_panels().lock() { set.remove(&device); }
     if let Ok(mut set) = ink_sessions().lock() { set.remove(&device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(&device); }
     update_presentation_mode(&app, &device, "off");
@@ -987,6 +1055,7 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
     let overlay = app.get_webview_window(&label(device))
         .ok_or("真机外框不存在，无法开启画笔。")?;
     if action == "ink_reset" {
+        set_shortcut_panel(device, false)?;
         let _guard = InkTransitionGuard::begin(device)?;
         // One-click restore is deliberately allowed with pen mode ON or OFF.
         // Recover Android input first even if the canvas has reloaded.
@@ -1021,6 +1090,7 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
         let turn_on = !is_inking(device);
 
         if turn_on {
+            set_shortcut_panel(device, false)?;
             if !ready_to_ink(device) {
                 return Err("画笔画布尚未加载完毕，请稍后重试。".into());
             }
@@ -1094,12 +1164,36 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
     if action.starts_with("ink_") {
         return control_ink(app, &device, action).await;
     }
+    if action == "shortcuts_status" { return Ok(shortcut_panel_open(&device)); }
+    if action == "shortcuts_toggle" {
+        if is_inking(&device) {
+            return Err("请先退出画笔模式，再使用手机快捷操作。".into());
+        }
+        if presentation_mode(&device) != "off" {
+            return Err("请先退出演示模式，再使用手机快捷操作。".into());
+        }
+        let open = !shortcut_panel_open(&device);
+        set_shortcut_panel(&device, open)?;
+        return Ok(open);
+    }
+    if let Some(key) = allowed_shortcut_key(action) {
+        if !shortcut_panel_open(&device) || is_inking(&device) || presentation_mode(&device) != "off" {
+            return Err("快捷操作没有启用，或正处于画笔／演示模式。".into());
+        }
+        if unsafe { IsIconic(hwnd) }.as_bool() {
+            return Err("请先恢复手机投屏窗口，再使用快捷操作。".into());
+        }
+        send_scrcpy_shortcut(hwnd, key)?;
+        return Ok(true);
+    }
     match action {
         "minimize" => {
+            set_shortcut_panel(&device, false)?;
             unsafe { ShowWindow(hwnd, SW_MINIMIZE); }
             Ok(is_inking(&device))
         }
         "close" => {
+            set_shortcut_panel(&device, false)?;
             crate::commands::stop_scrcpy_impl(app.state::<ScrcpyState>(), device).await?;
             Ok(false)
         }
@@ -1225,6 +1319,7 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
 }
 
 pub fn close(app: &AppHandle, device: &str) {
+    if let Ok(mut set) = shortcut_panels().lock() { set.remove(device); }
     if let Ok(mut set) = ink_sessions().lock() { set.remove(device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(device); }
     update_presentation_mode(app, device, "off");
@@ -1235,6 +1330,21 @@ pub fn close(app: &AppHandle, device: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floating_shortcut_actions_are_an_exact_allowlist() {
+        for name in [
+            "shortcut_fullscreen", "shortcut_home", "shortcut_back",
+            "shortcut_recents", "shortcut_power", "shortcut_rotate",
+            "shortcut_paste", "shortcut_screen_off",
+        ] {
+            assert!(allowed_shortcut_key(name).is_some(), "Missing shortcut: {name}");
+        }
+        for invalid in ["shortcut_exit", "shortcut_alt_tab", "shortcut_run",
+            "shortcut_paste;rm -rf /", "ink_clear", "shortcuts_toggle", ""] {
+            assert!(allowed_shortcut_key(invalid).is_none());
+        }
+    }
 
     #[test]
     fn presenter_modes_are_strict_and_off_does_not_capture_input() {

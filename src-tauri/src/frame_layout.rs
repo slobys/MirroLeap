@@ -78,7 +78,8 @@ pub fn expand_screen(screen: ScreenRect) -> Option<FrameRect> {
 
 
 pub const TOOLBAR_WIDTH: i32 = 62;
-pub const TOOLBAR_HEIGHT: i32 = 270;
+// Six 44-DIP actions: three window buttons, and pen / shortcuts / restore.
+pub const TOOLBAR_HEIGHT: i32 = 322;
 /// Breathing room both below the display's top edge and above the taskbar,
 /// AND inside the visible top/bottom edge of the mirrored phone.
 pub const TOOLBAR_SAFE_MARGIN: i32 = 12;
@@ -87,9 +88,9 @@ pub const TOOLBAR_SAFE_MARGIN: i32 = 12;
 /// margins it docks BELOW the rail rather than obscuring the Android screen.
 pub const ANNOTATION_TOOLBAR_WIDTH: i32 = 268;
 pub const ANNOTATION_STACK_WIDTH: i32 = 168;
-pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 486;
+pub const ANNOTATION_TOOLBAR_HEIGHT: i32 = 540;
 /// A short (or partly off-screen) landscape video does not have enough
-/// vertical space for the usual 270px rail. Keep the five actions in two ROWS
+/// vertical space for the usual 322px rail. Keep the six actions in two ROWS
 /// rather than cropping the last buttons or overlapping the Windows taskbar.
 pub const SHORT_TOOLBAR_WIDTH: i32 = 168;
 pub const SHORT_TOOLBAR_HEIGHT: i32 = 118;
@@ -202,7 +203,7 @@ pub fn toolbar_placement(
     let short_width = dip(SHORT_TOOLBAR_WIDTH, dpi);
     let short_ink_width = dip(SHORT_INK_TOOLBAR_WIDTH, dpi);
     let (layout, _requested_x, base_width, base_height) = if !enough_for_rail {
-        // Compact *horizontal* rail is much easier to click than five tiny
+        // Compact *horizontal* rail is much easier to click than six tiny
         // vertical targets. It also makes minimized/partially off-screen
         // windows recover without controls protruding from the desktop.
         if !inking {

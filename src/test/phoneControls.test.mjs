@@ -8,9 +8,10 @@ const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 
 // Exercise the same self-contained HTML that Tauri loads inside its WebView2
 // child HWND; stub only its narrow native IPC boundary.
-function setup({ failToggle = false } = {}) {
+function setup({ failToggle = false, failShortcut = false } = {}) {
   const actions = [];
   let enabled = false;
+  let shortcutsOpen = false;
   const dom = new JSDOM(html, {
     url: 'http://localhost/phone-controls.html',
     runScripts: 'dangerously',
@@ -20,11 +21,26 @@ function setup({ failToggle = false } = {}) {
       window.__TAURI__ = { core: { invoke: async (command, { action }) => {
         expect(command).toBe('device_frame_control');
         actions.push(action);
+        if (action === 'shortcuts_status') return shortcutsOpen;
+        if (action === 'ink_status') return enabled;
+        if (action === 'shortcuts_toggle') {
+          if (failShortcut) throw new Error('Native keyboard focus denied');
+          shortcutsOpen = !shortcutsOpen;
+          return shortcutsOpen;
+        }
+        if (action?.startsWith('shortcut_')) {
+          if (failShortcut) throw new Error('Native keyboard focus denied');
+          return true;
+        }
         if (action === 'ink_toggle') {
           if (failToggle) throw new Error('native canvas not ready');
           enabled = !enabled;
+          if (enabled) shortcutsOpen = false;
         }
-        if (action === 'ink_reset') enabled = false;
+        if (action === 'ink_reset') {
+          enabled = false;
+          shortcutsOpen = false;
+        }
         return enabled;
       } } };
     },
@@ -38,7 +54,7 @@ describe('real Tauri phone-controls HTML', () => {
     const ids = [...document.querySelectorAll('.session-actions button')].map(b => b.id);
     expect(ids).toEqual(['drag', 'minimize', 'close']);
     expect([...document.querySelectorAll('.annotation-actions button')].map(b => b.id))
-      .toEqual(['ink-toggle', 'restore']);
+      .toEqual(['ink-toggle', 'shortcut-toggle', 'restore']);
     expect(dom.window.getComputedStyle(document.querySelector('#ink-tools')).display).toBe('none');
     document.getElementById('ink-toggle').click();
     await nextTask();
@@ -49,6 +65,7 @@ describe('real Tauri phone-controls HTML', () => {
     expect(document.querySelectorAll('.swatches button')).toHaveLength(4);
     expect(document.querySelectorAll('.sizes button')).toHaveLength(3);
     expect(dom.window.getComputedStyle(document.querySelector('#ink-tools')).overflow).toBe('hidden');
+    expect(document.querySelectorAll('.shortcut-grid button')).toHaveLength(8);
     for (const layout of [
       'side-right', 'side-left', 'stack-left', 'stack-right',
       'short-right', 'short-left', 'short-ink-right', 'short-ink-left',
@@ -92,6 +109,58 @@ describe('real Tauri phone-controls HTML', () => {
     expect(document.body.classList.contains('inking')).toBe(true);
     expect(document.getElementById('size-9').getAttribute('aria-pressed')).toBe('true');
     expect(document.getElementById('pen').getAttribute('aria-pressed')).toBe('true');
+    dom.window.close();
+  });
+
+  it('opens eight phone shortcut actions without hiding window controls', async () => {
+    const {dom,document,actions}=setup();
+    await nextTask();
+    document.getElementById('shortcut-toggle').click();
+    await nextTask(); await nextTask();
+    expect(document.body.classList.contains('shortcuts')).toBe(true);
+    expect(document.getElementById('shortcut-toggle').getAttribute('aria-pressed')).toBe('true');
+    expect(dom.window.getComputedStyle(document.querySelector('#shortcut-tools')).display).toBe('flex');
+    const shortcuts=[...document.querySelectorAll('[data-shortcut]')].map(el=>el.dataset.shortcut);
+    expect(shortcuts).toEqual([
+      'shortcut_fullscreen','shortcut_home','shortcut_back','shortcut_recents',
+      'shortcut_power','shortcut_rotate','shortcut_paste','shortcut_screen_off',
+    ]);
+    for (const button of document.querySelectorAll('.shortcut-grid button')) {
+      button.click();
+      await nextTask();
+    }
+    expect(actions).toEqual(expect.arrayContaining(shortcuts));
+    expect([...document.querySelectorAll('.session-actions button')].map(b=>b.id))
+      .toEqual(['drag','minimize','close']);
+    dom.window.close();
+  });
+
+  it('switches between the pen and shortcuts without overlapping flyouts', async () => {
+    const {dom,document,actions}=setup();
+    await nextTask();
+    document.getElementById('ink-toggle').click();
+    await nextTask(); await nextTask();
+    expect(document.body.classList.contains('inking')).toBe(true);
+    document.getElementById('shortcut-toggle').click();
+    await nextTask(); await nextTask(); await nextTask();
+    expect(document.body.classList.contains('inking')).toBe(false);
+    expect(document.body.classList.contains('shortcuts')).toBe(true);
+    document.getElementById('ink-toggle').click();
+    await nextTask(); await nextTask(); await nextTask();
+    expect(document.body.classList.contains('inking')).toBe(true);
+    expect(document.body.classList.contains('shortcuts')).toBe(false);
+    expect(actions).toContain('shortcuts_toggle');
+    dom.window.close();
+  });
+
+  it('reports native shortcut failures rather than pretending the palette opened', async () => {
+    const {dom,document}=setup({failShortcut:true});
+    await nextTask();
+    document.getElementById('shortcut-toggle').click();
+    await nextTask(); await nextTask();
+    expect(document.body.classList.contains('shortcuts')).toBe(false);
+    expect(document.getElementById('status').dataset.error).toBe('true');
+    expect(document.getElementById('shortcut-toggle').disabled).toBe(false);
     dom.window.close();
   });
 

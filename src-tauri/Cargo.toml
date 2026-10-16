@@ -1,6 +1,6 @@
 [package]
 name = "mirroleap"
-version = "5.0.2"
+version = "5.0.3"
 authors = ["slobys", "KB-kil0bit contributors"]
 description = "MirroLeap: a lightweight Android mirroring desktop client powered by scrcpy"
 edition = "2021"
@@ -29,6 +29,12 @@ tokio = { version = "1.49.0", features = ["full"] }
 tauri-plugin-shell = "2.3.5"
 tauri-plugin-dialog = "2.7.0"
 tauri-plugin-clipboard-manager = "=2.3.3"
+# Keep the updater on the Tauri 2.10 compatible line. Signed updater
+# verification is independent of optional Windows Authenticode certificates.
+# Windows updater receives an explicitly signed NSIS EXE, not an archive.
+# Disabling ZIP extraction avoids a yanked/insecure ZIP 4.x dependency; the
+# trusted updater directly handles a Windows PE .exe installer.
+tauri-plugin-updater = { version = "=2.10.1", default-features = false, features = ["native-tls"] }
 chrono = "0.4.43"
 sha2 = "0.10"
 base64 = "0.22"

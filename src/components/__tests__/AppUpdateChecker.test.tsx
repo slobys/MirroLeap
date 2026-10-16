@@ -3,8 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AppUpdateChecker from '../AppUpdateChecker';
 import type { AppUpdateInfo } from '../../utils/appUpdate';
 
-const {invokeMock} = vi.hoisted(() => ({invokeMock: vi.fn()}));
+const {invokeMock, signedUpdateMock} = vi.hoisted(() => ({
+  invokeMock: vi.fn(),
+  signedUpdateMock: vi.fn(),
+}));
 vi.mock('@tauri-apps/api/core', () => ({invoke: invokeMock}));
+vi.mock('@tauri-apps/plugin-updater', () => ({check: signedUpdateMock}));
 
 const update: AppUpdateInfo = {
   currentVersion: '4.8.1', latestVersion: '4.9.0', status: 'update_available',
@@ -25,7 +29,10 @@ const update: AppUpdateInfo = {
 };
 
 describe('MirroLeap software update UI', () => {
-  beforeEach(() => invokeMock.mockReset());
+  beforeEach(() => {
+    invokeMock.mockReset();
+    signedUpdateMock.mockReset();
+  });
 
   it('never polls or installs automatically; user must request a check', () => {
     render(<AppUpdateChecker version="4.8.1"/>);
@@ -80,5 +87,45 @@ describe('MirroLeap software update UI', () => {
     fireEvent.click(screen.getByRole('button',{name:'Check for MirroLeap software updates'}));
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not verify');
     expect(screen.queryByRole('link',{name:'Portable ZIP'})).not.toBeInTheDocument();
+  });
+
+  it('installs only after an explicit click, matching GitHub stable version with signed manifest', async () => {
+    const downloadAndInstall = vi.fn().mockResolvedValue(undefined);
+    signedUpdateMock.mockResolvedValue({version:'4.9.0', downloadAndInstall});
+    invokeMock.mockImplementation((cmd:string) => cmd === 'check_mirroleap_update' ?
+      Promise.resolve(update) : Promise.resolve(true));
+    render(<AppUpdateChecker version="4.8.1"/>);
+    expect(signedUpdateMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', {name:'Check for MirroLeap software updates'}));
+    const button = await screen.findByRole('button',
+      {name:'Verify signature and install MirroLeap update'});
+    expect(signedUpdateMock).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    await waitFor(() => expect(downloadAndInstall).toHaveBeenCalledTimes(1));
+    expect(signedUpdateMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith('can_install_signed_update');
+  });
+
+  it('never offers one-click upgrade from portable or unsupported installations', async () => {
+    invokeMock.mockImplementation((cmd:string) => cmd === 'check_mirroleap_update' ?
+      Promise.resolve(update) : Promise.resolve(false));
+    render(<AppUpdateChecker version="4.8.1"/>);
+    fireEvent.click(screen.getByRole('button', {name:'Check for MirroLeap software updates'}));
+    expect(await screen.findByText(/Portable or unsupported install/)).toBeInTheDocument();
+    expect(screen.queryByRole('button',
+      {name:'Verify signature and install MirroLeap update'})).not.toBeInTheDocument();
+    expect(signedUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unsigned, missing or mismatched updater index', async () => {
+    signedUpdateMock.mockResolvedValue({version:'5.9.9', downloadAndInstall:vi.fn()});
+    invokeMock.mockImplementation((cmd:string) => cmd === 'check_mirroleap_update' ?
+      Promise.resolve(update) : Promise.resolve(true));
+    render(<AppUpdateChecker version="4.8.1"/>);
+    fireEvent.click(screen.getByRole('button', {name:'Check for MirroLeap software updates'}));
+    fireEvent.click(await screen.findByRole('button',
+      {name:'Verify signature and install MirroLeap update'}));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The signed update version changed');
+    expect((await signedUpdateMock.mock.results[0].value).downloadAndInstall).not.toHaveBeenCalled();
   });
 });

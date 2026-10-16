@@ -14,7 +14,13 @@ function mount(invoke: (command: string, args: { action: string }) => Promise<bo
     url: 'https://localhost/phone-controls.html',
     runScripts: 'dangerously',
     beforeParse(window: any) {
-      Object.defineProperty(window, '__TAURI__', { value: { core: { invoke } } });
+      // These legacy ink scenarios keep the separate phone-shortcut panel
+      // CLOSED. Its native status must not be inferred from the ink status.
+      Object.defineProperty(window, '__TAURI__', { value: { core: {
+        invoke: (command: string, args: {action:string}) =>
+          args.action === 'shortcuts_status' || args.action === 'shortcuts_toggle'
+            ? Promise.resolve(false) : invoke(command, args),
+      } } });
       window.alert = alert;
     },
   });

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Cross-layer safety gate for the read-only MirroLeap app updater.
+"""Cross-layer guard for explicit, signed MirroLeap Windows updates.
 
-This is not a digital signature validator or a Windows user acceptance test.
-It enforces the intended absence of silent installer actions and arbitrary
-release URLs until a separately signed Tauri updater is designed.
+The native GitHub metadata request remains read-only; a separate Tauri
+Ed25519 verifier downloads/installs ONLY on an explicit user click. This is
+not an alternative digital signature verifier or real Windows acceptance.
 """
 from pathlib import Path
+import base64
 import json
 import re
 
@@ -41,9 +42,41 @@ assert 'trustedReleaseDownload(info, asset)' in frontend
 assert 'trustedReleaseUrl(info)' in frontend and 'Object.prototype.hasOwnProperty.call' in validator
 assert "dangerouslySetInnerHTML" not in frontend
 assert "setInterval(" not in frontend and "useEffect(() => {" in frontend
+assert "tauri_plugin_updater::Builder::new().build()" in lib
+assert 'app_update::can_install_signed_update' in lib
+assert 'pub fn can_install_signed_update(window: Window)' in backend
+assert 'if window.label() != "main"' in backend
+assert 'Run-MirroLeap.cmd' in backend and 'ProgramFiles' in backend and 'LOCALAPPDATA' in backend
+assert caps["windows"] == ["main"] and "updater:allow-check" in caps["permissions"]
+assert "updater:allow-download-and-install" in caps["permissions"]
+assert "updater:allow-download" not in caps["permissions"], "Install and check scopes only"
+updater = cfg["plugins"]["updater"]
+assert cfg["bundle"]["createUpdaterArtifacts"] is True
+assert updater["endpoints"] == [
+    "https://github.com/slobys/MirroLeap/releases/latest/download/latest.json"
+]
+assert updater["windows"]["installMode"] == "passive"
+assert updater.get("dangerousInsecureTransportProtocol") is not True
+pub = base64.b64decode(updater["pubkey"], validate=True).decode("utf-8")
+assert pub.startswith("untrusted comment: minisign public key:"), "Expected embedded Ed25519 public key"
+assert "check as checkSignedUpdate" in frontend
+assert "await checkSignedUpdate()" in frontend and "await update.downloadAndInstall(" in frontend
+assert "update.version.replace(/^v/, '') !== info.latestVersion" in frontend
+assert "if (installLock.current || lock.current" in frontend, "Disallow repeated install clicks"
+assert "can_install_signed_update" in frontend, "Portable safeguard must be native"
+assert "onClick={() => void install()}" in frontend, "No automatic install effect"
+signing_script = (root / "scripts/windows-sign-and-checksum.ps1").read_text("utf-8")
+ci = (root / ".github/workflows/desktop-ci.yml").read_text("utf-8")
+assert "TAURI_SIGNING_PRIVATE_KEY_PASSWORD" in ci
+assert "TAURI_SIGNING_PRIVATE_KEY" in ci
+assert "npm run tauri signer sign" in signing_script
+assert signing_script.index("signtool") < signing_script.index("npm run tauri signer sign")
+assert "scripts/windows-updater-manifest.ps1" in ci
+assert "scripts/check_signed_updater_release.py" in ci
+assert "sha256sum --check SHA256SUMS.txt" in ci
 for prohibited in ("std::process::Command", "tokio::process::Command",
                    "std::fs::write", "tokio::fs::write",
                    "tauri_plugin_shell", "auto_install", "run_installer"):
     assert prohibited not in backend, f"Update checker must be read-only: {prohibited}"
 assert (root / "src-tauri/src/core_manager.rs").exists(), "scrcpy update remains independent"
-print("Read-only update checker host, release validation, user-click IPC and no-install contract passed")
+print("Signed updater: main-only permissions, Ed25519 trust root, manual install, portable guard and release signing verified")

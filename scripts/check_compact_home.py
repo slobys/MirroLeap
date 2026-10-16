@@ -22,10 +22,12 @@ assert "scrcpy_config" in src and "scrcpy_window_positions" in src, (
 assert "useState<'home' | 'settings'>('home')" in app
 assert "<CompactDashboard" in app and "onOpenSettings={openSettings}" in app
 for component in (
-    "<Sidebar", "<ControlPanel", "<SessionBehavior", "<ShortcutsPanel",
+    "<Sidebar", "<ControlPanel", "<SessionBehavior",
     "<Header", "<LogPanel", "<Footer",
 ):
     assert component in app, f"Advanced setting must remain accessible: {component}"
+assert "<ShortcutsPanel" not in app, "Live phone shortcuts belong in the floating toolbar"
+assert 'id="shortcut-tools"' in (root / "public/phone-controls.html").read_text(encoding="utf-8")
 for tab in ("devices", "mirror", "behavior", "appearance", "tools"):
     assert f"settingsTab === '{tab}'" in app
 for prop in ("onSelectDevice", "onStart", "onStop", "onResolutionChange",
