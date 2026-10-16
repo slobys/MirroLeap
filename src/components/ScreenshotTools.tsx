@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, Copy, Image as ImageIcon, LoaderCircle, PenLine } from 'lucide-react';
+import { Camera, Copy, Image as ImageIcon, LoaderCircle, PenLine, X } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Image } from '@tauri-apps/api/image';
 import { writeImage } from '@tauri-apps/plugin-clipboard-manager';
@@ -157,6 +157,16 @@ export default function ScreenshotTools({device, customPath}: Props) {
         {zh ? '已保存：' : 'Saved: '}{saved}
       </p>}
       {previewUrl && <div className="flex flex-col gap-3" aria-label={zh ? '截图预览' : 'Screenshot preview'}>
+        <div className="flex justify-between items-center">
+          <span className="font-semibold text-xs">{zh ? '本地截图预览' : 'Local screenshot preview'}</span>
+          <button type="button" aria-label={zh ? '关闭截图预览' : 'Close screenshot preview'}
+            className="ml-icon-button !w-8 !h-8" onClick={() => {
+              setPreviewUrl(null);
+              setCopyMessage(null);
+            }}>
+            <X size={15}/>
+          </button>
+        </div>
         <div className="rounded-xl border border-[var(--border-base)] bg-[var(--bg-elevated)] p-2 flex justify-center">
           <img src={previewUrl}
             className="max-h-72 max-w-full object-contain rounded-lg"

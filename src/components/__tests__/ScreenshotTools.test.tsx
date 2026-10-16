@@ -129,6 +129,19 @@ describe('MirroCapture local screenshot', () => {
     expect(() => pngDataUrlBytes('data:image/png;base64,Zg==')).toThrow();
   });
 
+  it('closes a sensitive preview without deleting the screenshot file', async () => {
+    invokeMock.mockImplementation(async (cmd) => cmd === 'preview_saved_screenshot'
+      ? tinyPng : 'C:\\Downloads\\MirroLeap-Screenshot-20261016-140000.png');
+    render(<ScreenshotTools device="emulator-5554"/>);
+    fireEvent.click(screen.getByRole('button',{name:'Save phone screenshot'}));
+    const close = await screen.findByRole('button',{name:'Close screenshot preview'});
+    fireEvent.click(close);
+    expect(screen.queryByAltText('Preview of the most recently saved phone screenshot')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:'Copy screenshot to clipboard'})).not.toBeInTheDocument();
+    expect(screen.getByText(/MirroLeap-Screenshot-20261016-140000.png/)).toBeInTheDocument();
+    expect(writeImageMock).not.toHaveBeenCalled();
+  });
+
   it('does not reveal an earlier phone screenshot after switching the selected device', async () => {
     let finish!: (savedPath: string) => void;
     invokeMock.mockReturnValueOnce(new Promise(resolve => {finish = resolve;}));

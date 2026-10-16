@@ -878,6 +878,15 @@ pub async fn preview_saved_screenshot(
     if screenshot.len() as u64 > PREVIEW_LIMIT || !valid_android_screenshot_png(&screenshot) {
         return Err("Saved PNG is invalid or too large to preview.".into());
     }
+    // The PNG may be heavily compressed: limit the *decoded* pixel count
+    // before passing bytes into WebView2's PNG decoder, not just file length.
+    let width = u32::from_be_bytes(screenshot[16..20].try_into()
+        .map_err(|_| "PNG width is unavailable")?) as u64;
+    let height = u32::from_be_bytes(screenshot[20..24].try_into()
+        .map_err(|_| "PNG height is unavailable")?) as u64;
+    if width.saturating_mul(height) > 16_000_000 {
+        return Err("Screenshot saved, but its dimensions exceed the preview limit.".into());
+    }
     Ok(format!("data:image/png;base64,{}", STANDARD.encode(&screenshot)))
 }
 
