@@ -18,8 +18,8 @@ export default function Footer({ version }: { version: string }) {
             </div>
             <p className="ml-muted leading-5">
                 {zh
-                    ? '基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 作为投屏核心。感谢原作者及开源贡献者。'
-                    : 'An independent community-developed derivative of kil0bit-kb/scrcpy-gui, powered by Genymobile/scrcpy. Credit to the original authors and open-source contributors.'}
+                    ? '基于 scrcpy-gui 二次开发，采用 Genymobile/scrcpy 核心。感谢原项目作者。'
+                    : 'A scrcpy-gui derivative powered by Genymobile/scrcpy. Thanks to the original authors.'}
             </p>
             <div className="flex flex-wrap items-center gap-4">
                 {links.map(link => (

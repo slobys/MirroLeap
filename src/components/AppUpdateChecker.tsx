@@ -66,8 +66,8 @@ export default function AppUpdateChecker({version}: Props) {
     </div>
     <p className="ml-muted text-xs leading-relaxed">
       {zh
-        ? '手动读取 GitHub 正式 Release 版本，不检查测试版，不会自动下载或执行安装程序。scrcpy 投屏引擎由上方独立管理。'
-        : 'Manually check GitHub stable Releases only. No preview builds, automatic installer downloads or execution. The scrcpy engine is managed separately above.'}
+        ? '手动检查 GitHub 正式版；不会自动下载安装。'
+        : 'Check stable GitHub releases manually. No automatic installation.'}
     </p>
     <div className="flex flex-wrap items-center gap-3">
       <button type="button" onClick={() => void check()} disabled={pending}
@@ -128,10 +128,10 @@ export default function AppUpdateChecker({version}: Props) {
         <ExternalLink size={13}/>{zh ? '查看该正式版本的 GitHub 页面' : 'View this stable release'}
       </a>}
     </div>}
-    <p className="ml-muted flex items-start gap-1.5 text-[11px] leading-relaxed">
-      <ShieldCheck size={14} className="shrink-0"/>
-      {zh ? '目前尚未配置可信 Windows 代码签名；本功能只做版本检查与官方链接引导，不会静默安装，也不要求关闭 Windows 安全防护。' :
-        'Trusted Windows code signing is not configured. This feature never installs silently or asks you to disable system protection.'}
-    </p>
+    <details className="ml-settings-help-details">
+      <summary className="inline-flex items-center gap-2"><ShieldCheck size={14}/>{zh ? '下载与安全说明' : 'Download & safety'}</summary>
+      <p>{zh ? '目前尚未配置可信 Windows 代码签名；本功能只做版本检查与官方链接引导，不会静默安装，也不要求关闭 Windows 安全防护。' :
+        'Trusted Windows code signing is not configured. This feature never installs silently or asks you to disable system protection.'}</p>
+    </details>
   </section>;
 }

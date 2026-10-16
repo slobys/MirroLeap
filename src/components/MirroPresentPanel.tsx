@@ -135,8 +135,8 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
     </div>
     <p className="ml-muted text-xs leading-relaxed">
       {zh ?
-        '适合课堂讲解和会议展示。工具只作用于当前选中的手机，不修改投屏码率或录屏配置。聚光灯实时跟随鼠标；放大镜使用手动刷新的手机截图。' :
-        'For teaching and demonstrations. Only the selected phone is affected. Spotlight tracks the pointer live; magnifier zooms an explicitly refreshed Android still image.'}
+        '课堂演示与会议讲解：聚光灯、定格放大镜。' :
+        'Present with spotlight and a still-frame magnifier.'}
     </p>
     <div className="flex flex-wrap gap-2">
       <button type="button" aria-label={zh ? '开启聚光灯' : 'Enable spotlight'}
@@ -187,10 +187,13 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
     {error && <p role="alert" className="text-xs text-red-600 break-words">
       {zh ? '演示操作失败：' : 'Presentation action failed: '}{error}
     </p>}
-    <p className="ml-muted text-[11px] leading-relaxed">
-      {zh ?
-        '演示聚光灯或放大镜开启时会暂时接管手机触控；退出演示后恢复。投屏右侧悬浮栏的“一键恢复”也可紧急退出（同时会清空画笔）。现有 MirroCapture 保存的是原始手机画面或画笔图层，不包含演示聚光灯和定格放大镜。' :
-        'Presenter focus temporarily intercepts phone taps. Exit to restore touch, or use the phone toolbar’s one-click reset (also clears ink). MirroCapture saves phone pixels and optional pen ink, not the temporary spotlight or snapshot lens.'}
-    </p>
+    <details className="ml-settings-help-details">
+      <summary>{zh ? '使用说明与安全提示' : 'How it works & safety'}</summary>
+      <p>
+        {zh ?
+          '演示聚光灯或放大镜开启时会暂时接管手机触控；退出演示后恢复。投屏右侧悬浮栏的“一键恢复”也可紧急退出（同时会清空画笔）。现有 MirroCapture 保存的是原始手机画面或画笔图层，不包含演示聚光灯和定格放大镜。' :
+          'Presenter focus temporarily intercepts phone taps. Exit to restore touch, or use the phone toolbar’s one-click reset (also clears ink). MirroCapture saves phone pixels and optional pen ink, not the temporary spotlight or snapshot lens.'}
+      </p>
+    </details>
   </section>;
 }

@@ -45,8 +45,8 @@ export default function DecoderPerformance({config, setConfig, support, observed
     </div>
     <p className="ml-muted text-xs leading-relaxed">
       {zh
-        ? '这项设置决定电脑如何解码手机视频，不等同于手机端 H.264/H.265 编码或下方的图形渲染器。自动模式会让 scrcpy 选择兼容的方式。'
-        : 'This controls video decoding on your computer, not Android video encoding or the graphics renderer. Auto lets scrcpy select a compatible decoder.'}
+        ? '电脑端视频解码；建议优先使用自动模式。'
+        : 'Desktop video decoding. Auto is recommended.'}
     </p>
     <label htmlFor="ml-hwdec" className="font-medium text-xs">
       {zh ? '电脑端视频解码方式' : 'Host video decoder'}
@@ -106,10 +106,12 @@ export default function DecoderPerformance({config, setConfig, support, observed
             : (zh ? '尚无记录' : 'Not yet reported'))}
       </span>
     </div>
-    <p className="ml-muted flex gap-2 items-start text-[11px]">
-      <ShieldCheck size={14} className="shrink-0"/>
-      {zh ? 'GPU 模式不会自动更新你的 scrcpy 核心，也不能单凭选项预测 CPU 降幅或实际延迟。请比较实际帧率、掉帧及画面流畅程度。'
-        : 'GPU selection never upgrades your core and does not predict CPU or latency gains. Compare logged FPS, dropped frames and real smoothness.'}
-    </p>
+    <details className="ml-settings-help-details">
+      <summary className="inline-flex items-center gap-2">
+        <ShieldCheck size={14}/>{zh ? '解码说明' : 'Decoder notes'}
+      </summary>
+      <p>{zh ? 'GPU 模式不会自动更新你的 scrcpy 核心，也不能单凭选项预测 CPU 降幅或实际延迟。请比较实际帧率、掉帧及画面流畅程度。'
+        : 'GPU selection never upgrades your core and does not predict CPU or latency gains. Compare logged FPS, dropped frames and real smoothness.'}</p>
+    </details>
   </section>;
 }

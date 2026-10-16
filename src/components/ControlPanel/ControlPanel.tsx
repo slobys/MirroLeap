@@ -251,7 +251,7 @@ export default function ControlPanel({
     );
 
     return (
-        <main className="ml-comfort-settings lg:col-span-6 space-y-6 min-w-0 pb-8">
+        <main className="ml-comfort-settings space-y-6 min-w-0 pb-8">
             <div className="glass p-5 sm:p-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 backdrop-blur-md">
                 <div className="flex items-center gap-2 mb-1.5">
                     <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">{t('controlPanel.captureSource')}</label>

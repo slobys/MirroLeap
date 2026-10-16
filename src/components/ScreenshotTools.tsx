@@ -122,14 +122,15 @@ export default function ScreenshotTools({device, customPath}: Props) {
       </div>
       <p className="ml-muted text-xs leading-relaxed">
         {zh
-          ? '将选中手机的画面保存为 PNG 到电脑“下载”文件夹。可选择原始截图或包含 MirroLeap 画笔的合成截图。'
-          : 'Save the selected Android screen as a PNG in Downloads, with or without your MirroLeap pen annotations.'}
+          ? '保存手机截图或画笔合成图，文件存入“下载”目录。'
+          : 'Save phone screenshots or annotated PNGs to Downloads.'}
       </p>
-      <p className="ml-muted text-[11px]">
-        {zh
+      <details className="ml-settings-help-details">
+        <summary>{zh ? '截图说明' : 'Capture details'}</summary>
+        <p>{zh
           ? '带批注截图需要先开启投屏并画出至少一笔。只保存手机画面和画笔，不包含手机外框、悬浮工具栏或电脑桌面。'
-          : 'Annotated capture requires an active mirrored phone and at least one pen stroke. The phone bezel, floating toolbar and desktop are excluded.'}
-      </p>
+          : 'Annotated capture requires an active mirrored phone and at least one pen stroke. The phone bezel, floating toolbar and desktop are excluded.'}</p>
+      </details>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"

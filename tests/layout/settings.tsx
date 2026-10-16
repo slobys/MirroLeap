@@ -1,16 +1,24 @@
 /**
  * Dev-only, real React/CSS settings fixture for Chromium/Edge geometry tests.
- * The capture and behavior sections below mount actual production components.
+ * Capture, behavior, appearance and tools mount their production components.
  * No ADB, filesystem or Tauri calls are made by this fixture.
  */
 import { useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { ArrowLeft, Keyboard, MonitorPlay, Palette, Settings2, Smartphone, TerminalSquare } from 'lucide-react';
 import '../../src/index.css';
+import '../../src/settings-center.css';
 import { I18nProvider } from '../../src/i18n';
 import ControlPanel from '../../src/components/ControlPanel';
 import SessionBehavior from '../../src/components/SessionBehavior';
 import ShortcutsPanel from '../../src/components/ShortcutsPanel';
+import DecoderPerformance from '../../src/components/DecoderPerformance';
+import Header from '../../src/components/Header';
+import AppUpdateChecker from '../../src/components/AppUpdateChecker';
+import Footer from '../../src/components/Footer';
+import MirroPresentPanel from '../../src/components/MirroPresentPanel';
+import ScreenshotTools from '../../src/components/ScreenshotTools';
+import LogPanel from '../../src/components/LogPanel';
 import type { ScrcpyConfig } from '../../src/hooks/useScrcpy';
 
 const tabs = [
@@ -43,7 +51,7 @@ function SettingsFixture() {
             <h1 className="font-bold text-xl flex items-center gap-2"><Settings2 size={20} className="ml-primary"/> 设置与高级功能</h1>
             <p className="ml-muted text-xs mt-0.5">常用功能在首页，全部专业选项在这里。</p>
           </div>
-          <span className="ml-version-pill">MirroLeap v5.0.1</span>
+          <span className="ml-version-pill">MirroLeap v5.0.2</span>
         </div>
         <nav className="ml-settings-nav flex gap-2 overflow-x-auto custom-scrollbar mt-4 pb-1" aria-label="设置分类">
           {tabs.map(({id, text, Icon}) => (
@@ -55,18 +63,42 @@ function SettingsFixture() {
         </nav>
       </div>
       <div className="ml-settings-body flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 sm:px-8 pb-12 pt-6" key={tab}>
-        <div className="max-w-[1080px] mx-auto">
-          {tab === 'mirror' && <div className="flex flex-col gap-6">
+        <div className="ml-settings-frame mx-auto">
+          {tab === 'mirror' && <div className="ml-settings-columns ml-mirror-layout">
             <ControlPanel config={config} setConfig={setConfig} isRunning={false}
               onStart={() => {}} onStop={() => {}} onListOptions={() => {}}
               renderDriverSupport={{hostOs: 'windows',supportsRenderDriver:true,
                 supportedDrivers:[{id:'direct3d',label:'D3D11 (Direct3D)'},{id:'opengl',label:'OpenGL'}]}}/>
+            <aside className="ml-settings-stack">
+              <DecoderPerformance config={config} setConfig={setConfig}
+                support={null} observedMode={undefined} running={false}/>
+              <section className="ml-card ml-settings-summary">
+                <h2>当前参数概览</h2><p>选中配置在下次投屏时生效。</p>
+                <dl><div><dt>分辨率</dt><dd>1080p</dd></div><div><dt>编码</dt><dd>H264</dd></div></dl>
+              </section>
+            </aside>
           </div>}
-          {tab === 'behavior' && <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {tab === 'behavior' && <div className="ml-behavior-layout">
             <SessionBehavior config={config} setConfig={setConfig}/>
             <ShortcutsPanel/>
           </div>}
-          {tab !== 'mirror' && tab !== 'behavior' && <p className="ml-muted">其他设置共用相同的滚动容器。</p>}
+          {tab === 'appearance' && <div className="ml-settings-columns ml-appearance-layout">
+            <Header onThemeChange={()=>{}} currentTheme="ultraviolet" colorMode="light"
+              onColorModeChange={()=>{}} binaryStatus={{found:true,message:'ready'}}
+              onDownload={()=>{}} onSetPath={()=>{}} onResetPath={()=>{}}
+              isDownloading={false} downloadProgress={0} version="5.0.2"/>
+            <div className="ml-settings-stack"><AppUpdateChecker version="5.0.2"/><Footer version="5.0.2"/></div>
+          </div>}
+          {tab === 'tools' && <div className="ml-settings-columns ml-tools-layout">
+            <div className="ml-settings-stack">
+              <MirroPresentPanel device="" running={false} onRecenter={async()=>{}}/>
+              <ScreenshotTools device=""/>
+            </div>
+            <aside className="ml-settings-stack">
+              <LogPanel logs={[]} onClear={()=>{}} onRunCommand={()=>{}}/>
+            </aside>
+          </div>}
+          {tab === 'devices' && <p className="ml-muted">设备连接页面使用相同的设置滚动容器。</p>}
         </div>
       </div>
     </section>

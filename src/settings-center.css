@@ -1,0 +1,163 @@
+/* MirroLeap Settings Center — independent of the compact home and phone overlays.
+   Design tokens are shared across the five settings tabs and both color modes. */
+.ml-settings {
+  --ml-card-bg: var(--bg-surface);
+  --ml-card-radius: 18px;
+  --ml-card-shadow: 0 2px 14px rgb(0 0 0 / 3%);
+  --ml-selection: color-mix(in srgb, var(--primary) 14%, var(--bg-surface));
+  --ml-selection-text: var(--primary);
+  background: var(--bg-base);
+}
+[data-mode="light"] .ml-settings {
+  --ml-card-bg: #fff;
+  --ml-card-shadow: 0 3px 20px rgb(37 25 69 / 4%);
+  --ml-selection-text: #6b34ca;
+}
+.ml-settings .ml-settings-top {
+  padding-top: 17px;
+  padding-bottom: 13px;
+  background: var(--ml-card-bg);
+}
+.ml-settings .ml-settings-top h1 { font-size: 24px; letter-spacing: -.025em; }
+.ml-settings .ml-settings-top p { font-size: 13px; }
+.ml-settings .ml-settings-tab {
+  min-height: 43px;
+  border-radius: 11px;
+  font-size: 14px;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+.ml-settings .ml-settings-tab.ml-tab-active {
+  color: var(--ml-selection-text);
+  background: var(--ml-selection);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+.ml-settings .ml-settings-body {
+  background: color-mix(in srgb, var(--bg-base) 76%, var(--bg-surface));
+  padding-top: 22px;
+  padding-bottom: 56px;
+}
+.ml-settings-frame { width: 100%; max-width: 1460px; min-width: 0; }
+.ml-settings-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+  min-width: 0;
+}
+.ml-settings-stack { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.ml-tools-layout { grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); }
+.ml-appearance-layout { grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr); }
+.ml-settings .ml-card,
+.ml-mirror-layout .ml-comfort-settings > .glass {
+  padding: 23px;
+  background: var(--ml-card-bg);
+  border: 1px solid var(--border-base);
+  border-radius: var(--ml-card-radius);
+  box-shadow: var(--ml-card-shadow);
+}
+.ml-mirror-layout .ml-comfort-settings {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+  padding-bottom: 0;
+}
+.ml-mirror-layout .ml-comfort-settings > .glass { backdrop-filter: none; }
+.ml-mirror-layout .ml-comfort-settings > .glass > .grid,
+.ml-mirror-layout .ml-comfort-settings .grid { min-width: 0; }
+.ml-settings .ml-card h2,
+.ml-settings-group-head h2 {
+  font-weight: 720;
+  font-size: 17px;
+  line-height: 1.4;
+  color: var(--text-base);
+  letter-spacing: -.015em;
+}
+.ml-settings .ml-card p { line-height: 1.6; }
+.ml-settings-group-head {
+  display: flex; align-items: center; gap: 11px;
+  min-height: 33px; padding-bottom: 13px; margin-bottom: 13px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ml-settings-group-head p { font-size: 13px; margin-top: 2px; }
+.ml-settings-summary > p { font-size: 13px; margin: 6px 0 16px; }
+.ml-settings-summary dl { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+.ml-settings-summary dl > div { padding: 12px; border: 1px solid var(--border-subtle); border-radius: 11px; min-width: 0; }
+.ml-settings-summary dt { font-size: 12px; color: var(--text-muted); }
+.ml-settings-summary dd { margin-top: 4px; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.ml-mirror-layout .ml-comfort-settings .ml-settings-details { margin-top: 20px; }
+.ml-mirror-layout .ml-comfort-settings .ml-settings-details summary { font-weight: 700; }
+
+/* Settings behavior: related switches, then recording, then shortcuts. */
+.ml-behavior-layout { display: grid; gap: 20px; min-width: 0; }
+.ml-behavior-groups { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; align-items: start; }
+.ml-behavior-recording { grid-column: 1/-1; }
+.ml-behavior-groups .ml-settings-group { min-width: 0; }
+.ml-settings .ml-settings-switch { min-height: 65px; padding-block: 8px; }
+.ml-settings .ml-settings-switch:hover { background: var(--bg-elevated); border-color: var(--border-subtle); }
+.ml-settings .ml-settings-switch:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ml-settings .ml-setting-hint {
+  font-size: 12px; line-height: 1.4; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 32ch; margin-top: 2px;
+}
+.ml-settings .ml-behavior-groups .ml-settings-group > div:last-child { min-width: 0; }
+.ml-settings .ml-shortcut-grid > div { min-height: 78px; padding: 10px; }
+.ml-settings .ml-shortcut-grid kbd { font-size: 12px; height: 24px; min-width: 24px; }
+.ml-settings .ml-shortcut-grid .ml-shortcut-title { font-size: 12px; margin-top: 4px; text-align: center; }
+
+/* Appearance: keep theme controls separate from app updates and core status. */
+.ml-appearance-controls { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.ml-appearance-preferences, .ml-appearance-engine { min-width: 0; }
+.ml-preference-field { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--border-subtle); }
+.ml-preference-field:last-child { border-bottom: 0; padding-bottom: 0; }
+.ml-preference-label { font-size: 14px; font-weight: 650; color: var(--text-base); }
+.ml-theme-swatches { display: flex; align-items: center; gap: 16px; min-height: 39px; }
+.ml-settings .ml-theme-swatch { width: 30px; height: 30px; flex: none; border-radius: 50%; border: 2px solid var(--border-base); position: relative; }
+.ml-settings .ml-theme-swatch.ml-selected { outline: 2px solid var(--primary); outline-offset: 3px; }
+.ml-preference-segments { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.ml-settings .ml-preference-segment {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 6px 10px;
+  border: 1px solid var(--border-base); border-radius: 10px;
+  font-size: 13px; color: var(--text-muted); background: var(--bg-surface);
+}
+.ml-settings .ml-preference-segment.ml-selected { color: var(--ml-selection-text); background: var(--ml-selection); border-color: var(--primary); font-weight: 700; }
+.ml-appearance-scale > label { display: flex; min-height: 46px; width: fit-content; border-radius: 10px; }
+.ml-language-select { width: 100%; max-width: 320px; min-height: 44px; }
+.ml-settings .ml-language-option { display: block; width: 100%; text-align: left; min-height: 36px; padding: 6px 11px; border-radius: 8px; font-size: 13px; }
+.ml-language-option:hover, .ml-language-current { background: var(--ml-selection); color: var(--ml-selection-text); }
+.ml-engine-badge { border-radius: 30px; padding: 5px 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.ml-engine-ready { color: #059669; background: #10b98116; }
+.ml-engine-unavailable { color: #ca8a04; background: #f59e0b16; }
+.ml-engine-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 14px; padding: 10px 0 16px; }
+.ml-engine-progress { height: 5px; width: 100%; border-radius: 12px; overflow: hidden; background: var(--bg-input); }
+.ml-engine-progress > div { background: var(--primary); height: 100%; }
+.ml-engine-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.ml-engine-footnote { font-size: 12px; margin-top: 15px; }
+
+/* Tools favor actions; verbose caveats remain available on demand. */
+.ml-tools-layout .ml-card { gap: 12px; }
+.ml-tools-layout .ml-secondary-action { min-height: 41px; font-size: 13px; }
+.ml-settings-help-details { border-top: 1px solid var(--border-subtle); padding-top: 12px; font-size: 12px; color: var(--text-muted); }
+.ml-settings-help-details summary { cursor: pointer; font-size: 13px; font-weight: 650; color: var(--text-base); }
+.ml-settings-help-details p { margin-top: 10px; }
+.ml-tools-layout .force-dark { height: min(580px, 68vh); min-height: 380px; box-shadow: none; }
+
+@media (max-width: 1050px) {
+  .ml-settings-columns { grid-template-columns: minmax(0,1fr); }
+  .ml-appearance-layout, .ml-tools-layout { grid-template-columns: minmax(0,1fr); }
+  .ml-tools-layout .force-dark { height: 300px; min-height: 300px; }
+}
+@media (max-width: 800px) {
+  .ml-behavior-groups { grid-template-columns: minmax(0,1fr); }
+  .ml-behavior-recording { grid-column: auto; }
+  .ml-settings .ml-settings-top h1 { font-size: 21px; }
+}
+@media (max-width: 600px) {
+  .ml-settings .ml-settings-body { padding: 16px 14px 40px; }
+  .ml-settings .ml-card,
+  .ml-mirror-layout .ml-comfort-settings > .glass { padding: 17px; }
+  .ml-preference-segment span { font-size: 12px; }
+  .ml-settings-summary dl { grid-template-columns: minmax(0,1fr); }
+}
