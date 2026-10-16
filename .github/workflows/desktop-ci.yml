@@ -68,6 +68,8 @@ jobs:
       - run: npm ci
       - name: Real Edge dashboard geometry (idle, running and core-missing)
         run: node scripts/windows-dashboard-layout.mjs
+      - name: Real Edge settings geometry (100%, 125%, 150% DPI)
+        run: node scripts/windows-settings-layout.mjs
       - name: Build original standalone desktop executable (unpatched, without any installer)
         run: npm run tauri build -- --no-bundle
       - name: Stage extract-and-run portable version
@@ -169,6 +171,11 @@ jobs:
           基于 kil0bit-kb/scrcpy-gui 二次开发，使用 Genymobile/scrcpy 投屏核心。
 
           ### 主要更新
+          ### v5.0.1 舒适阅读与客户端界面更新
+          - **提高设置可读性**：将过小的高级设置标签和提示统一提升至约 14–15px，增加按钮/输入框高度和卡片内边距；参数网格按窗口宽度从两列自适应为一列，允许纵向滚动，不挤在单屏。
+          - **分组与导航更清晰**：输入增强独立分区，垂直同步与编码器兼容选项放入可展开区域；各设置分类的字体、导航间距和键盘焦点统一，保留此前所有低频专业功能。
+          - **新增真实 Edge 设置页验收**：Windows CI 检查 100%、125%、150% DPI 和四种窗口尺寸下的文字、控件尺寸、操作入口与滚动可达性，并继续运行原有真实 WebView2 启动检测和三格式安装包校验。
+
           - **v4.7.3 MirroCapture 截图预览与剪贴板复制**：保存原始/画笔合成 PNG 后在「设置 → 工具与日志」显示缩略图，用户可主动点「复制图片到剪贴板」粘贴到 Windows 应用。没有新增首页按钮。
           - **最小权限和隐私保护**：读取预览只限电脑 Downloads 目录中本工具生成的截图文件，拒绝任意路径、符号链接越界与大于 12 MiB 的图片；主窗口仅具有系统剪贴板的图片写入权限，不读取任何用户现有剪贴板内容。切换手机会清除旧设备图片预览。超大图仍能正常保存但不在界面预览。
           - **v4.8.0 智能无线连接中心**：将连接、诊断、USB 转无线、配对结果汇总在无线设备页。点击连接后立即显示进度，失败时自动展示设备状态、当前连接端口和下一步建议。发现同 IP 的动态端口时可以手动选择，不擅自自动连接，也不扫描整个局域网。

@@ -31,15 +31,19 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## ✨ v5.0.1 · 更舒适的设置界面
+
+本次维护更新保留 v5.0.0 的投屏、无线连接、截图预览、GPU 解码与 MirroPresent 功能，重点优化设置页的阅读体验：更大的文字与按钮、画质选项的响应式两列布局、输入增强独立分区、兼容选项可折叠，以及各设置分类统一的滚动和间距。新增 Windows Edge 的设置页面几何检查，在 100% / 125% / 150% 缩放与不同窗口尺寸下验证可操作性。
+
 ## 📥 下载与使用
 
 适用于 **Windows 10/11 x64**，需要 WebView2 Runtime 与 Android 设备的 USB 调试/无线调试授权。
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.0.0_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.0.0_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.0.0_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.1_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.1_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.1_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
 从 **[MirroLeap GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest)** 的 Assets 下载，不要从 Tags 页面下载源码 ZIP 当作安装包。
 
