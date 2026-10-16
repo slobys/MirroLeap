@@ -1,4 +1,5 @@
 mod commands;
+mod app_update;
 mod capture_compositor;
 mod core_manager;
 mod frame_layout;
@@ -139,6 +140,7 @@ pub fn run() {
             commands::get_scrcpy_bin_dir,
             commands::run_terminal_command,
             commands::check_scrcpy_update,
+            app_update::check_mirroleap_update,
             close_splashscreen,
             get_app_version
         ])

@@ -5,6 +5,7 @@ import Sidebar from "./components/Sidebar";
 import ControlPanel from "./components/ControlPanel";
 import LogPanel from "./components/LogPanel";
 import ScreenshotTools from "./components/ScreenshotTools";
+import AppUpdateChecker from "./components/AppUpdateChecker";
 import Header from "./components/Header";
 import SessionBehavior from "./components/SessionBehavior";
 import ShortcutsPanel from "./components/ShortcutsPanel";
@@ -87,7 +88,7 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("4.7.2");
+  const [appVersion, setAppVersion] = useState("4.8.1");
   // Keep the daily workflow lightweight. Older saved scrcpy_* options are
   // still read by useScrcpy, and every advanced feature remains in Settings.
   const [view, setView] = useState<'home' | 'settings'>('home');
@@ -442,6 +443,7 @@ function App() {
                         isDownloading={isDownloading} downloadProgress={downloadProgress}
                         version={appVersion}
                       />
+                      <AppUpdateChecker version={appVersion}/>
                       <Footer version={appVersion}/>
                     </div>
                   )}
