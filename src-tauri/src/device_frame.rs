@@ -32,7 +32,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::frame_layout::{
-    expand_screen, is_frame_edge_hover, native_clip_radius, toolbar_placement,
+    companion_needs_reposition, expand_screen, is_frame_edge_hover, native_clip_radius, toolbar_placement,
     FrameRect, ScreenRect, ToolbarLayout, TOOLBAR_HEIGHT, TOOLBAR_WIDTH,
 };
 use crate::ScrcpyState;
@@ -389,6 +389,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut clipped_pid: Option<u32> = None;
     let mut last_client_size: Option<(u32, i32, i32)> = None;
     let mut controls_rect: Option<ScreenRect> = None;
+    let mut shell_position_checked_at: Option<Instant> = None;
+    let mut toolbar_position_checked_at: Option<Instant> = None;
     let mut controls_y_offset: Option<i32> = None;
     let mut last_nearby: Option<Instant> = None;
     let mut video_was_unavailable = true;
@@ -422,6 +424,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
             previous_frame = None;
             controls_rect = None;
+            shell_position_checked_at = None;
+            toolbar_position_checked_at = None;
             controls_y_offset = None;
             last_nearby = None;
             applied_orientation = None;
@@ -497,6 +501,10 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 if let Err(error) = place_overlay(&overlay, hwnd, frame) {
                     let _ = app.emit("scrcpy-log", format!("[FRAME] Retrying restored shell: {error}"));
                     shell_visible = false;
+                    shell_position_checked_at = None;
+                } else {
+                    previous_frame = Some(frame);
+                    shell_position_checked_at = Some(Instant::now());
                 }
             } else {
                 shell_visible = false;
@@ -505,14 +513,31 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let shell_behind_video = overlay_hwnd.map(|shell| {
             unsafe { GetWindow(hwnd, GW_HWNDPREV) }.map(|above| above != shell).unwrap_or(true)
         }).unwrap_or(true);
-        if shell_visible && (previous_frame != Some(frame) || shell_behind_video || foreground == hwnd || (inking && active)) {
+        let shell_rect = ScreenRect {
+            x: frame.x, y: frame.y, width: frame.width, height: frame.height,
+        };
+        let shell_health_due = shell_position_checked_at
+            .map(|last| last.elapsed() > Duration::from_secs(2)).unwrap_or(true);
+        if shell_visible && companion_needs_reposition(
+            previous_frame.map(|rect| ScreenRect {
+                x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+            }),
+            shell_rect,
+            actual_visible || needs_restore,
+            !shell_behind_video,
+            shell_health_due,
+        ) {
             match place_overlay(&overlay, hwnd, frame) {
-                Ok(()) => previous_frame = Some(frame),
+                Ok(()) => {
+                    previous_frame = Some(frame);
+                    shell_position_checked_at = Some(Instant::now());
+                },
                 Err(error) => {
                     // Do not destroy the skin or toolbar just because Windows
                     // temporarily refuses one native window positioning call.
                     let _ = app.emit("scrcpy-log", format!("[FRAME] Position will retry: {error}"));
                     previous_frame = None;
+                    shell_position_checked_at = None;
                 }
             }
         }
@@ -564,6 +589,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 controls_y_offset = None;
                 previous_layout = None;
                 previous_zoom = None;
+                toolbar_position_checked_at = None;
                 continue;
             };
             let rect = placement.rect;
@@ -580,14 +606,32 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             }
             if controls_visible {
                 // Tauri show() can reset the native HWND's position and z-order.
-                // Always place AFTER show, immediately above the visible shell,
-                // not HWND_TOP above an unrelated foreground browser.
-                if let Err(error) = place_toolbar(&toolbar, &overlay, rect) {
-                    let _ = app.emit("scrcpy-log",
-                        format!("[FRAME] Repositioning toolbar on next tick: {error}"));
-                    controls_rect = None;
-                } else {
-                    controls_rect = Some(rect);
+                // Position immediately on restore, drag, DPI/rotation change
+                // or z-order loss. A stationary companion should not get
+                // SetWindowPos() 20 times per second: it causes unnecessary
+                // DWM compositor work and occasional focus flicker.
+                let toolbar_stacked = match (overlay_hwnd, toolbar_hwnd) {
+                    (Some(_shell), Some(control)) if foreground == control => true,
+                    (Some(shell), Some(control)) =>
+                        unsafe { GetWindow(shell, GW_HWNDPREV) }
+                            .map(|above| above == control).unwrap_or(false),
+                    _ => false,
+                };
+                let health_due = toolbar_position_checked_at
+                    .map(|last| last.elapsed() > Duration::from_secs(2)).unwrap_or(true);
+                if companion_needs_reposition(
+                    controls_rect, rect, actually_visible && !newly_shown,
+                    toolbar_stacked, health_due,
+                ) {
+                    if let Err(error) = place_toolbar(&toolbar, &overlay, rect) {
+                        let _ = app.emit("scrcpy-log",
+                            format!("[FRAME] Repositioning toolbar on next tick: {error}"));
+                        controls_rect = None;
+                        toolbar_position_checked_at = None;
+                    } else {
+                        controls_rect = Some(rect);
+                        toolbar_position_checked_at = Some(Instant::now());
+                    }
                 }
                 let refresh_layout = layout_synced_at.map(|t| t.elapsed() > Duration::from_secs(2))
                     .unwrap_or(true);
@@ -608,6 +652,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         } else {
             if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
             controls_rect = None;
+            toolbar_position_checked_at = None;
             controls_y_offset = None;
             previous_layout = None;
             previous_zoom = None;

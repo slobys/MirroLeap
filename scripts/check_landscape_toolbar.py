@@ -80,6 +80,10 @@ assert "monitor_work_area(hwnd)" in native and "GetMonitorInfoW" in native
 assert "MONITOR_DEFAULTTONEAREST" in native and "info.rcWork" in native
 assert "placement.zoom_percent" in native and "document.documentElement.style.zoom" in toolbar
 assert "GetWindow(hwnd, GW_HWNDPREV)" in native, "Toolbar must keep SDL-relative stacking"
+assert "pub fn companion_needs_reposition(" in layout, "Stable native companions must avoid per-tick SetWindowPos"
+assert native.count("companion_needs_reposition(") >= 2, "Both frame and toolbar must use the movement gate"
+assert "Duration::from_secs(2)" in native, "Native companion z-order needs periodic health check"
+assert "shell_position_checked_at" in native and "toolbar_position_checked_at" in native
 assert "recent_restore" in native and "video_was_unavailable" in native
 assert "window.scrcpyControls?.setLayout" in native
 
