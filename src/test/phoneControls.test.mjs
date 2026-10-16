@@ -12,6 +12,7 @@ function setup({ failToggle = false } = {}) {
   const actions = [];
   let enabled = false;
   let quick = false;
+  let top = false;
   const dom = new JSDOM(html, {
     url: 'http://localhost/phone-controls.html',
     runScripts: 'dangerously',
@@ -29,6 +30,8 @@ function setup({ failToggle = false } = {}) {
         if (action === 'ink_reset') { enabled = false; quick = false; }
         if (action === 'quick_toggle') { quick = !quick; enabled = false; }
         if (action === 'quick_status') return quick;
+        if (action === 'quick_top_status') return top;
+        if (action === 'quick_top_toggle') return (top = !top);
         return action.startsWith('quick_') ? true : enabled;
       } } };
     },
@@ -91,6 +94,16 @@ describe('real Tauri phone-controls HTML', () => {
       'quick_fullscreen','quick_home','quick_back','quick_recents','quick_power',
       'quick_rotate','quick_paste','quick_screen_off',
     ]));
+    const top = document.getElementById('quick-top');
+    expect(top).not.toBeNull();
+    expect(top.getAttribute('aria-pressed')).toBe('false');
+    top.click();
+    await nextTask(); await nextTask();
+    expect(actions).toContain('quick_top_toggle');
+    expect(top.getAttribute('aria-pressed')).toBe('true');
+    top.click();
+    await nextTask(); await nextTask();
+    expect(top.getAttribute('aria-pressed')).toBe('false');
     document.getElementById('ink-toggle').click();
     await nextTask(); await nextTask();
     expect(document.body.classList.contains('quick-open')).toBe(false);

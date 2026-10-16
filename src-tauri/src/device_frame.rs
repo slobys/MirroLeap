@@ -21,17 +21,14 @@ use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
     MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, SetWindowRgn,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD,
-    KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_LBUTTON, VK_LMENU,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_LMENU};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
     GetWindowRect, GW_HWNDPREV,
     IsIconic, IsWindowVisible, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
     GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST, HWND_TOPMOST, HWND_NOTOPMOST,
-    WM_SYSKEYDOWN, WM_SYSKEYUP, WM_KEYUP,
+    WM_SYSKEYDOWN, WM_SYSKEYUP,
     HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
     SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
 };
@@ -1100,11 +1097,11 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
 fn send_video_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
     // scrcpy's default MOD + key shortcuts: F/R/V/O. Only the matched
     // scrcpy SDL HWND may receive synthetic keys, never an arbitrary app.
-    let key = match action {
-        "quick_fullscreen" => b'F',
-        "quick_rotate" => b'R',
-        "quick_paste" => b'V',
-        "quick_screen_off" => b'O',
+    let (key, scan) = match action {
+        "quick_fullscreen" => (b'F', 0x21_isize),
+        "quick_rotate" => (b'R', 0x13_isize),
+        "quick_paste" => (b'V', 0x2F_isize),
+        "quick_screen_off" => (b'O', 0x18_isize),
         _ => return Err("Unsupported scrcpy shortcut".into()),
     };
     if unsafe { IsIconic(hwnd).as_bool() } {
@@ -1114,40 +1111,17 @@ fn send_video_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
     // consequently goes to WebView2, not to the scrcpy SDL window. Post only
     // hard-coded Alt shortcuts to the already PID-verified video HWND.
     let scan_alt = 0x38_isize << 16;
+    let scan_key = scan << 16;
     unsafe {
         PostMessageW(Some(hwnd), WM_SYSKEYDOWN, WPARAM(VK_LMENU.0 as usize),
             LPARAM(scan_alt)).map_err(|e| e.to_string())?;
         PostMessageW(Some(hwnd), WM_SYSKEYDOWN, WPARAM(key as usize),
-            LPARAM(1 << 29)).map_err(|e| e.to_string())?;
+            LPARAM(scan_key | (1 << 29))).map_err(|e| e.to_string())?;
         PostMessageW(Some(hwnd), WM_SYSKEYUP, WPARAM(key as usize),
-            LPARAM((1 << 29) | (1 << 30) | (1 << 31))).map_err(|e| e.to_string())?;
-        PostMessageW(Some(hwnd), WM_KEYUP, WPARAM(VK_LMENU.0 as usize),
+            LPARAM(scan_key | (1 << 29) | (1 << 30) | (1 << 31))).map_err(|e| e.to_string())?;
+        PostMessageW(Some(hwnd), WM_SYSKEYUP, WPARAM(VK_LMENU.0 as usize),
             LPARAM(scan_alt | (1 << 30) | (1 << 31)))
             .map_err(|e| e.to_string())?;
-    }
-    return Ok(());
-    #[allow(unreachable_code)]
-    let keyboard = |key: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS| INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: key,
-                wScan: 0,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
-    let inputs = [
-        keyboard(VK_LMENU, KEYBD_EVENT_FLAGS(0)),
-        keyboard(VIRTUAL_KEY(key as u16), KEYBD_EVENT_FLAGS(0)),
-        keyboard(VIRTUAL_KEY(key as u16), KEYEVENTF_KEYUP),
-        keyboard(VK_LMENU, KEYEVENTF_KEYUP),
-    ];
-    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
-    if sent != inputs.len() as u32 {
-        return Err("Windows refused to send the scrcpy shortcut".into());
     }
     Ok(())
 }

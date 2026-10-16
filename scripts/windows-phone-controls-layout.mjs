@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Verify the Windows hover toolbar with actual Chromium/Edge box geometry:
- * all eight quick actions must be visible, unobstructed and never crop the
+ * all nine quick actions must be visible, unobstructed and never crop the
  * neighboring close/minimize, ink and emergency reset controls. Browser-only
  * mock is inert; native IPC is verified separately by the Rust/Windows build.
  */
@@ -86,7 +86,7 @@ try {
           `${entry.layout} at ${dpi*100}% DPI: ${action.name} is cropped or obscured: ${JSON.stringify(geometry)}`);
       }
       assert.deepEqual(errors, [], `Browser errors in ${entry.layout}`);
-      console.log('PASS',entry.layout, `${dpi*100}% DPI, eight controls reachable`);
+      console.log('PASS',entry.layout, `${dpi*100}% DPI, nine controls reachable`);
       await page.close();
     }
     await context.close();
