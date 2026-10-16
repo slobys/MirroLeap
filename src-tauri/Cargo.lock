@@ -2218,7 +2218,7 @@ dependencies = [
 
 [[package]]
 name = "mirroleap"
-version = "5.0.1"
+version = "5.0.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",

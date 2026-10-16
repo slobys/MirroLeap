@@ -51,7 +51,7 @@ function SettingsFixture() {
             <h1 className="font-bold text-xl flex items-center gap-2"><Settings2 size={20} className="ml-primary"/> 设置与高级功能</h1>
             <p className="ml-muted text-xs mt-0.5">常用功能在首页，全部专业选项在这里。</p>
           </div>
-          <span className="ml-version-pill">MirroLeap v5.0.1</span>
+          <span className="ml-version-pill">MirroLeap v5.0.2</span>
         </div>
         <nav className="ml-settings-nav flex gap-2 overflow-x-auto custom-scrollbar mt-4 pb-1" aria-label="设置分类">
           {tabs.map(({id, text, Icon}) => (
@@ -86,8 +86,8 @@ function SettingsFixture() {
             <Header onThemeChange={()=>{}} currentTheme="ultraviolet" colorMode="light"
               onColorModeChange={()=>{}} binaryStatus={{found:true,message:'ready'}}
               onDownload={()=>{}} onSetPath={()=>{}} onResetPath={()=>{}}
-              isDownloading={false} downloadProgress={0} version="5.0.1"/>
-            <div className="ml-settings-stack"><AppUpdateChecker version="5.0.1"/><Footer version="5.0.1"/></div>
+              isDownloading={false} downloadProgress={0} version="5.0.2"/>
+            <div className="ml-settings-stack"><AppUpdateChecker version="5.0.2"/><Footer version="5.0.2"/></div>
           </div>}
           {tab === 'tools' && <div className="ml-settings-columns ml-tools-layout">
             <div className="ml-settings-stack">
