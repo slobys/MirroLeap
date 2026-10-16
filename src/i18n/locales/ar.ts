@@ -1,7 +1,7 @@
 // Arabic translations
 // Mirrors the English locale keys.
 
-import type { Translations } from './en';
+import { en, type Translations } from './en';
 
 export const ar: Translations = {
    languages: {
@@ -65,6 +65,7 @@ export const ar: Translations = {
         gotIt: 'حسنًا'
     },
     sidebar: {
+        wirelessCenter: en.sidebar.wirelessCenter,
         deviceHub: 'إدارة الأجهزة',
         killAdb: 'إنهاء ADB',
         killAdbTitle: 'إنهاء جميع عمليات ADB بالقوة',

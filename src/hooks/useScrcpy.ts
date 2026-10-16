@@ -945,6 +945,9 @@ export function useScrcpy() {
                 // button offers the same check without first attempting ADB.
                 try {
                     const report = await diagnoseConnection(ip, customPath);
+                    // The wireless hub displays this diagnosis immediately.
+                    // Do not require a second TCP probe just to read logs.
+                    res = { ...res, diagnosis: report };
                     setLogs(prev => [...prev.slice(-100), t('sidebar.diagnostics.' + report.code)]);
                 } catch {
                     // Do not hide the original ADB error if diagnostics fails.

@@ -1,4 +1,4 @@
-import type { Translations } from './en';
+import { en, type Translations } from './en';
 
 export const zhTW: Translations = {
   languages: {
@@ -62,6 +62,7 @@ export const zhTW: Translations = {
         gotIt: '了解'
     },
     sidebar: {
+        wirelessCenter: en.sidebar.wirelessCenter,
         deviceHub: '裝置中心',
         killAdb: '終止 ADB',
         killAdbTitle: '強制終止所有 ADB 操作',

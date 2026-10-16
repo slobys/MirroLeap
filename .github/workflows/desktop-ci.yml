@@ -44,6 +44,7 @@ jobs:
       - run: python3 scripts/check_security_baseline.py
       - run: python3 scripts/check_annotated_capture.py
       - run: python3 scripts/check_preview_clipboard.py
+      - run: python3 scripts/check_wireless_center.py
       - run: python3 scripts/check_repository_migration.py
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
@@ -166,6 +167,9 @@ jobs:
           ### 主要更新
           - **v4.7.3 MirroCapture 截图预览与剪贴板复制**：保存原始/画笔合成 PNG 后在「设置 → 工具与日志」显示缩略图，用户可主动点「复制图片到剪贴板」粘贴到 Windows 应用。没有新增首页按钮。
           - **最小权限和隐私保护**：读取预览只限电脑 Downloads 目录中本工具生成的截图文件，拒绝任意路径、符号链接越界与大于 12 MiB 的图片；主窗口仅具有系统剪贴板的图片写入权限，不读取任何用户现有剪贴板内容。切换手机会清除旧设备图片预览。超大图仍能正常保存但不在界面预览。
+          - **v4.8.0 智能无线连接中心**：将连接、诊断、USB 转无线、配对结果汇总在无线设备页。点击连接后立即显示进度，失败时自动展示设备状态、当前连接端口和下一步建议。发现同 IP 的动态端口时可以手动选择，不擅自自动连接，也不扫描整个局域网。
+          - **历史地址与授权状态更清楚**：展示历史设备的已连接/离线/等待授权/已记住状态，以及 mDNS 配对端口和连接端口的区别；配对成功不会谎报手机已建立投屏连接。
+          - **更安全的 ADB 请求**：仅接受合法 IPv4 和可选端口、阻止重复手动连接；原生配对命令校验六位配对码、强制 20 秒超时并限定主窗口调用，同时保留原有的后台退避重连和连接后状态刷新。
           - **v4.7.2 窗口稳定性 3.0 第一阶段**：优化 Windows SDL 视频与透明手机外框、悬浮栏的 HWND 跟随，不再在位置/层级完全稳定时每 50ms 重复调用 SetWindowPos。发生拖动、旋转、任务栏/多屏 DPI、最小化恢复或层级异常时立即调整，另外每 2 秒进行一次轻量健康校验。保留原有画笔、窗口控制和视频功能，并增加纯 Rust 决策回归测试。
           - **明确六项功能路线图**：后续依次推进 MirroCapture 截图预览复制、智能无线连接中心、软件内检查更新、GPU 解码优化和 MirroPresent 演示工具；新功能与高风险窗口改造拆分发布，避免互相影响。
           - **v4.7.1 MirroCapture 批注图片导出**：在手机投屏画面完成画笔圈画后，到「设置 → 工具与日志」点击「保存含画笔截图」。截取当前选定 Android 手机的原始 PNG，并将当前手机的透明画笔图层按像素比例合成到原分辨率，生成单独的 MirroLeap-Annotated-*.png 文件，保留原始截图按钮。
