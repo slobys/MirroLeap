@@ -49,7 +49,7 @@ describe('MirroLeap software update UI', () => {
     invokeMock.mockResolvedValue({...update, changelog: '<img src=x onerror=alert(1)>\nNew buttons'});
     const {container} = render(<AppUpdateChecker version="4.8.1"/>);
     fireEvent.click(screen.getByRole('button',{name:'Check for MirroLeap software updates'}));
-    expect(invokeMock).toHaveBeenCalledExactlyOnceWith('check_mirroleap_update');
+    expect(invokeMock).toHaveBeenCalledWith('check_mirroleap_update');
     expect(await screen.findByText(/Stable update v4.9.0 available/)).toBeInTheDocument();
     expect(screen.getByText(/New buttons/)).toBeInTheDocument();
     expect(container.querySelector('img')).toBeNull();
@@ -66,8 +66,21 @@ describe('MirroLeap software update UI', () => {
     render(<AppUpdateChecker version="4.8.1"/>);
     fireEvent.click(screen.getByRole('button',{name:'Check for MirroLeap software updates'}));
     await screen.findByText(/Stable update v4.9.0 available/);
-    fireEvent.click(screen.getByRole('button',{name:'Download, verify and install MirroLeap update'}));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Portable ZIP requires a manual replacement');
+    expect(screen.queryByRole('button',{name:'Download, verify and install MirroLeap update'}))
+      .not.toBeInTheDocument();
+    expect(screen.getByText(/No eligible NSIS installation was detected/)).toBeInTheDocument();
+    expect(updaterCheck).not.toHaveBeenCalled();
+  });
+
+  it('also hides installer action for MSI or unknown Windows installations', async () => {
+    invokeMock.mockImplementation(async (action:string) =>
+      action === 'get_app_install_kind' ? 'other' : update);
+    render(<AppUpdateChecker version="4.8.1"/>);
+    fireEvent.click(screen.getByRole('button',{name:'Check for MirroLeap software updates'}));
+    await screen.findByText(/Stable update v4.9.0 available/);
+    expect(screen.queryByRole('button',{name:'Download, verify and install MirroLeap update'}))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole('link',{name:'Portable ZIP'})).toHaveAttribute('href', update.downloads[0].url);
     expect(updaterCheck).not.toHaveBeenCalled();
   });
 

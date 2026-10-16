@@ -20,4 +20,8 @@ $sig = (Get-Content -LiteralPath $signature -Raw).Trim()
 if ($sig.Length -lt 80 -or $sig.Length -gt 2000) {
     throw 'Updater signature has an unexpected format'
 }
+node scripts/verify-updater-signature.mjs "$installer" "$signature"
+if ($LASTEXITCODE -ne 0) {
+    throw 'The final NSIS installer failed pinned-key signature verification'
+}
 Write-Host "Verified updater signature artifact exists for MirroLeap v$version"

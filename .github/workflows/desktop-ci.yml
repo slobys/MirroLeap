@@ -70,6 +70,8 @@ jobs:
         run: node scripts/windows-dashboard-layout.mjs
       - name: Real Edge settings geometry (100%, 125%, 150% DPI)
         run: node scripts/windows-settings-layout.mjs
+      - name: Real Edge phone quick-controls (8 layouts, 3 DPI scales)
+        run: node scripts/windows-phone-controls-layout.mjs
       - name: Build original standalone desktop executable (unpatched, without any installer)
         run: npm run tauri build -- --no-bundle
       - name: Stage extract-and-run portable version
@@ -137,9 +139,45 @@ jobs:
             src-tauri/target/release/bundle/portable/*_x64_Portable.zip
             release-checksums/SHA256SUMS.txt
 
+  verify-updater:
+    name: Validate cryptographically signed Windows updater
+    needs: [checks, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: MirroLeap-Windows-Installer
+          path: release-assets
+      - name: Verify final installer bytes, pinned-key signature and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          mkdir verified-assets
+          for suffix in "_x64-setup.exe" "_x64_en-US.msi" "_x64_Portable.zip"; do
+            file="$(find release-assets -type f -name "MirroLeap_${VERSION}${suffix}" -print -quit)"
+            test -n "$file" || { echo "Missing installer: ${suffix}"; exit 1; }
+            cp "$file" verified-assets/
+          done
+          file="$(find release-assets -type f -name "SHA256SUMS.txt" -print -quit)"
+          test -n "$file" || { echo "Missing checksum manifest"; exit 1; }
+          cp "$file" verified-assets/
+          (cd verified-assets && sha256sum --check SHA256SUMS.txt)
+          file="$(find release-assets -type f -name "MirroLeap_${VERSION}_x64-setup.exe.sig" -print -quit)"
+          test -n "$file" || { echo "Missing signed updater signature"; exit 1; }
+          cp "$file" verified-assets/
+          node scripts/write-updater-manifest.mjs "$VERSION" \
+            "verified-assets/MirroLeap_${VERSION}_x64-setup.exe" \
+            "verified-assets/MirroLeap_${VERSION}_x64-setup.exe.sig" verified-assets/latest.json
+          node -e 'const m=require("./verified-assets/latest.json"); if (!m.platforms?.["windows-x86_64"]?.signature) process.exit(1)'
+
   publish-release:
     name: Publish stable MirroLeap release
-    needs: [checks, windows]
+    needs: [checks, windows, verify-updater]
     if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.message, '[publish release]') }}
     runs-on: ubuntu-latest
     permissions:
@@ -174,7 +212,9 @@ jobs:
           test -n "$updater_sig" || { echo "Missing signed NSIS updater artifact"; exit 1; }
           cp "$updater_sig" verified-assets/
           test -s "verified-assets/MirroLeap_${VERSION}_x64-setup.exe.sig"
-          node scripts/write-updater-manifest.mjs "$VERSION" +            "verified-assets/MirroLeap_${VERSION}_x64-setup.exe.sig" verified-assets/latest.json
+          node scripts/write-updater-manifest.mjs "$VERSION" \
+            "verified-assets/MirroLeap_${VERSION}_x64-setup.exe" \
+            "verified-assets/MirroLeap_${VERSION}_x64-setup.exe.sig" verified-assets/latest.json
           for suffix in "_x64-setup.exe" "_x64_en-US.msi" "_x64_Portable.zip"; do
             test -f "verified-assets/MirroLeap_${VERSION}${suffix}" || {
               echo "Missing MirroLeap_${VERSION}${suffix}"; exit 1;
@@ -188,7 +228,7 @@ jobs:
           ### 主要更新
           ### v5.0.3 手机悬浮栏快捷控制与签名在线更新
           - **悬浮快捷控制**：手机投屏旁展开八个实时操作，支持主页、返回、最近任务、电源，以及全屏、旋转、粘贴、息屏；原生窗口与设备权限严格绑定，按键仅作用于当前投屏。
-          - **签名在线更新**：Windows 安装版可主动下载安装 minisign 签名验证的官方 NSIS 更新包；不支持无签名包，免安装版继续提示手动更换 ZIP，避免破坏便携式目录。
+          - **签名在线更新**：Windows NSIS EXE 安装版可主动下载安装 minisign 签名验证的官方更新包；不支持无签名包，免安装 ZIP/MSI 仍需手动升级以避免重复安装。
           - **发布完整性**：额外上传官方签名文件及 latest.json；更新只通过单一官方 HTTPS Release 入口，不允许自动绕过 SmartScreen。
           ### v5.0.2 全新设置中心 UI
           - **投屏参数不再局促**：宽屏左右并排显示捕获/画质设置与 GPU 解码、当前参数概览；窄窗口自动切回单列且保留滚动。

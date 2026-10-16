@@ -22,9 +22,10 @@ fn require_main_window(window: &Window) -> Result<(), String> {
     Ok(())
 }
 
-/// Portable installs have a launcher beside the executable. The signed NSIS
-/// updater cannot update an extracted ZIP in place, so keep it on the manual
-/// portable-upgrade path rather than installing a second unrelated app.
+/// Only the NSIS EXE installation is eligible for the signed NSIS updater.
+/// A portable copy has its launcher beside the executable. An MSI install
+/// may be system-managed; running NSIS over it could create a second install.
+/// Fail closed unless the NSIS uninstaller is present next to this binary.
 #[tauri::command]
 pub fn get_app_install_kind(window: Window) -> Result<&'static str, String> {
     require_main_window(&window)?;
@@ -33,8 +34,10 @@ pub fn get_app_install_kind(window: Window) -> Result<&'static str, String> {
     let dir = exe.parent().ok_or("Application directory missing")?;
     Ok(if dir.join("Run-MirroLeap.cmd").is_file() {
         "portable"
-    } else {
+    } else if dir.join("uninstall.exe").is_file() {
         "installed"
+    } else {
+        "other"
     })
 }
 

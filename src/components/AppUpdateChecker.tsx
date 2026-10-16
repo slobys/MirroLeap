@@ -10,7 +10,8 @@ interface Props { version: string; running?: boolean; }
 /**
  * Stable release metadata is checked only after a user click. Installation is
  * separately opt-in and uses Tauri's pinned-key signature verification; never
- * execute a GitHub-downloaded file directly. Portable ZIP remains manual.
+ * execute a GitHub-downloaded file directly. Portable ZIP and MSI installs
+ * stay on the manual path to avoid converting one installation into another.
  */
 export default function AppUpdateChecker({version, running = false}: Props) {
   const {locale} = useI18n();
@@ -21,6 +22,7 @@ export default function AppUpdateChecker({version, running = false}: Props) {
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeProgress, setUpgradeProgress] = useState<number | null>(null);
   const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null);
+  const [installKind, setInstallKind] = useState<'unknown' | 'portable' | 'installed' | 'other'>('unknown');
   const generation = useRef(0);
   const lock = useRef(false);
   const upgradeLock = useRef(false);
@@ -37,6 +39,7 @@ export default function AppUpdateChecker({version, running = false}: Props) {
     lock.current = true;
     setPending(true);
     setInfo(null);
+    setInstallKind('unknown');
     setError(null);
     try {
       const result = await invoke<AppUpdateInfo>('check_mirroleap_update');
@@ -45,6 +48,18 @@ export default function AppUpdateChecker({version, running = false}: Props) {
           !['update_available', 'up_to_date', 'ahead'].includes(result.status)) {
         setError(explainUpdateError('invalid_release', zh));
         return;
+      }
+      if (result.status === 'update_available') {
+        try {
+          const detected = await invoke<string>('get_app_install_kind');
+          if (request !== generation.current) return;
+          setInstallKind(detected === 'installed' ? 'installed' :
+            detected === 'portable' ? 'portable' : 'other');
+        } catch {
+          // Unknown installation type must never show the installer button.
+          if (request !== generation.current) return;
+          setInstallKind('other');
+        }
       }
       setInfo(result);
     } catch (reason) {
@@ -61,7 +76,8 @@ export default function AppUpdateChecker({version, running = false}: Props) {
   const updateAvailable = info?.status === 'update_available';
 
   const installUpdate = async () => {
-    if (lock.current || upgradeLock.current || !updateAvailable || !info || running) return;
+    if (lock.current || upgradeLock.current || !updateAvailable || !info ||
+        installKind !== 'installed' || running) return;
     // The update must be both present in the official stable release metadata
     // and signed by the Tauri updater private key. A release ZIP or EXE cannot
     // bypass the updater signature simply because GitHub served it.
@@ -73,8 +89,8 @@ export default function AppUpdateChecker({version, running = false}: Props) {
       const kind = await invoke<string>('get_app_install_kind');
       if (kind !== 'installed') {
         throw Error(zh
-          ? '免安装版请使用下方 Portable ZIP 手动替换；一键安装只支持安装版。'
-          : 'Portable ZIP requires a manual replacement. One-click install is for installed versions.');
+          ? '仅支持 NSIS EXE 安装版的一键升级；免安装 ZIP 和 MSI 安装版请下载对应文件手动升级。'
+          : 'Signed one-click updates require an NSIS EXE installation. Portable ZIP and MSI versions must be upgraded manually.');
       }
       const {check} = await import('@tauri-apps/plugin-updater');
       const signedUpdate = await check({timeout: 12000});
@@ -124,8 +140,8 @@ export default function AppUpdateChecker({version, running = false}: Props) {
     </div>
     <p className="ml-muted text-xs leading-relaxed">
       {zh
-        ? '检查 GitHub 正式版；安装版支持经签名验证的一键更新。'
-        : 'Check GitHub stable releases. Installed editions support signed one-click updates.'}
+        ? '检查 GitHub 正式版；NSIS EXE 安装版支持签名验证的一键更新。'
+        : 'Check stable GitHub releases. Signed one-click updates require an NSIS EXE install.'}
     </p>
     <div className="flex flex-wrap items-center gap-3">
       <button type="button" onClick={() => void check()} disabled={pending}
@@ -140,7 +156,7 @@ export default function AppUpdateChecker({version, running = false}: Props) {
         <ExternalLink size={13}/>
         {zh ? '官方发布页面' : 'Official releases'}
       </a>
-      {updateAvailable && <button type="button" onClick={() => void installUpdate()}
+      {updateAvailable && installKind === 'installed' && <button type="button" onClick={() => void installUpdate()}
         disabled={upgrading || pending || running}
         aria-label={zh ? '下载验证并安装 MirroLeap 更新' : 'Download, verify and install MirroLeap update'}
         className="ml-secondary-action inline-flex items-center gap-2 px-4">
@@ -149,7 +165,12 @@ export default function AppUpdateChecker({version, running = false}: Props) {
           (zh ? '一键安装并重启' : 'Install update and restart')}
       </button>}
     </div>
-    {running && updateAvailable && <p role="note" className="text-xs text-amber-600">
+    {updateAvailable && installKind !== 'installed' && <p role="note" className="ml-muted text-xs">
+      {zh
+        ? '当前未检测到可一键升级的 NSIS 安装。请使用下方官方 ZIP、EXE 或 MSI 文件手动升级。'
+        : 'No eligible NSIS installation was detected. Use the official ZIP, EXE or MSI download links below to upgrade manually.'}
+    </p>}
+    {running && updateAvailable && installKind === 'installed' && <p role="note" className="text-xs text-amber-600">
       {zh ? '先结束正在运行的投屏，再安装更新。' : 'Stop the active phone mirror before installing the update.'}
     </p>}
     {upgradeMessage && <p role="status" className="text-xs text-emerald-600">
@@ -203,8 +224,8 @@ export default function AppUpdateChecker({version, running = false}: Props) {
     <details className="ml-settings-help-details">
       <summary className="inline-flex items-center gap-2"><ShieldCheck size={14}/>{zh ? '下载与安全说明' : 'Download & safety'}</summary>
       <p>{zh
-        ? '一键更新使用 Tauri 签名公钥验证更新包，签名缺失或不匹配则拒绝安装。当前尚未配置受信任的 Windows 系统代码签名证书；SmartScreen 可能提示。免安装版请自行更新 ZIP，不要求关闭 Windows 安全防护。'
-        : 'One-click updates require a Tauri-signed package; invalid or missing signatures fail closed. Windows Authenticode signing is not configured and SmartScreen may warn. Portable ZIP upgrades remain manual. Do not disable Windows security.'}</p>
+        ? '仅 NSIS EXE 安装版使用 Tauri 签名公钥验证更新包；签名无效则拒绝安装。免安装 ZIP 和 MSI 请手动更新。未配置受信任的 Windows 代码签名，SmartScreen 仍可能提示，请勿关闭系统防护。'
+        : 'Only NSIS EXE installations use pinned-key Tauri-signed updates; invalid signatures fail closed. MSI and portable ZIP upgrades remain manual. No trusted Windows Authenticode certificate is configured; do not disable system protection.'}</p>
     </details>
   </section>;
 }
