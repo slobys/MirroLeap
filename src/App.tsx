@@ -5,6 +5,9 @@ import Sidebar from "./components/Sidebar";
 import ControlPanel from "./components/ControlPanel";
 import LogPanel from "./components/LogPanel";
 import ScreenshotTools from "./components/ScreenshotTools";
+import AppUpdateChecker from "./components/AppUpdateChecker";
+import DecoderPerformance from "./components/DecoderPerformance";
+import MirroPresentPanel from "./components/MirroPresentPanel";
 import Header from "./components/Header";
 import SessionBehavior from "./components/SessionBehavior";
 import ShortcutsPanel from "./components/ShortcutsPanel";
@@ -35,6 +38,7 @@ function App() {
     runScrcpy,
     stopScrcpy,
     changeMirrorResolution,
+    recenterMirrorWindow,
     downloadScrcpy,
     checkScrcpy,
     scrcpyStatus,
@@ -54,6 +58,8 @@ function App() {
     clearLogs,
     detectedCameras,
     renderDriverSupport,
+    videoDecoderSupport,
+    observedDecoders,
     mdnsDevices,
     config,
     setConfig,
@@ -87,7 +93,7 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("4.7.3");
+  const [appVersion, setAppVersion] = useState("5.0.0");
   // Keep the daily workflow lightweight. Older saved scrcpy_* options are
   // still read by useScrcpy, and every advanced feature remains in Settings.
   const [view, setView] = useState<'home' | 'settings'>('home');
@@ -405,6 +411,7 @@ function App() {
               <div className="ml-settings-body flex-1 overflow-y-auto custom-scrollbar px-5 pb-8 pt-4" key={settingsTab}>
                 <div className="max-w-[900px] mx-auto">
                   {settingsTab === 'mirror' && (
+                    <div className="flex flex-col gap-4">
                     <ControlPanel
                       config={config} setConfig={setConfig} onStart={handleStart}
                       onStop={handleStop} isRunning={sessionRunning}
@@ -413,6 +420,11 @@ function App() {
                       renderDriverSupport={renderDriverSupport}
                       onListOptions={(arg) => { if (activeDevice) listScrcpyOptions(activeDevice, arg); }}
                     />
+                    <DecoderPerformance config={config} setConfig={setConfig}
+                      support={videoDecoderSupport}
+                      observedMode={observedDecoders[activeDevice]}
+                      running={sessionRunning}/>
+                    </div>
                   )}
                   {settingsTab === 'devices' && (
                     <Sidebar
@@ -442,11 +454,15 @@ function App() {
                         isDownloading={isDownloading} downloadProgress={downloadProgress}
                         version={appVersion}
                       />
+                      <AppUpdateChecker version={appVersion}/>
                       <Footer version={appVersion}/>
                     </div>
                   )}
                   {settingsTab === 'tools' && (
                     <div className="flex flex-col gap-4">
+                      <MirroPresentPanel device={activeDevice}
+                        running={sessionRunning} customPath={config.scrcpyPath}
+                        onRecenter={recenterMirrorWindow}/>
                       <ScreenshotTools device={activeDevice} customPath={config.scrcpyPath}/>
                       <LogPanel logs={logs} onClear={clearLogs}
                         onAddLog={(msg) => setLogs((prev: string[]) => [...prev.slice(-100), msg])}
