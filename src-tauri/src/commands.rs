@@ -11,6 +11,7 @@ use tokio::process::Command as TokioCommand;
 use tokio::io::{BufReader, AsyncBufReadExt, AsyncReadExt};
 use tokio::time::{timeout, Duration};
 use serde::Deserialize;
+use crate::video_decoder::{self, DecoderDecision, VideoDecoderSupport};
 
 const AUDIO_FALLBACK_CHAIN: &[&str] = &["aac", "flac", "raw"];
 
@@ -1234,6 +1235,37 @@ pub async fn get_render_drivers(custom_path: Option<String>) -> serde_json::Valu
     }
 }
 
+async fn probe_video_decoder_support(exe_path: &str) -> Result<VideoDecoderSupport, String> {
+    async fn probe(exe_path: &str, argument: &str) -> Result<String, String> {
+        let mut command = create_command(exe_path);
+        command.arg(argument).kill_on_drop(true);
+        let output = timeout(Duration::from_secs(5), command.output())
+            .await.map_err(|_| format!("scrcpy {argument} timed out after 5 seconds"))?
+            .map_err(|error| format!("Cannot inspect installed scrcpy core: {error}"))?;
+        if !output.status.success() {
+            return Err(format!("scrcpy {argument} failed; core unavailable or damaged"));
+        }
+        if output.stdout.len().saturating_add(output.stderr.len()) > 128 * 1024 {
+            return Err("scrcpy capability output exceeds 128 KiB".into());
+        }
+        Ok(format!("{}\n{}", String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)))
+    }
+    let version = probe(exe_path, "--version").await?;
+    let help = probe(exe_path, "--help").await?;
+    Ok(video_decoder::analyze_support(&version, &help, video_decoder::host_os()))
+}
+
+#[tauri::command]
+pub async fn get_video_decoder_support(
+    window: Window,
+    custom_path: Option<String>,
+) -> Result<VideoDecoderSupport, String> {
+    require_main_window(&window)?;
+    let exe_path = get_binary_path("scrcpy", custom_path);
+    probe_video_decoder_support(&exe_path).await
+}
+
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ScrcpyConfig {
@@ -1268,6 +1300,11 @@ pub struct ScrcpyConfig {
     hid_keyboard: Option<bool>,
     hid_mouse: Option<bool>,
     render_driver: Option<String>,
+    /// Host-side video decoding, independent of the Android encoder and SDL
+    /// renderer: auto (default), disabled (software), or OS-specific hwdec.
+    hardware_decoder: Option<String>,
+    /// Ask the installed scrcpy core to print measured FPS to its log.
+    print_fps: Option<bool>,
     // v4 features
     flex_display: Option<bool>,
     camera_torch: Option<bool>,
@@ -1839,14 +1876,29 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
     args
 }
 
+fn build_scrcpy_args_with_decoder(
+    config: &ScrcpyConfig,
+    video_dir_fallback: Option<String>,
+    audio_codec_override: Option<&str>,
+    decoder: &DecoderDecision,
+) -> Vec<String> {
+    let mut args = build_scrcpy_args(config, video_dir_fallback, audio_codec_override);
+    // Validated against the installed core's own --help, never pass
+    // arbitrary localStorage strings as scrcpy CLI flags.
+    if let Some(flag) = &decoder.flag { args.push(flag.clone()); }
+    if decoder.print_fps { args.push("--print-fps".into()); }
+    args
+}
+
 async fn spawn_scrcpy_streams(
     window: &Window,
+    device: &str,
     exe_path: &str,
     adb_exe_path: &str,
     server_path: Option<&str>,
     args: &[String],
     vsync: bool,
-) -> Result<(tokio::process::Child, Arc<AtomicBool>), String> {
+) -> Result<(tokio::process::Child, Arc<AtomicBool>, Arc<AtomicBool>), String> {
     let command_str = format!("> scrcpy {}", args.join(" "));
     let _ = window.emit("scrcpy-log", command_str);
 
@@ -1873,8 +1925,11 @@ async fn spawn_scrcpy_streams(
     let stderr = child.stderr.take().expect("Failed to capture stderr");
 
     let audio_error_flag = Arc::new(AtomicBool::new(false));
+    let decoder_error_flag = Arc::new(AtomicBool::new(false));
 
     let window_stdout = window.clone();
+    let stdout_device = device.to_string();
+    let stdout_decoder_error = decoder_error_flag.clone();
     tokio::spawn(async move {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
@@ -1885,7 +1940,17 @@ async fn spawn_scrcpy_streams(
             tokio::select! {
                 line_res = lines.next_line() => {
                     match line_res {
-                        Ok(Some(line)) => buffer.push(line),
+                        Ok(Some(line)) => {
+                            if video_decoder::is_hardware_decode_error(&line) {
+                                stdout_decoder_error.store(true, Ordering::SeqCst);
+                            }
+                            if let Some(actual) = video_decoder::observed_decoder(&line) {
+                                let _ = window_stdout.emit("scrcpy-video-decoder", json!({
+                                    "device": stdout_device.as_str(), "mode": actual,
+                                }));
+                            }
+                            buffer.push(line);
+                        },
                         Ok(None) => break,
                         Err(_) => break,
                     }
@@ -1906,6 +1971,8 @@ async fn spawn_scrcpy_streams(
 
     let window_stderr = window.clone();
     let flag_clone = audio_error_flag.clone();
+    let stderr_device = device.to_string();
+    let stderr_decoder_error = decoder_error_flag.clone();
     tokio::spawn(async move {
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
@@ -1919,6 +1986,14 @@ async fn spawn_scrcpy_streams(
                         Ok(Some(line)) => {
                             if is_audio_codec_error(&line) {
                                 flag_clone.store(true, Ordering::SeqCst);
+                            }
+                            if video_decoder::is_hardware_decode_error(&line) {
+                                stderr_decoder_error.store(true, Ordering::SeqCst);
+                            }
+                            if let Some(actual) = video_decoder::observed_decoder(&line) {
+                                let _ = window_stderr.emit("scrcpy-video-decoder", json!({
+                                    "device": stderr_device.as_str(), "mode": actual,
+                                }));
                             }
                             buffer.push(line);
                         }
@@ -1940,7 +2015,7 @@ async fn spawn_scrcpy_streams(
         }
     });
 
-    Ok((child, audio_error_flag))
+    Ok((child, audio_error_flag, decoder_error_flag))
 }
 
 enum AttemptOutcome {
@@ -1992,12 +2067,45 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     let should_auto_fallback = audio_enabled
         && (audio_codec_mode.is_empty() || audio_codec_mode.eq_ignore_ascii_case("auto"));
 
+    // Video decoding is HOST-SIDE; do not confuse it with Android's video
+    // encoder or SDL render driver. Auto is the old unmodified launch path.
+    // Only probe the core for explicitly requested FPS/decoder features.
+    let requested_decoder = config.hardware_decoder.as_deref().unwrap_or("auto").trim();
+    let request_fps = config.print_fps.unwrap_or(false);
+    let video_enabled = !(config.session_mode == "mirror" &&
+        config.otg_pure.unwrap_or(false) &&
+        (config.hid_keyboard.unwrap_or(false) || config.hid_mouse.unwrap_or(false)));
+    let capabilities = if (requested_decoder != "auto" && !requested_decoder.is_empty()) || request_fps {
+        match probe_video_decoder_support(&exe_path).await {
+            Ok(support) => Some(support),
+            Err(reason) => {
+                let _ = window.emit("scrcpy-log", format!(
+                    "[DECODER] Capability probe unavailable: {reason}. Keeping original scrcpy video flags."
+                ));
+                None
+            }
+        }
+    } else { None };
+    let decoder_decision = video_decoder::choose_decoder(
+        config.hardware_decoder.as_deref(), request_fps,
+        capabilities.as_ref(), video_enabled,
+    );
+    if let Some(warning) = &decoder_decision.warning {
+        let _ = window.emit("scrcpy-log", format!("[DECODER] {warning}"));
+    }
+    let forced_hardware_decoder = decoder_decision.flag.as_ref()
+        .is_some_and(|value| value != "--hwdec=disabled");
+    let _ = window.emit("scrcpy-video-decoder", json!({
+        "device": config.device, "mode": "starting",
+    }));
+
     // First attempt: honour the user's audio codec choice. In "auto" mode this
     // launches without --audio-codec, matching the previous default behaviour.
-    let initial_args = build_scrcpy_args(&config, video_dir.clone(), None);
+    let initial_args = build_scrcpy_args_with_decoder(&config, video_dir.clone(), None, &decoder_decision);
 
-    let (child, audio_error_flag) = spawn_scrcpy_streams(
+    let (child, audio_error_flag, decoder_error_flag) = spawn_scrcpy_streams(
         &window,
+        &config.device,
         &exe_path,
         &adb_exe_path,
         server_path.as_deref(),
@@ -2030,6 +2138,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     let adb_exe_path_mon = adb_exe_path;
     let server_path_mon = server_path;
     let config_mon = config.clone();
+    let initial_decoder_decision = decoder_decision;
 
     // Position we asked scrcpy to open at this launch (if any). Used to learn
     // the decoration offset so the saved position round-trips exactly. See
@@ -2046,6 +2155,10 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
 
     tokio::spawn(async move {
         let mut current_audio_flag = audio_error_flag;
+        let mut current_decoder_error_flag = decoder_error_flag;
+        let mut current_decoder_decision = initial_decoder_decision;
+        let mut forced_decoder_retry_used = false;
+        let mut current_audio_override: Option<String> = None;
         let mut chain_index: usize = 0;
         let mut current_scrcpy_pid = initial_scrcpy_pid;
         let mut first_window_pos: Option<(i32, i32)> = None;
@@ -2127,25 +2240,68 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                     tokio::time::sleep(Duration::from_millis(250)).await;
 
                     let audio_failed = current_audio_flag.load(Ordering::SeqCst);
+                    let decoder_failed = current_decoder_error_flag.load(Ordering::SeqCst);
 
-                    if should_auto_fallback && audio_failed && chain_index < AUDIO_FALLBACK_CHAIN.len() {
+                    if forced_hardware_decoder && decoder_failed && !forced_decoder_retry_used {
+                        // An explicit GPU-only decoder may fail on a machine
+                        // lacking suitable drivers. Retry ONCE with scrcpy's
+                        // default auto (which has its own software fallback).
+                        // Do not retry on unrelated USB/ADB or codec errors.
+                        forced_decoder_retry_used = true;
+                        current_decoder_decision.flag = None;
+                        let _ = window_mon.emit("scrcpy-log",
+                            "[DECODER] GPU decoder failed. Retrying once with automatic/software fallback.".to_string());
+                        let _ = window_mon.emit("scrcpy-video-decoder", json!({
+                            "device": device_mon.as_str(), "mode": "retrying",
+                        }));
+                        let retry_args = build_scrcpy_args_with_decoder(
+                            &config_mon, video_dir_mon.clone(),
+                            current_audio_override.as_deref(), &current_decoder_decision,
+                        );
+                        match spawn_scrcpy_streams(
+                            &window_mon, &device_mon, &exe_path_mon, &adb_exe_path_mon,
+                            server_path_mon.as_deref(), &retry_args,
+                            config_mon.vsync.unwrap_or(true),
+                        ).await {
+                            Ok((new_child, new_audio_flag, new_decoder_flag)) => {
+                                current_scrcpy_pid = new_child.id();
+                                first_window_pos = None;
+                                last_window_pos = None;
+                                app_handle_mon.state::<ScrcpyState>()
+                                    .processes.lock().unwrap()
+                                    .insert(device_mon.clone(), new_child);
+                                current_audio_flag = new_audio_flag;
+                                current_decoder_error_flag = new_decoder_flag;
+                                continue;
+                            }
+                            Err(reason) => {
+                                let _ = window_mon.emit("scrcpy-log",
+                                    format!("[DECODER] Automatic fallback also failed: {reason}"));
+                                emit_window_pos_and_stop(&window_mon, &device_mon,
+                                    requested_pos, first_window_pos, last_window_pos);
+                                break;
+                            }
+                        }
+                    } else if should_auto_fallback && audio_failed && chain_index < AUDIO_FALLBACK_CHAIN.len() {
                         let next_codec = AUDIO_FALLBACK_CHAIN[chain_index];
                         let _ = window_mon.emit(
                             "scrcpy-log",
                             format!("[SYSTEM] Default audio codec failed, retrying with {}...", next_codec.to_uppercase()),
                         );
 
-                        let new_args = build_scrcpy_args(&config_mon, video_dir_mon.clone(), Some(next_codec));
+                        let new_args = build_scrcpy_args_with_decoder(&config_mon,
+                            video_dir_mon.clone(), Some(next_codec), &current_decoder_decision);
 
                         match spawn_scrcpy_streams(
                             &window_mon,
+                            &device_mon,
                             &exe_path_mon,
                             &adb_exe_path_mon,
                             server_path_mon.as_deref(),
                             &new_args,
                             config_mon.vsync.unwrap_or(true),
                         ).await {
-                            Ok((new_child, new_flag)) => {
+                            Ok((new_child, new_flag, new_decoder_flag)) => {
                                 current_scrcpy_pid = new_child.id();
                                 // New window: re-learn its decoration offset by
                                 // resampling this attempt from scratch. Clear the
@@ -2158,6 +2314,8 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                                 let state_mon = app_handle_mon.state::<ScrcpyState>();
                                 state_mon.processes.lock().unwrap().insert(device_mon.clone(), new_child);
                                 current_audio_flag = new_flag;
+                                current_decoder_error_flag = new_decoder_flag;
+                                current_audio_override = Some(next_codec.to_string());
                                 chain_index += 1;
                                 continue;
                             }
@@ -2221,6 +2379,8 @@ mod tests {
             hid_keyboard: None,
             hid_mouse: None,
             render_driver: None,
+            hardware_decoder: None,
+            print_fps: None,
             flex_display: None,
             camera_torch: None,
             camera_zoom: None,
@@ -2265,6 +2425,36 @@ mod tests {
         assert!(args.contains(&"-s".to_string()));
         assert!(args.contains(&"device1".to_string()));
         assert!(args.contains(&"--video-codec=h264".to_string()));
+    }
+
+    #[test]
+    fn decoder_flags_are_appended_only_from_validated_core_capabilities() {
+        use crate::video_decoder::{analyze_support, choose_decoder};
+        let mut config = base_config("mirror");
+        config.hardware_decoder = Some("d3d11va".into());
+        config.print_fps = Some(true);
+        let help = "    --hwdec=mode\n      modes: auto, disabled, d3d11va\n    --print-fps\n";
+        let old_core = analyze_support("scrcpy 4.1", help, "windows");
+        let old_choice = choose_decoder(config.hardware_decoder.as_deref(), true, Some(&old_core), true);
+        let old_args = build_scrcpy_args_with_decoder(&config, None, None, &old_choice);
+        assert!(!old_args.iter().any(|s| s.starts_with("--hwdec=")));
+        assert!(old_args.iter().any(|s| s == "--print-fps"));
+
+        let new_core = analyze_support("scrcpy 5.0.1", help, "windows");
+        let hw_choice = choose_decoder(config.hardware_decoder.as_deref(), true, Some(&new_core), true);
+        let gpu_args = build_scrcpy_args_with_decoder(&config, None, None, &hw_choice);
+        assert_eq!(gpu_args.iter().filter(|v| v.starts_with("--hwdec=")).count(), 1);
+        assert!(gpu_args.contains(&"--hwdec=d3d11va".to_string()));
+        assert_eq!(gpu_args.iter().filter(|v| *v == "--print-fps").count(), 1);
+        assert!(gpu_args.contains(&"--video-codec=h264".to_string()));
+
+        let fallback = choose_decoder(Some("auto"), true, Some(&new_core), true);
+        let fallback_args = build_scrcpy_args_with_decoder(&config, None, None, &fallback);
+        assert!(!fallback_args.iter().any(|s| s.starts_with("--hwdec=")));
+
+        let invalid = choose_decoder(Some("--help"), false, Some(&new_core), true);
+        assert!(build_scrcpy_args_with_decoder(&config, None, None, &invalid)
+            .iter().all(|s| s != "--hwdec=--help"));
     }
 
     #[test]

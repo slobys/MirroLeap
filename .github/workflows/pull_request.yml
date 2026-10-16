@@ -30,6 +30,9 @@ jobs:
       - name: Verify annotated capture IPC and PNG export
         run: python3 scripts/check_annotated_capture.py
 
+      - name: GPU decoder capability and fallback safety
+        run: python3 scripts/check_video_decoder.py
+
       - name: Lint Frontend
         run: npm run lint
 
@@ -82,6 +85,9 @@ jobs:
 
       - name: Verify annotated capture IPC and PNG export
         run: python3 scripts/check_annotated_capture.py
+
+      - name: GPU decoder capability and fallback safety
+        run: python3 scripts/check_video_decoder.py
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
