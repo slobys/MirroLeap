@@ -23,7 +23,7 @@ import type { ScrcpyConfig } from '../../src/hooks/useScrcpy';
 const tabs = [
   { id: 'mirror', text: '投屏参数', Icon: MonitorPlay },
   { id: 'devices', text: '连接与配对', Icon: Smartphone },
-  { id: 'behavior', text: '行为与快捷键', Icon: Keyboard },
+  { id: 'behavior', text: '行为设置', Icon: Keyboard },
   { id: 'appearance', text: '外观与引擎', Icon: Palette },
   { id: 'tools', text: '工具与日志', Icon: TerminalSquare },
 ] as const;

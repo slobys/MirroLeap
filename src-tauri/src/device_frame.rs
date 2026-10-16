@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri::webview::PageLoadEvent;
-use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Foundation::{HWND, POINT, RECT, LPARAM, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
     MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, SetWindowRgn,
@@ -29,7 +29,9 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
     GetWindowRect, GW_HWNDPREV,
-    IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow,
+    IsIconic, IsWindowVisible, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
+    GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST, HWND_TOPMOST, HWND_NOTOPMOST,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WM_KEYUP,
     HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
     SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
 };
@@ -1108,10 +1110,23 @@ fn send_video_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
     if unsafe { IsIconic(hwnd).as_bool() } {
         return Err("Restore the mirrored phone before using a shortcut".into());
     }
-    let _ = unsafe { SetForegroundWindow(hwnd) };
-    if unsafe { GetForegroundWindow() } != hwnd {
-        return Err("Could not safely focus the scrcpy video window".into());
+    // The floating WebView takes foreground focus when clicked. SendInput
+    // consequently goes to WebView2, not to the scrcpy SDL window. Post only
+    // hard-coded Alt shortcuts to the already PID-verified video HWND.
+    let scan_alt = 0x38_isize << 16;
+    unsafe {
+        PostMessageW(Some(hwnd), WM_SYSKEYDOWN, WPARAM(VK_LMENU.0 as usize),
+            LPARAM(scan_alt)).map_err(|e| e.to_string())?;
+        PostMessageW(Some(hwnd), WM_SYSKEYDOWN, WPARAM(key as usize),
+            LPARAM(1 << 29)).map_err(|e| e.to_string())?;
+        PostMessageW(Some(hwnd), WM_SYSKEYUP, WPARAM(key as usize),
+            LPARAM((1 << 29) | (1 << 30) | (1 << 31))).map_err(|e| e.to_string())?;
+        PostMessageW(Some(hwnd), WM_KEYUP, WPARAM(VK_LMENU.0 as usize),
+            LPARAM(scan_alt | (1 << 30) | (1 << 31)))
+            .map_err(|e| e.to_string())?;
     }
+    return Ok(());
+    #[allow(unreachable_code)]
     let keyboard = |key: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS| INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
@@ -1137,6 +1152,24 @@ fn send_video_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn toggle_video_topmost(app: &AppHandle, device: &str, hwnd: HWND) -> Result<bool, String> {
+    let was_topmost = (unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32
+        & WS_EX_TOPMOST.0) != 0;
+    let placement = if was_topmost { HWND_NOTOPMOST } else { HWND_TOPMOST };
+    unsafe { SetWindowPos(hwnd, Some(placement), 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) }
+        .map_err(|e| format!("Cannot toggle video topmost: {e}"))?;
+    for name in [label(device), toolbar_label(device)] {
+        if let Some(window) = app.get_webview_window(&name) {
+            if let Ok(handle) = window.hwnd() {
+                let _ = unsafe { SetWindowPos(handle, Some(placement), 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+            }
+        }
+    }
+    Ok(!was_topmost)
+}
+
 pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<bool, String> {
     let device = device_for_controls(app, caller)?;
     let pid = app.state::<ScrcpyState>().processes.lock()
@@ -1146,6 +1179,10 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
     let hwnd = crate::commands::find_window_by_pid(pid).ok_or("投屏窗口不可见")?;
 
     if action == "quick_status" { return Ok(is_quick_open(&device)); }
+    if action == "quick_top_status" {
+        return Ok((unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32
+            & WS_EX_TOPMOST.0) != 0);
+    }
     if action == "quick_toggle" {
         if !is_quick_open(&device) && is_inking(&device) {
             control_ink(app, &device, "ink_toggle").await?;
@@ -1157,6 +1194,9 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
     if action.starts_with("quick_") {
         if !is_quick_open(&device) {
             return Err("Open the phone quick-control panel first".into());
+        }
+        if action == "quick_top_toggle" {
+            return toggle_video_topmost(app, &device, hwnd);
         }
         if matches!(action, "quick_fullscreen" | "quick_rotate" | "quick_paste" | "quick_screen_off") {
             send_video_shortcut(hwnd, action)?;
@@ -1182,14 +1222,14 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             Ok(false)
         }
         "drag" => {
-            begin_drag(device.clone(), hwnd)?;
+            begin_drag(app, device.clone(), hwnd)?;
             Ok(is_inking(&device))
         }
         _ => Err("Unsupported device-frame action".into()),
     }
 }
 
-fn begin_drag(device: String, hwnd: HWND) -> Result<(), String> {
+fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String> {
     let cursor = pointer().ok_or("Could not read mouse position")?;
     let mut rect = RECT::default();
     unsafe { GetWindowRect(hwnd, &mut rect) }.map_err(|e| e.to_string())?;
@@ -1203,6 +1243,18 @@ fn begin_drag(device: String, hwnd: HWND) -> Result<(), String> {
     // HWND is kept as an integer across await boundaries (Win32 HWND wrappers
     // carry pointer types that must not be held across Send async suspension).
     let hwnd_value = hwnd.0 as usize;
+    let companions: Vec<(usize, i32, i32)> = [label(&device), toolbar_label(&device)]
+        .iter()
+        .filter_map(|name| app.get_webview_window(name))
+        .filter_map(|window| window.hwnd().ok())
+        .filter_map(|handle| {
+            let mut current = RECT::default();
+            unsafe { GetWindowRect(handle, &mut current) }.ok()?;
+            Some((handle.0 as usize, current.left, current.top))
+        })
+        .collect();
+    let start_x = rect.left;
+    let start_y = rect.top;
     let dx = cursor.0 - rect.left;
     let dy = cursor.1 - rect.top;
     tokio::spawn(async move {
@@ -1214,10 +1266,22 @@ fn begin_drag(device: String, hwnd: HWND) -> Result<(), String> {
             if !held { break; }
             let Some((x,y)) = pointer() else { continue };
             let video = HWND(hwnd_value as *mut _);
+            let new_x = x-dx;
+            let new_y = y-dy;
             let _ = unsafe {
-                SetWindowPos(video, None, x-dx, y-dy, 0, 0,
+                SetWindowPos(video, None, new_x, new_y, 0, 0,
                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
             };
+            // Move the transparent phone skin and floating toolbar in the
+            // same 12ms tick as SDL; the independent 50ms health monitor is
+            // too slow and visibly separates the bezel during mouse drag.
+            for &(window, left, top) in &companions {
+                let handle = HWND(window as *mut _);
+                let _ = unsafe { SetWindowPos(handle, None,
+                    left.saturating_add(new_x.saturating_sub(start_x)),
+                    top.saturating_add(new_y.saturating_sub(start_y)), 0, 0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) };
+            }
         }
         if let Ok(mut pending) = drags().lock() { pending.remove(&device); }
         // Return keyboard focus to the live video when the mouse is released.

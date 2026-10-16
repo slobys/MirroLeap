@@ -400,7 +400,7 @@ function App() {
                   {([
                     { id: 'mirror' as const, Icon: MonitorPlay, zh: '投屏参数', en: 'Capture' },
                     { id: 'devices' as const, Icon: Smartphone, zh: '连接与配对', en: 'Connections' },
-                    { id: 'behavior' as const, Icon: Keyboard, zh: '行为与快捷键', en: 'Behavior' },
+                    { id: 'behavior' as const, Icon: Keyboard, zh: '行为设置', en: 'Behavior settings' },
                     { id: 'appearance' as const, Icon: Palette, zh: '外观与引擎', en: 'Appearance' },
                     { id: 'tools' as const, Icon: TerminalSquare, zh: '工具与日志', en: 'Tools & logs' },
                   ]).map(({id, Icon, zh, en}) => (

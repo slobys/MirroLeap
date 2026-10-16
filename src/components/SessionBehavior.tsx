@@ -191,13 +191,6 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                 </div>
                 <div className="flex flex-col gap-1">
                     <Toggle
-                        checked={config.alwaysOnTop || false}
-                        onChange={(v) => handleChange('alwaysOnTop', v)}
-                        icon={Layers}
-                        label={t('sessionBehavior.alwaysOnTop')}
-                        tooltip={t('sessionBehavior.alwaysOnTopTooltip')}
-                    />
-                    <Toggle
                         checked={config.fullscreen || false}
                         onChange={(v) => handleChange('fullscreen', v)}
                         icon={Maximize}

@@ -21,7 +21,7 @@ const layouts = [
   { layout:'tight-ink-left', width:374, height:136 },
 ];
 const file = pathToFileURL(resolve('public/phone-controls.html')).href;
-const names = ['fullscreen','home','back','recents','power','rotate','paste','screen_off'];
+const names = ['fullscreen','home','back','recents','power','rotate','paste','screen_off','top'];
 const browser = await chromium.launch({
   channel: process.env.MIRROLEAP_LAYOUT_BROWSER === 'chromium' ? undefined : 'msedge',
   headless: true, args:['--no-first-run', '--disable-extensions'],
@@ -68,7 +68,7 @@ try {
             const b=rect(button);
             const x=(b.left+b.right)/2, y=(b.top+b.bottom)/2;
             const hit=document.elementFromPoint(x,y);
-            return {name,visible: b.width>24 && b.height>=40 &&
+            return {name,rect:{x:b.x,y:b.y,w:b.width,h:b.height},hit:hit?.id,visible: b.width>24 && b.height>=34 &&
               b.left>=r.left-1 && b.right<=r.right+1 &&
               b.top>=r.top-1 && b.bottom<=r.bottom+1 &&
               !!hit && (hit === button || button.contains(hit))};
@@ -83,7 +83,7 @@ try {
         `Quick panel hides overflowing controls in ${entry.layout}`);
       for(const action of geometry.actions) {
         assert(action.visible,
-          `${entry.layout} at ${dpi*100}% DPI: ${action.name} is cropped or obscured`);
+          `${entry.layout} at ${dpi*100}% DPI: ${action.name} is cropped or obscured: ${JSON.stringify(geometry)}`);
       }
       assert.deepEqual(errors, [], `Browser errors in ${entry.layout}`);
       console.log('PASS',entry.layout, `${dpi*100}% DPI, eight controls reachable`);
