@@ -937,7 +937,7 @@ pub(crate) async fn set_presentation_snapshot(
         let actual = capture_screen(pid).ok_or("Restore the phone projection first")?;
         actual.screen.width as f64 / actual.screen.height as f64
     };
-    if (screenshot_ratio / video_ratio - 1.0).abs() > .06 {
+    if (screenshot_ratio / video_ratio - 1.0).abs() > 0.06 {
         return Err("Phone rotated while capturing snapshot. Wait for landscape to settle and retry.".into());
     }
     let orientation = if width > height { "landscape" } else { "portrait" };
