@@ -141,6 +141,19 @@ pub struct ToolbarPlacement {
     pub zoom_percent: u32,
 }
 
+/// Native HWND companions do not need a SetWindowPos call every 50 ms.
+/// Only actual motion, visibility restoration, unexpected z-order or a
+/// low-frequency health check require the compositor to be repositioned.
+pub fn companion_needs_reposition(
+    previous: Option<ScreenRect>,
+    desired: ScreenRect,
+    visible: bool,
+    correctly_stacked: bool,
+    health_due: bool,
+) -> bool {
+    !visible || previous != Some(desired) || !correctly_stacked || health_due
+}
+
 /// All desktop/frame coordinates are Win32 PHYSICAL pixels, but WebView CSS
 /// sizes are DIPs. Multiply the control geometry by the video window DPI so
 /// that e.g. a 62 CSS-pixel rail is not clipped to 41 CSS pixels at 150%.
@@ -391,6 +404,18 @@ mod tests {
         assert!(placement.rect.y >= desktop.y);
         assert!(placement.rect.y + placement.rect.height <= 1080);
         assert!(placement.rect.x > frame.x + frame.width);
+    }
+
+    #[test]
+    fn stable_companion_does_not_reorder_windows_on_every_follow_tick() {
+        let current = ScreenRect { x: 300, y: 40, width: 500, height: 700 };
+        assert!(!companion_needs_reposition(Some(current), current, true, true, false));
+        assert!(companion_needs_reposition(None, current, true, true, false));
+        assert!(companion_needs_reposition(Some(current), current, false, true, false));
+        assert!(companion_needs_reposition(Some(current), current, true, false, false));
+        assert!(companion_needs_reposition(Some(current), current, true, true, true));
+        let moved = ScreenRect { x: 305, ..current };
+        assert!(companion_needs_reposition(Some(current), moved, true, true, false));
     }
 
     #[test]
