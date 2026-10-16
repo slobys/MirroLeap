@@ -16,21 +16,24 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri::webview::PageLoadEvent;
-use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Foundation::{HWND, POINT, RECT, LPARAM, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
     MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, SetWindowRgn,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD,
-    KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_LBUTTON, VK_LMENU,
+    KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
+    VK_LBUTTON, VK_LMENU, VK_F11,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
     GetWindowRect, GW_HWNDPREV,
-    IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow,
-    HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+    IsIconic, IsWindowVisible, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
+    WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    HWND_TOP, HWND_TOPMOST, HWND_NOTOPMOST,
+    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
     SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
 };
 
@@ -45,6 +48,14 @@ static PRESENTATION_MODES: OnceLock<Mutex<HashMap<String, &'static str>>> = Once
 static PRESENTATION_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static QUICK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static TOPMOST_ENABLED: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+fn topmost_sessions() -> &'static Mutex<HashMap<String, bool>> {
+    TOPMOST_ENABLED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+fn is_topmost(device: &str) -> bool {
+    topmost_sessions().lock().ok()
+        .and_then(|states| states.get(device).copied()).unwrap_or(false)
+}
 fn quick_sessions() -> &'static Mutex<HashSet<String>> {
     QUICK_ENABLED.get_or_init(|| Mutex::new(HashSet::new()))
 }
@@ -541,7 +552,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let foreground = unsafe { GetForegroundWindow() };
         // Quick Android navigation uses the same native expanded rail
         // geometry as the pen palette, but never intercepts phone touches.
-        let inking = is_inking(&device) || is_quick_open(&device);
+        let drawing = is_inking(&device);
+        let expanded = drawing || is_quick_open(&device);
         let presenting = presentation_mode(&device) != "off";
         let active = foreground == hwnd
             || toolbar_hwnd == Some(foreground)
@@ -559,7 +571,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 // Tauri/WebView2 may reset HWND hit-testing across hide/show.
                 // Presenter and ink are the only modes allowed to intercept
                 // Android mouse events after the SDL window is restored.
-                let _ = overlay.set_ignore_cursor_events(!(inking || presenting));
+                // Opening the shortcut flyout must never capture Android taps.
+                let _ = overlay.set_ignore_cursor_events(!(drawing || presenting));
                 shell_visible = true;
                 previous_frame = None;
                 // Re-establish HWND z-order AFTER making WebView visible.
@@ -583,7 +596,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         };
         let shell_health_due = shell_position_checked_at
             .map(|last| last.elapsed() > Duration::from_secs(2)).unwrap_or(true);
-        if shell_visible && companion_needs_reposition(
+        if shell_visible && !is_dragging(&device) && companion_needs_reposition(
             previous_frame.map(|rect| ScreenRect {
                 x: rect.x, y: rect.y, width: rect.width, height: rect.height,
             }),
@@ -622,7 +635,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // hover over the phone bezel should STILL reveal its control handle.
         let recent_restore = restored_at.map(|t| t.elapsed() < Duration::from_millis(2200))
             .unwrap_or(false);
-        let wanted = close_to_edge || dragging || inking || presenting || inside_controls || recent_restore;
+        let wanted = close_to_edge || dragging || expanded || presenting || inside_controls || recent_restore;
         if wanted { last_nearby = Some(Instant::now()); }
         let lingering = last_nearby.map(|t| t.elapsed() < Duration::from_millis(550))
             .unwrap_or(false);
@@ -646,7 +659,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             // The top of the compact rail is stable as the phone moves; the
             // expanded flyout is allowed to move UP to fit within the desktop.
             let top = frame.y + controls_y_offset.unwrap_or(0);
-            let Some(placement) = toolbar_placement(frame, top, desktop, inking, dpi) else {
+            let Some(placement) = toolbar_placement(frame, top, desktop, expanded, dpi) else {
                 // If scrcpy has no visible intersection with the monitor's
                 // work area, hide controls rather than show a floating ghost.
                 if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
@@ -684,7 +697,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 };
                 let health_due = toolbar_position_checked_at
                     .map(|last| last.elapsed() > Duration::from_secs(2)).unwrap_or(true);
-                if companion_needs_reposition(
+                if !dragging && companion_needs_reposition(
                     controls_rect, rect, actually_visible && !newly_shown,
                     toolbar_stacked, health_due,
                 ) {
@@ -1095,46 +1108,138 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
 
 /// The dedicated phone-controls-* window is the ONLY trusted caller.
 /// The SVG overlay captures pointer events solely during annotation mode.
+/// scrcpy uses SDL scan codes and requires a shortcut modifier for device
+/// controls. F11 is its documented modifier-free fullscreen key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ScrcpyHotkey {
+    vk: u16,
+    scan: u16,
+    alt: bool,
+}
+fn scrcpy_hotkey(action: &str) -> Option<ScrcpyHotkey> {
+    match action {
+        "quick_fullscreen" => Some(ScrcpyHotkey { vk: VK_F11.0, scan: 0x57, alt: false }),
+        "quick_rotate" => Some(ScrcpyHotkey { vk: b'R' as u16, scan: 0x13, alt: true }),
+        "quick_paste" => Some(ScrcpyHotkey { vk: b'V' as u16, scan: 0x2f, alt: true }),
+        "quick_screen_off" => Some(ScrcpyHotkey { vk: b'O' as u16, scan: 0x18, alt: true }),
+        _ => None,
+    }
+}
+
 fn send_video_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
-    // scrcpy's default MOD + key shortcuts: F/R/V/O. Only the matched
-    // scrcpy SDL HWND may receive synthetic keys, never an arbitrary app.
-    let key = match action {
-        "quick_fullscreen" => b'F',
-        "quick_rotate" => b'R',
-        "quick_paste" => b'V',
-        "quick_screen_off" => b'O',
-        _ => return Err("Unsupported scrcpy shortcut".into()),
-    };
+    let hotkey = scrcpy_hotkey(action).ok_or("Unknown scrcpy shortcut")?;
     if unsafe { IsIconic(hwnd).as_bool() } {
         return Err("Restore the mirrored phone before using a shortcut".into());
     }
+    // Clicking the OTHER WebView2 toolbar gives it focus, not the scrcpy SDL
+    // window. The previous code checked foreground immediately after
+    // SetForegroundWindow() and rejected every action on some PCs. Give
+    // Windows up to 120ms to acknowledge focus; use strictly targeted
+    // WM_KEY messages as a fallback instead of sending hotkeys to the
+    // wrong foreground program.
     let _ = unsafe { SetForegroundWindow(hwnd) };
-    if unsafe { GetForegroundWindow() } != hwnd {
-        return Err("Could not safely focus the scrcpy video window".into());
+    let mut focused = false;
+    for _ in 0..8 {
+        if unsafe { GetForegroundWindow() } == hwnd {
+            focused = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(15));
     }
-    let keyboard = |key: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS| INPUT {
+    if !focused {
+        let post = |vk: u16, scan: u16, down: bool, alt_held: bool| -> Result<(), String> {
+            let message = match (down, alt_held) {
+                (true, true) => WM_SYSKEYDOWN,
+                (false, true) => WM_SYSKEYUP,
+                (true, false) => WM_KEYDOWN,
+                (false, false) => WM_KEYUP,
+            };
+            let bits: u32 = 1 | (u32::from(scan) << 16)
+                | (if alt_held { 1 << 29 } else { 0 })
+                | (if down { 0 } else { (1 << 30) | (1 << 31) });
+            unsafe { PostMessageW(Some(hwnd), message, WPARAM(vk as usize), LPARAM(bits as isize)) }
+                .map_err(|e| format!("Could not deliver shortcut to the scrcpy SDL window: {e}"))
+        };
+        if hotkey.alt {
+            post(VK_LMENU.0, 0x38, true, false)?;
+        }
+        post(hotkey.vk, hotkey.scan, true, hotkey.alt)?;
+        post(hotkey.vk, hotkey.scan, false, hotkey.alt)?;
+        if hotkey.alt {
+            post(VK_LMENU.0, 0x38, false, true)?;
+        }
+        return Ok(());
+    }
+
+    // Use physical scan codes, not only translated virtual-key values, so
+    // SDL receives the expected ALT+key even with different keyboard layouts.
+    let keyboard = |scan: u16, keyup: bool| INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
-                wVk: key,
-                wScan: 0,
-                dwFlags: flags,
+                wVk: Default::default(),
+                wScan: scan,
+                dwFlags: if keyup { KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP }
+                    else { KEYEVENTF_SCANCODE },
                 time: 0,
                 dwExtraInfo: 0,
             },
         },
     };
-    let inputs = [
-        keyboard(VK_LMENU, KEYBD_EVENT_FLAGS(0)),
-        keyboard(VIRTUAL_KEY(key as u16), KEYBD_EVENT_FLAGS(0)),
-        keyboard(VIRTUAL_KEY(key as u16), KEYEVENTF_KEYUP),
-        keyboard(VK_LMENU, KEYEVENTF_KEYUP),
-    ];
+    let mut inputs = Vec::with_capacity(4);
+    if hotkey.alt { inputs.push(keyboard(0x38, false)); }
+    inputs.push(keyboard(hotkey.scan, false));
+    inputs.push(keyboard(hotkey.scan, true));
+    if hotkey.alt { inputs.push(keyboard(0x38, true)); }
     let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
     if sent != inputs.len() as u32 {
         return Err("Windows refused to send the scrcpy shortcut".into());
     }
     Ok(())
+}
+
+fn toggle_phone_topmost(app: &AppHandle, device: &str, hwnd: HWND) -> Result<bool, String> {
+    let overlay = app.get_webview_window(&label(device))
+        .ok_or("Phone bezel is no longer available")?;
+    let toolbar = app.get_webview_window(&toolbar_label(device))
+        .ok_or("Phone control bar is no longer available")?;
+    let previous = is_topmost(device);
+    let enable = !previous;
+    let apply = |enabled: bool| -> Result<(), String> {
+        // All THREE HWNDs form one phone; changing only scrcpy would leave
+        // the frame/toolbar behind, or paint a floating ghost above other apps.
+        let z = if enabled { HWND_TOPMOST } else { HWND_NOTOPMOST };
+        unsafe {
+            SetWindowPos(hwnd, Some(z), 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+        }.map_err(|e| format!("Could not update scrcpy topmost status: {e}"))?;
+        overlay.set_always_on_top(enabled)
+            .map_err(|e| format!("Could not update phone frame: {e}"))?;
+        toolbar.set_always_on_top(enabled)
+            .map_err(|e| format!("Could not update phone controls: {e}"))?;
+        Ok(())
+    };
+    if let Err(error) = apply(enable) {
+        let _ = apply(previous);
+        return Err(error);
+    }
+    topmost_sessions().lock().map_err(|e| e.to_string())?
+        .insert(device.to_owned(), enable);
+    let _ = app.emit("mirroleap-window-topmost", serde_json::json!({
+        "device": device, "enabled": enable,
+    }));
+    Ok(enable)
+}
+
+fn dragged_companion_position(
+    initial_video: (i32, i32), initial_companion: (i32, i32), target_video: (i32, i32),
+) -> (i32, i32) {
+    // Preserve each HWND's physical offset from the SDL video on every drag
+    // tick. The offset includes the transparent bezel's overscan.
+    (
+        target_video.0.saturating_add(initial_companion.0.saturating_sub(initial_video.0)),
+        target_video.1.saturating_add(initial_companion.1.saturating_sub(initial_video.1)),
+    )
 }
 
 pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<bool, String> {
@@ -1146,6 +1251,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
     let hwnd = crate::commands::find_window_by_pid(pid).ok_or("投屏窗口不可见")?;
 
     if action == "quick_status" { return Ok(is_quick_open(&device)); }
+    if action == "quick_topmost_status" { return Ok(is_topmost(&device)); }
     if action == "quick_toggle" {
         if !is_quick_open(&device) && is_inking(&device) {
             control_ink(app, &device, "ink_toggle").await?;
@@ -1158,8 +1264,14 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         if !is_quick_open(&device) {
             return Err("Open the phone quick-control panel first".into());
         }
+        if action == "quick_topmost" {
+            return toggle_phone_topmost(app, &device, hwnd);
+        }
         if matches!(action, "quick_fullscreen" | "quick_rotate" | "quick_paste" | "quick_screen_off") {
             send_video_shortcut(hwnd, action)?;
+            let _ = app.emit("scrcpy-log", format!(
+                "[QUICK] Sent {action} keyboard event to the selected scrcpy window ({device})"
+            ));
         } else {
             crate::commands::phone_toolbar_keyevent(&device, action).await?;
         }
@@ -1182,27 +1294,48 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             Ok(false)
         }
         "drag" => {
-            begin_drag(device.clone(), hwnd)?;
+            begin_drag(app, device.clone(), hwnd)?;
             Ok(is_inking(&device))
         }
         _ => Err("Unsupported device-frame action".into()),
     }
 }
 
-fn begin_drag(device: String, hwnd: HWND) -> Result<(), String> {
+fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String> {
     let cursor = pointer().ok_or("Could not read mouse position")?;
     let mut rect = RECT::default();
     unsafe { GetWindowRect(hwnd, &mut rect) }.map_err(|e| e.to_string())?;
+
+    // Move scrcpy, its transparent phone bezel and the toolbar at the SAME
+    // 12ms tick. The normal frame observer only checks every 50ms, which
+    // otherwise exposes 20-40px gaps on fast horizontal mouse movement.
+    let overlay = app.get_webview_window(&label(&device))
+        .ok_or("Phone frame is unavailable during drag")?;
+    let toolbar = app.get_webview_window(&toolbar_label(&device))
+        .ok_or("Phone controls are unavailable during drag")?;
+    let frame_hwnd = overlay.hwnd().map_err(|e| e.to_string())?;
+    let toolbar_hwnd = toolbar.hwnd().map_err(|e| e.to_string())?;
+    let mut frame_rect = RECT::default();
+    let mut toolbar_rect = RECT::default();
+    unsafe { GetWindowRect(frame_hwnd, &mut frame_rect) }
+        .map_err(|e| e.to_string())?;
+    unsafe { GetWindowRect(toolbar_hwnd, &mut toolbar_rect) }
+        .map_err(|e| e.to_string())?;
     {
+        // Reserve the drag only after all three HWNDs are verified. Otherwise
+        // a missing companion would leave the device stuck in 'dragging'.
         let mut pending = drags().lock().map_err(|e| e.to_string())?;
         if !pending.insert(device.clone()) {
             return Ok(());
         }
     }
-
-    // HWND is kept as an integer across await boundaries (Win32 HWND wrappers
-    // carry pointer types that must not be held across Send async suspension).
+    // HWND is kept as a number across async suspension.
     let hwnd_value = hwnd.0 as usize;
+    let frame_value = frame_hwnd.0 as usize;
+    let toolbar_value = toolbar_hwnd.0 as usize;
+    let initial_video = (rect.left, rect.top);
+    let initial_frame = (frame_rect.left, frame_rect.top);
+    let initial_toolbar = (toolbar_rect.left, toolbar_rect.top);
     let dx = cursor.0 - rect.left;
     let dy = cursor.1 - rect.top;
     tokio::spawn(async move {
@@ -1214,10 +1347,24 @@ fn begin_drag(device: String, hwnd: HWND) -> Result<(), String> {
             if !held { break; }
             let Some((x,y)) = pointer() else { continue };
             let video = HWND(hwnd_value as *mut _);
-            let _ = unsafe {
-                SetWindowPos(video, None, x-dx, y-dy, 0, 0,
-                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
-            };
+            let new_left = x.saturating_sub(dx);
+            let new_top = y.saturating_sub(dy);
+            let flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+            if unsafe { SetWindowPos(video, None, new_left, new_top, 0, 0, flags) }.is_ok() {
+                let frame = HWND(frame_value as *mut _);
+                let controls = HWND(toolbar_value as *mut _);
+                let frame_pos = dragged_companion_position(
+                    initial_video, initial_frame, (new_left, new_top));
+                let toolbar_pos = dragged_companion_position(
+                    initial_video, initial_toolbar, (new_left, new_top));
+                if unsafe { SetWindowPos(frame, None, frame_pos.0, frame_pos.1, 0, 0, flags) }.is_err()
+                    || unsafe { SetWindowPos(controls, None, toolbar_pos.0, toolbar_pos.1, 0, 0, flags) }.is_err()
+                {
+                    // Fall back to the regular position watcher instead of
+                    // leaving any of the three phone windows detached.
+                    break;
+                }
+            }
         }
         if let Ok(mut pending) = drags().lock() { pending.remove(&device); }
         // Return keyboard focus to the live video when the mouse is released.
@@ -1300,10 +1447,14 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
     };
 
     tokio::spawn(follow(app.clone(), device.to_owned(), overlay, toolbar));
+    if let Ok(mut states) = topmost_sessions().lock() {
+        states.insert(device.to_owned(), always_on_top);
+    }
     Ok(())
 }
 
 pub fn close(app: &AppHandle, device: &str) {
+    if let Ok(mut states) = topmost_sessions().lock() { states.remove(device); }
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
     if let Ok(mut set) = ink_sessions().lock() { set.remove(device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(device); }
@@ -1315,6 +1466,41 @@ pub fn close(app: &AppHandle, device: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moving_phone_left_or_right_keeps_both_companion_offsets() {
+        let video = (700, 110);
+        let frame = (688, 98);
+        let controls = (1420, 250);
+        for target in [(100, 110), (1480, 110), (760, 240), (12, -20)] {
+            let shell = dragged_companion_position(video, frame, target);
+            let toolbar = dragged_companion_position(video, controls, target);
+            assert_eq!((shell.0 - target.0, shell.1 - target.1), (-12, -12));
+            assert_eq!((toolbar.0 - target.0, toolbar.1 - target.1), (720, 140));
+        }
+    }
+
+    #[test]
+    fn video_quick_actions_use_only_documented_scrcpy_keys() {
+        assert_eq!(scrcpy_hotkey("quick_fullscreen"),
+            Some(ScrcpyHotkey { vk: VK_F11.0, scan: 0x57, alt: false }));
+        for (action, vk, scan) in [
+            ("quick_rotate", b'R', 0x13),
+            ("quick_paste", b'V', 0x2f),
+            ("quick_screen_off", b'O', 0x18),
+        ] {
+            let key = scrcpy_hotkey(action).expect(action);
+            assert!(key.alt, "scrcpy action requires a modifier: {action}");
+            assert_eq!(key.vk, vk as u16);
+            assert_eq!(key.scan, scan);
+        }
+        for action in [
+            "quick_quit", "quick_close", "quick_topmost", "quick_topmost_status",
+            "quick_home", "quick_power", "quick_toggle", "quick_paste;exit",
+        ] {
+            assert!(scrcpy_hotkey(action).is_none(), "unsafe hotkey: {action}");
+        }
+    }
 
     #[test]
     fn presenter_modes_are_strict_and_off_does_not_capture_input() {

@@ -18,7 +18,7 @@ import ThemedModal from "./components/ThemedModal";
 import { useScrcpy } from "./hooks/useScrcpy";
 import { getVersion } from '@tauri-apps/api/app';
 import { useI18n } from "./i18n";
-import { ArrowLeft, Keyboard, MonitorPlay, Palette, Settings2, Smartphone, TerminalSquare } from 'lucide-react';
+import { ArrowLeft, SlidersHorizontal, MonitorPlay, Palette, Settings2, Smartphone, TerminalSquare } from 'lucide-react';
 import './settings-center.css';
 
 type SettingsTab = 'devices' | 'mirror' | 'behavior' | 'appearance' | 'tools';
@@ -97,7 +97,7 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("5.0.3");
+  const [appVersion, setAppVersion] = useState("5.0.4");
   // Keep the daily workflow lightweight. Older saved scrcpy_* options are
   // still read by useScrcpy, and every advanced feature remains in Settings.
   const [view, setView] = useState<'home' | 'settings'>('home');
@@ -400,7 +400,7 @@ function App() {
                   {([
                     { id: 'mirror' as const, Icon: MonitorPlay, zh: '投屏参数', en: 'Capture' },
                     { id: 'devices' as const, Icon: Smartphone, zh: '连接与配对', en: 'Connections' },
-                    { id: 'behavior' as const, Icon: Keyboard, zh: '行为与快捷键', en: 'Behavior' },
+                    { id: 'behavior' as const, Icon: SlidersHorizontal, zh: '行为设置', en: 'Behavior settings' },
                     { id: 'appearance' as const, Icon: Palette, zh: '外观与引擎', en: 'Appearance' },
                     { id: 'tools' as const, Icon: TerminalSquare, zh: '工具与日志', en: 'Tools & logs' },
                   ]).map(({id, Icon, zh, en}) => (

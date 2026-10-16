@@ -63,6 +63,15 @@ try {
           fits, noRailOverlap,
           overflowing:panel.scrollWidth - panel.clientWidth > 1 ||
             panel.scrollHeight - panel.clientHeight > 1,
+          pin:(() => {
+            const button=document.getElementById('quick-pin');
+            const b=rect(button);
+            const hit=document.elementFromPoint((b.left+b.right)/2,(b.top+b.bottom)/2);
+            return b.height >= 20 && b.width >= 45 &&
+              b.left >= r.left-1 && b.right <= r.right+1 &&
+              b.top >= r.top-1 && b.bottom <= r.bottom+1 &&
+              !!hit && (hit === button || button.contains(hit));
+          })(),
           actions:actions.map(name => {
             const button=document.getElementById('quick-'+name);
             const b=rect(button);
@@ -81,6 +90,7 @@ try {
         `Quick panel covers window/ink controls in ${entry.layout}`);
       assert(!geometry.overflowing,
         `Quick panel hides overflowing controls in ${entry.layout}`);
+      assert(geometry.pin, `Pin-to-top button is cropped in ${entry.layout}`);
       for(const action of geometry.actions) {
         assert(action.visible,
           `${entry.layout} at ${dpi*100}% DPI: ${action.name} is cropped or obscured`);
