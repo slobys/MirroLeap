@@ -12,6 +12,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Window};
 
 const RELEASE_API: &str = "https://api.github.com/repos/slobys/MirroLeap/releases/latest";
+const PREVIEW_RELEASES_API: &str = "https://api.github.com/repos/slobys/MirroLeap/releases?per_page=10";
 const RELEASE_URL_BASE: &str = "https://github.com/slobys/MirroLeap/releases/tag/";
 const ASSET_URL_BASE: &str = "https://github.com/slobys/MirroLeap/releases/download/";
 const MAX_METADATA_BYTES: usize = 512 * 1024;
@@ -126,12 +127,27 @@ fn interpret_release(current: &str, release: &Value) -> Result<AppUpdateInfo, St
     })
 }
 
-#[tauri::command]
-pub async fn check_mirroleap_update(
-    window: Window,
-    app_handle: AppHandle,
-) -> Result<AppUpdateInfo, String> {
-    if window.label() != "main" { return Err("main_window_only".into()); }
+/// Explicit opt-in preview channel. The stable check above remains unchanged
+/// and never trusts prereleases. Only safe numeric tags and this repository's
+/// canonical release assets can appear in the preview list.
+fn interpret_preview_releases(current: &str, releases: &Value) -> Result<AppUpdateInfo, String> {
+    let releases = releases.as_array().ok_or("invalid_release")?;
+    let release = releases.iter().take(10).filter(|release| {
+        release.get("draft").and_then(Value::as_bool) == Some(false) &&
+        release.get("prerelease").and_then(Value::as_bool) == Some(true)
+    }).filter_map(|release| {
+        let tag = release.get("tag_name")?.as_str()?;
+        if !tag.starts_with('v') { return None; }
+        let version = stable_version(tag)?;
+        Some((version, release))
+    }).max_by_key(|(version, _)| *version)
+        .map(|(_, release)| release).ok_or("release_unavailable")?;
+    let mut parsed = release.clone();
+    parsed["prerelease"] = Value::Bool(false);
+    interpret_release(current, &parsed)
+}
+
+async fn fetch_release_json(endpoint: &'static str) -> Result<Value, String> {
     let client = reqwest::Client::builder()
         .user_agent("MirroLeap-Desktop-UpdateCheck")
         .redirect(reqwest::redirect::Policy::none())
@@ -139,7 +155,7 @@ pub async fn check_mirroleap_update(
         .timeout(Duration::from_secs(12))
         .build().map_err(|_| "network_error")?;
 
-    let mut response = client.get(RELEASE_API)
+    let mut response = client.get(endpoint)
         .header("Accept", "application/vnd.github+json")
         .send().await.map_err(|e| {
             if e.is_timeout() { "timeout" } else { "network_error" }
@@ -162,9 +178,29 @@ pub async fn check_mirroleap_update(
         }
         payload.extend_from_slice(&chunk);
     }
-    let data: Value = serde_json::from_slice(&payload).map_err(|_| "invalid_release")?;
+    serde_json::from_slice(&payload).map_err(|_| "invalid_release".into())
+}
+
+#[tauri::command]
+pub async fn check_mirroleap_update(
+    window: Window,
+    app_handle: AppHandle,
+) -> Result<AppUpdateInfo, String> {
+    if window.label() != "main" { return Err("main_window_only".into()); }
+    let data = fetch_release_json(RELEASE_API).await?;
     let local = app_handle.package_info().version.to_string();
     interpret_release(&local, &data)
+}
+
+#[tauri::command]
+pub async fn check_mirroleap_preview_update(
+    window: Window,
+    app_handle: AppHandle,
+) -> Result<AppUpdateInfo, String> {
+    if window.label() != "main" { return Err("main_window_only".into()); }
+    let data = fetch_release_json(PREVIEW_RELEASES_API).await?;
+    let local = app_handle.package_info().version.to_string();
+    interpret_preview_releases(&local, &data)
 }
 
 #[cfg(test)]
@@ -229,6 +265,30 @@ mod tests {
             release["tag_name"] = json!(tag);
             assert!(interpret_release("4.8.0", &release).is_err(), "{tag}");
         }
+    }
+
+    #[test]
+    fn preview_channel_selects_only_canonical_non_draft_prereleases() {
+        let mut preview = sample_release();
+        preview["tag_name"] = json!("v5.0.4");
+        preview["prerelease"] = json!(true);
+        let mut invalid = preview.clone();
+        invalid["tag_name"] = json!("v5.99.0/../../evil");
+        let mut draft = preview.clone();
+        draft["draft"] = json!(true);
+        draft["tag_name"] = json!("v6.0.0");
+        let mut old = preview.clone();
+        old["tag_name"] = json!("v5.0.3");
+        let selected = interpret_preview_releases("5.0.4", &json!([
+            invalid, draft, old, preview
+        ])).unwrap();
+        assert_eq!(selected.latest_version, "5.0.4");
+        assert_eq!(selected.status, "up_to_date");
+        assert_eq!(selected.release_url,
+            "https://github.com/slobys/MirroLeap/releases/tag/v5.0.4");
+        assert_eq!(interpret_preview_releases("5.0.2", &json!([
+            {"tag_name":"v5.0.5", "prerelease":true, "draft":false}
+        ])).unwrap().status, "update_available");
     }
 
     #[test]

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Cross-layer safety gate for the read-only MirroLeap app updater.
+"""Cross-layer safety gate for MirroLeap release metadata channels.
 
-This is not a digital signature validator or a Windows user acceptance test.
-It enforces the intended absence of silent installer actions and arbitrary
-release URLs until a separately signed Tauri updater is designed.
+The Rust metadata checker is read-only, pinned to GitHub endpoints, and
+may never execute installers. Signed auto-install is separately controlled
+by the Tauri updater plugin and allowed only for eligible NSIS installs.
 """
 from pathlib import Path
 import json
@@ -25,8 +25,10 @@ assert cfg["identifier"] == "com.kb.scrcpy-gui-v3", "Preserve existing Windows a
 assert pkg["version"] == cfg["version"]
 assert re.search(r'(?m)^version = "' + re.escape(pkg["version"]) + r'"', crate)
 assert 'app_update::check_mirroleap_update' in lib
+assert 'app_update::check_mirroleap_preview_update' in lib
 assert 'window.label() != "main"' in backend
 assert 'https://api.github.com/repos/slobys/MirroLeap/releases/latest' in backend
+assert 'https://api.github.com/repos/slobys/MirroLeap/releases?per_page=10' in backend
 assert 'reqwest::redirect::Policy::none()' in backend
 assert 'Duration::from_secs(12)' in backend
 assert 'MAX_METADATA_BYTES: usize = 512 * 1024' in backend
@@ -36,7 +38,10 @@ assert 'asset.get("browser_download_url").and_then(Value::as_str) == Some(expect
 assert 'MirroLeap_{version}_x64_Portable.zip' in backend
 assert 'SHA256SUMS.txt' in backend
 assert 'AppUpdateChecker version={appVersion}' in app
-assert "await invoke<AppUpdateInfo>('check_mirroleap_update')" in frontend
+assert "await invoke<AppUpdateInfo>(" in frontend
+assert "'check_mirroleap_preview_update' : 'check_mirroleap_update'" in frontend
+assert "requestedChannel === 'stable' && result.status === 'update_available'" in frontend
+assert "channel === 'stable' && installKind === 'installed'" in frontend
 assert 'trustedReleaseDownload(info, asset)' in frontend
 assert 'trustedReleaseUrl(info)' in frontend and 'Object.prototype.hasOwnProperty.call' in validator
 assert "dangerouslySetInnerHTML" not in frontend

@@ -24,7 +24,7 @@ for root_svg in (portrait, landscape):
     aperture = [e for e in mask if e.attrib.get("fill") == "#000000"]
     assert len(aperture) == 1
     for key, expected in {"x": "18", "y": "18", "width": "964", "height": "2114",
-                          "rx": "57"}.items():
+                          "rx": "72"}.items():
         assert aperture[0].get(key) == expected, f"SVG aperture {key} differs"
 # The geometry is rotated with the entire portrait group, rather than
 # stretched to landscape dimensions as an unrotated portrait phone.

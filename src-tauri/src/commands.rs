@@ -165,6 +165,9 @@ pub(crate) async fn phone_toolbar_keyevent(device: &str, action: &str) -> Result
         "quick_back" => "4",
         "quick_recents" => "187",
         "quick_power" => "26",
+        // KEYCODE_SLEEP never wakes an already sleeping device; some OEMs
+        // may pause video capture while the display is asleep.
+        "quick_sleep" => "223",
         _ => return Err("Unsupported Android navigation shortcut".into()),
     };
     let adb_path = get_binary_path("adb", None);

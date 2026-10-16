@@ -18,6 +18,7 @@ export default function AppUpdateChecker({version, running = false}: Props) {
   const zh = locale.startsWith('zh');
   const [pending, setPending] = useState(false);
   const [info, setInfo] = useState<AppUpdateInfo | null>(null);
+  const [channel, setChannel] = useState<'stable' | 'preview'>('stable');
   const [error, setError] = useState<string | null>(null);
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeProgress, setUpgradeProgress] = useState<number | null>(null);
@@ -33,23 +34,25 @@ export default function AppUpdateChecker({version, running = false}: Props) {
     return () => { generation.current++; };
   }, []);
 
-  const check = async () => {
+  const check = async (requestedChannel: 'stable' | 'preview' = 'stable') => {
     if (lock.current) return;
     const request = ++generation.current;
     lock.current = true;
+    setChannel(requestedChannel);
     setPending(true);
     setInfo(null);
     setInstallKind('unknown');
     setError(null);
     try {
-      const result = await invoke<AppUpdateInfo>('check_mirroleap_update');
+      const result = await invoke<AppUpdateInfo>(
+        requestedChannel === 'preview' ? 'check_mirroleap_preview_update' : 'check_mirroleap_update');
       if (request !== generation.current) return;
       if (!trustedReleaseUrl(result) ||
           !['update_available', 'up_to_date', 'ahead'].includes(result.status)) {
         setError(explainUpdateError('invalid_release', zh));
         return;
       }
-      if (result.status === 'update_available') {
+      if (requestedChannel === 'stable' && result.status === 'update_available') {
         try {
           const detected = await invoke<string>('get_app_install_kind');
           if (request !== generation.current) return;
@@ -76,7 +79,7 @@ export default function AppUpdateChecker({version, running = false}: Props) {
   const updateAvailable = info?.status === 'update_available';
 
   const installUpdate = async () => {
-    if (lock.current || upgradeLock.current || !updateAvailable || !info ||
+    if (lock.current || upgradeLock.current || !updateAvailable || !info || channel !== 'stable' ||
         installKind !== 'installed' || running) return;
     // The update must be both present in the official stable release metadata
     // and signed by the Tauri updater private key. A release ZIP or EXE cannot
@@ -140,8 +143,8 @@ export default function AppUpdateChecker({version, running = false}: Props) {
     </div>
     <p className="ml-muted text-xs leading-relaxed">
       {zh
-        ? '检查 GitHub 正式版；NSIS EXE 安装版支持签名验证的一键更新。'
-        : 'Check stable GitHub releases. Signed one-click updates require an NSIS EXE install.'}
+        ? '可分别检查正式版和测试版。NSIS EXE 安装版仅支持对已签名正式版一键更新。'
+        : 'Check stable or preview releases. One-click NSIS updates are limited to signed stable releases.'}
     </p>
     <div className="flex flex-wrap items-center gap-3">
       <button type="button" onClick={() => void check()} disabled={pending}
@@ -151,12 +154,18 @@ export default function AppUpdateChecker({version, running = false}: Props) {
         {pending ? (zh ? '正在连接 GitHub…' : 'Checking GitHub…') :
           (zh ? '检查软件更新' : 'Check for updates')}
       </button>
+      <button type="button" onClick={() => void check('preview')} disabled={pending}
+        aria-label={zh ? '检查 MirroLeap 测试版更新' : 'Check MirroLeap preview updates'}
+        className="ml-secondary-action inline-flex items-center gap-2 px-4">
+        {pending && channel === 'preview' ? <LoaderCircle size={16} className="animate-spin"/> : <RefreshCw size={16}/>}
+        {zh ? '检查测试版' : 'Check preview builds'}
+      </button>
       <a href={officialPage} target="_blank" rel="noopener noreferrer"
         className="ml-footer-link inline-flex items-center gap-1">
         <ExternalLink size={13}/>
         {zh ? '官方发布页面' : 'Official releases'}
       </a>
-      {updateAvailable && installKind === 'installed' && <button type="button" onClick={() => void installUpdate()}
+      {updateAvailable && channel === 'stable' && installKind === 'installed' && <button type="button" onClick={() => void installUpdate()}
         disabled={upgrading || pending || running}
         aria-label={zh ? '下载验证并安装 MirroLeap 更新' : 'Download, verify and install MirroLeap update'}
         className="ml-secondary-action inline-flex items-center gap-2 px-4">
@@ -165,12 +174,17 @@ export default function AppUpdateChecker({version, running = false}: Props) {
           (zh ? '一键安装并重启' : 'Install update and restart')}
       </button>}
     </div>
-    {updateAvailable && installKind !== 'installed' && <p role="note" className="ml-muted text-xs">
+    {updateAvailable && channel === 'preview' && <p role="note" className="ml-muted text-xs">
+      {zh
+        ? '测试版目前提供官方手动下载；一键安装仍只接收经过签名校验的正式版。'
+        : 'Preview builds provide manual official downloads. One-click installation checks signed stable releases only.'}
+    </p>}
+    {updateAvailable && channel === 'stable' && installKind !== 'installed' && <p role="note" className="ml-muted text-xs">
       {zh
         ? '当前未检测到可一键升级的 NSIS 安装。请使用下方官方 ZIP、EXE 或 MSI 文件手动升级。'
         : 'No eligible NSIS installation was detected. Use the official ZIP, EXE or MSI download links below to upgrade manually.'}
     </p>}
-    {running && updateAvailable && installKind === 'installed' && <p role="note" className="text-xs text-amber-600">
+    {running && updateAvailable && channel === 'stable' && installKind === 'installed' && <p role="note" className="text-xs text-amber-600">
       {zh ? '先结束正在运行的投屏，再安装更新。' : 'Stop the active phone mirror before installing the update.'}
     </p>}
     {upgradeMessage && <p role="status" className="text-xs text-emerald-600">
@@ -184,10 +198,17 @@ export default function AppUpdateChecker({version, running = false}: Props) {
         <div className="flex flex-col gap-1">
           <p className="font-semibold text-sm">
             {updateAvailable ?
-              (zh ? `发现正式版 v${info.latestVersion}` : `Stable update v${info.latestVersion} available`) :
+              (channel === 'preview' ?
+                (zh ? `发现测试版 v${info.latestVersion}` : `Preview update v${info.latestVersion} available`) :
+                (zh ? `发现正式版 v${info.latestVersion}` : `Stable update v${info.latestVersion} available`)) :
               info.status === 'ahead' ?
-                (zh ? `当前构建高于最新正式版 v${info.latestVersion}` : `Installed build is newer than stable v${info.latestVersion}`) :
-                (zh ? `当前已是最新正式版 v${info.latestVersion}` : `Up to date: v${info.latestVersion}`)}
+                (channel === 'preview' ?
+                  (zh ? `当前版本高于最新测试版 v${info.latestVersion}` : `Installed build is newer than preview v${info.latestVersion}`) :
+                  (zh ? `当前构建高于最新正式版 v${info.latestVersion}；如使用测试版，请点击“检查测试版”`
+                    : `Installed build is newer than stable v${info.latestVersion}; use Check preview builds for test releases`)) :
+                (channel === 'preview' ?
+                  (zh ? `当前已是最新测试版 v${info.latestVersion}` : `Up to date on preview channel: v${info.latestVersion}`) :
+                  (zh ? `当前已是最新正式版 v${info.latestVersion}` : `Up to date: v${info.latestVersion}`))}
           </p>
           {info.publishedAt && <span className="ml-muted text-xs">{zh ? '发布时间' : 'Published'}：{info.publishedAt.slice(0, 10)}</span>}
         </div>
@@ -218,7 +239,9 @@ export default function AppUpdateChecker({version, running = false}: Props) {
       </div>}
       {releasePage && <a href={releasePage} target="_blank" rel="noopener noreferrer"
         className="ml-footer-link inline-flex items-center self-start gap-1">
-        <ExternalLink size={13}/>{zh ? '查看该正式版本的 GitHub 页面' : 'View this stable release'}
+        <ExternalLink size={13}/>{channel === 'preview'
+          ? (zh ? '查看该测试版本的 GitHub 页面' : 'View this preview release')
+          : (zh ? '查看该正式版本的 GitHub 页面' : 'View this stable release')}
       </a>}
     </div>}
     <details className="ml-settings-help-details">

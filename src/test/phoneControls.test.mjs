@@ -8,7 +8,7 @@ const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 
 // Exercise the same self-contained HTML that Tauri loads inside its WebView2
 // child HWND; stub only its narrow native IPC boundary.
-function setup({ failToggle = false } = {}) {
+function setup({ failToggle = false, failAction = null } = {}) {
   const actions = [];
   let enabled = false;
   let quick = false;
@@ -22,6 +22,7 @@ function setup({ failToggle = false } = {}) {
       window.__TAURI__ = { core: { invoke: async (command, { action }) => {
         expect(command).toBe('device_frame_control');
         actions.push(action);
+        if (action === failAction) throw new Error('Native action unavailable');
         if (action === 'ink_toggle') {
           if (failToggle) throw new Error('native canvas not ready');
           enabled = !enabled;
@@ -108,6 +109,28 @@ describe('real Tauri phone-controls HTML', () => {
     await nextTask(); await nextTask();
     expect(document.body.classList.contains('quick-open')).toBe(false);
     expect(document.body.classList.contains('inking')).toBe(true);
+    dom.window.close();
+  });
+
+  it('displays pending, dispatched and failure feedback for shortcut actions', async () => {
+    const { dom, document } = setup({failAction:'quick_screen_off'});
+    document.getElementById('quick-toggle').click();
+    await nextTask(); await nextTask();
+    const rotate = document.getElementById('quick-rotate');
+    rotate.click();
+    expect(rotate.dataset.feedback).toBe('busy');
+    expect(rotate.getAttribute('aria-busy')).toBe('true');
+    await nextTask();
+    expect(rotate.dataset.feedback).toBe('sent');
+    expect(document.getElementById('quick-feedback').textContent)
+      .toContain('指令已发送：旋转');
+    const sleep = document.getElementById('quick-screen_off');
+    sleep.click();
+    await nextTask();
+    expect(sleep.dataset.feedback).toBe('error');
+    expect(document.getElementById('quick-feedback').textContent)
+      .toContain('息屏失败');
+    expect(document.getElementById('status').dataset.error).toBe('true');
     dom.window.close();
   });
 

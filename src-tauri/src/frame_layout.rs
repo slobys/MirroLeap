@@ -276,15 +276,16 @@ pub fn toolbar_placement(
 
 /// Ellipse radii for the REAL SDL client region, in physical screen pixels.
 ///
-/// The antialiased SVG aperture uses a 57-unit rounded corner. The GDI region
-/// MUST be deliberately **less rounded** by 3 physical pixels in both axes:
+/// The antialiased SVG aperture uses a 72-unit rounded corner. The GDI region
+/// MUST be deliberately **less rounded** by 4 physical pixels in both axes:
 /// this makes every SVG-transparent screen pixel backed by live video, while
 /// the dark bezel/gasket hides the invisible hard GDI boundary underneath.
 ///
 /// v4.3.2 matched the radii exactly and exposed cyan wallpaper-colored seams.
 /// v4.3.3 removed the native region and introduced square black corners.
 /// Never match radii exactly or use a square overpainting rectangle again.
-pub const NATIVE_CORNER_OVERSCAN_PX: i32 = 3;
+pub const SCREEN_CORNER_RADIUS: f64 = 72.0;
+pub const NATIVE_CORNER_OVERSCAN_PX: i32 = 4;
 pub fn native_clip_radius(video_width: i32, video_height: i32) -> Option<(i32, i32)> {
     if video_width < 80 || video_height < 80 { return None; }
     let (inner_width, inner_height) = if is_landscape(video_width, video_height) {
@@ -292,8 +293,8 @@ pub fn native_clip_radius(video_width: i32, video_height: i32) -> Option<(i32, i
     } else {
         (INNER_WIDTH, INNER_HEIGHT)
     };
-    let rx = ((video_width as f64) * 57.0 / inner_width).round() as i32;
-    let ry = ((video_height as f64) * 57.0 / inner_height).round() as i32;
+    let rx = ((video_width as f64) * SCREEN_CORNER_RADIUS / inner_width).round() as i32;
+    let ry = ((video_height as f64) * SCREEN_CORNER_RADIUS / inner_height).round() as i32;
     Some(((rx - NATIVE_CORNER_OVERSCAN_PX).clamp(2, video_width / 3),
           (ry - NATIVE_CORNER_OVERSCAN_PX).clamp(2, video_height / 3)))
 }
@@ -306,8 +307,8 @@ fn svg_aperture_radius(video_width: i32, video_height: i32) -> Option<(f64, f64)
     } else {
         (INNER_WIDTH, INNER_HEIGHT)
     };
-    Some((video_width as f64 * 57.0 / inner_width,
-          video_height as f64 * 57.0 / inner_height))
+    Some((video_width as f64 * SCREEN_CORNER_RADIUS / inner_width,
+          video_height as f64 * SCREEN_CORNER_RADIUS / inner_height))
 }
 
 /// Hover near the right/left bezel, or the top edge; the controller never

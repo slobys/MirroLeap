@@ -21,14 +21,19 @@ use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
     MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, SetWindowRgn,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_LMENU};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD,
+    KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_SCANCODE, KEYEVENTF_KEYUP,
+    VIRTUAL_KEY, VK_LBUTTON,
+};
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
+    BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos,
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
-    GetWindowRect, GW_HWNDPREV,
-    IsIconic, IsWindowVisible, PostMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
+    GetWindowRect, GW_HWNDPREV, GetWindowThreadProcessId,
+    IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow,
     GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST, HWND_TOPMOST, HWND_NOTOPMOST,
-    WM_SYSKEYDOWN, WM_SYSKEYUP,
     HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
     SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
 };
@@ -44,6 +49,10 @@ static PRESENTATION_MODES: OnceLock<Mutex<HashMap<String, &'static str>>> = Once
 static PRESENTATION_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static QUICK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static VIDEO_TOPMOST_REQUESTS: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+fn topmost_requests() -> &'static Mutex<HashMap<String, bool>> {
+    VIDEO_TOPMOST_REQUESTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 fn quick_sessions() -> &'static Mutex<HashSet<String>> {
     QUICK_ENABLED.get_or_init(|| Mutex::new(HashSet::new()))
 }
@@ -322,7 +331,7 @@ fn capture_screen(pid: u32) -> Option<CapturedWindow> {
 /// A matching GDI region (v4.3.2) exposed wallpaper-colored 1px cracks because
 /// GDI masks are *not* antialiased, whereas the SVG's transparent aperture is.
 ///
-/// Fix: clip LESS aggressively than the SVG hole. Both radii are 3 physical
+/// Fix: clip LESS aggressively than the SVG hole. Both radii are 4 physical
 /// pixels smaller, so the entire visible rounded aperture remains backed by
 /// live SDL video. The SVG bezel and dark gasket overpaint the hard GDI pixels.
 /// Do not clip more aggressively or return to the square SVG matte.
@@ -455,6 +464,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut previous_layout: Option<ToolbarLayout> = None;
     let mut previous_zoom: Option<u32> = None;
     let mut layout_synced_at: Option<Instant> = None;
+    let mut topmost_checked_at: Option<Instant> = None;
     let mut clip_retry_reported = false;
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -496,6 +506,30 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let hwnd = captured.hwnd;
         let frame = captured.frame;
         let screen = captured.screen;
+        // The interactive drag loop moves SDL, the transparent bezel and
+        // toolbar together through one native DeferWindowPos batch. The
+        // slower 50ms health follower must not move the same windows in
+        // parallel, which previously caused jitter and visible separation.
+        if is_dragging(&device) {
+            previous_frame = None;
+            controls_rect = None;
+            shell_position_checked_at = None;
+            toolbar_position_checked_at = None;
+            continue;
+        }
+        if topmost_checked_at.map(|t| t.elapsed() > Duration::from_millis(650)).unwrap_or(true) {
+            if let Ok(state) = topmost_requests().lock() {
+                if let Some(&desired) = state.get(&device) {
+                    let companions_match = [overlay.hwnd().ok(), toolbar.hwnd().ok()]
+                        .into_iter().flatten()
+                        .all(|handle| video_is_topmost(handle) == desired);
+                    if video_is_topmost(hwnd) != desired || !companions_match {
+                        let _ = apply_video_topmost(&app, &device, hwnd, desired);
+                    }
+                }
+            }
+            topmost_checked_at = Some(Instant::now());
+        }
         if video_was_unavailable {
             // The video can be restored while the browser still owns focus.
             // Show the control handle briefly so the user can discover it
@@ -1095,53 +1129,77 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
 /// The dedicated phone-controls-* window is the ONLY trusted caller.
 /// The SVG overlay captures pointer events solely during annotation mode.
 fn send_video_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
-    // scrcpy's default MOD + key shortcuts: F/R/V/O. Only the matched
-    // scrcpy SDL HWND may receive synthetic keys, never an arbitrary app.
-    let (key, scan) = match action {
-        "quick_fullscreen" => (b'F', 0x21_isize),
-        "quick_rotate" => (b'R', 0x13_isize),
-        "quick_paste" => (b'V', 0x2F_isize),
-        "quick_screen_off" => (b'O', 0x18_isize),
+    // SDL polls real keyboard state. PostMessage(WM_SYSKEYDOWN) returns
+    // success even when SDL ignores the synthetic event. Instead move input
+    // focus to the PID-validated scrcpy video and inject real scan codes.
+    let scan = match action {
+        "quick_fullscreen" => 0x21_u16,
+        "quick_rotate" => 0x13_u16,
+        "quick_paste" => 0x2F_u16,
         _ => return Err("Unsupported scrcpy shortcut".into()),
     };
     if unsafe { IsIconic(hwnd).as_bool() } {
         return Err("Restore the mirrored phone before using a shortcut".into());
     }
-    // The floating WebView takes foreground focus when clicked. SendInput
-    // consequently goes to WebView2, not to the scrcpy SDL window. Post only
-    // hard-coded Alt shortcuts to the already PID-verified video HWND.
-    let scan_alt = 0x38_isize << 16;
-    let scan_key = scan << 16;
-    unsafe {
-        PostMessageW(Some(hwnd), WM_SYSKEYDOWN, WPARAM(VK_LMENU.0 as usize),
-            LPARAM(scan_alt)).map_err(|e| e.to_string())?;
-        PostMessageW(Some(hwnd), WM_SYSKEYDOWN, WPARAM(key as usize),
-            LPARAM(scan_key | (1 << 29))).map_err(|e| e.to_string())?;
-        PostMessageW(Some(hwnd), WM_SYSKEYUP, WPARAM(key as usize),
-            LPARAM(scan_key | (1 << 29) | (1 << 30) | (1 << 31))).map_err(|e| e.to_string())?;
-        PostMessageW(Some(hwnd), WM_SYSKEYUP, WPARAM(VK_LMENU.0 as usize),
-            LPARAM(scan_alt | (1 << 30) | (1 << 31)))
-            .map_err(|e| e.to_string())?;
+    let current_thread = unsafe { GetCurrentThreadId() };
+    let current_foreground = unsafe { GetForegroundWindow() };
+    let foreground_thread = unsafe { GetWindowThreadProcessId(current_foreground, None) };
+    // Foreground activation is permitted as a consequence of the actual
+    // phone-toolbar user click. Briefly attach to its input thread if needed;
+    // always detach before returning.
+    let attached = foreground_thread != 0 && foreground_thread != current_thread
+        && unsafe { AttachThreadInput(current_thread, foreground_thread, true) }.as_bool();
+    let _ = unsafe { SetForegroundWindow(hwnd) };
+    if attached {
+        let _ = unsafe { AttachThreadInput(current_thread, foreground_thread, false) };
+    }
+    if unsafe { GetForegroundWindow() } != hwnd {
+        return Err("Windows did not allow scrcpy to receive keyboard focus; retry after clicking the video".into());
+    }
+    let key = |scan: u16, release: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT {
+            wVk: VIRTUAL_KEY(0), wScan: scan,
+            dwFlags: KEYEVENTF_SCANCODE | if release { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+            time: 0, dwExtraInfo: 0,
+        }},
+    };
+    const ALT: u16 = 0x38;
+    let input = [key(ALT, false), key(scan, false), key(scan, true), key(ALT, true)];
+    if unsafe { SendInput(&input, std::mem::size_of::<INPUT>() as i32) } != input.len() as u32 {
+        return Err("Windows refused to send the scrcpy shortcut".into());
     }
     Ok(())
 }
 
-fn toggle_video_topmost(app: &AppHandle, device: &str, hwnd: HWND) -> Result<bool, String> {
-    let was_topmost = (unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32
-        & WS_EX_TOPMOST.0) != 0;
-    let placement = if was_topmost { HWND_NOTOPMOST } else { HWND_TOPMOST };
+fn video_is_topmost(hwnd: HWND) -> bool {
+    (unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32 & WS_EX_TOPMOST.0) != 0
+}
+fn apply_video_topmost(app: &AppHandle, device: &str, hwnd: HWND, desired: bool) -> Result<(), String> {
+    let placement = if desired { HWND_TOPMOST } else { HWND_NOTOPMOST };
     unsafe { SetWindowPos(hwnd, Some(placement), 0, 0, 0, 0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) }
-        .map_err(|e| format!("Cannot toggle video topmost: {e}"))?;
+        .map_err(|e| format!("Cannot update video topmost: {e}"))?;
     for name in [label(device), toolbar_label(device)] {
         if let Some(window) = app.get_webview_window(&name) {
             if let Ok(handle) = window.hwnd() {
-                let _ = unsafe { SetWindowPos(handle, Some(placement), 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+                unsafe { SetWindowPos(handle, Some(placement), 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) }
+                    .map_err(|e| format!("Cannot synchronize phone bezel topmost: {e}"))?;
             }
         }
     }
-    Ok(!was_topmost)
+    if video_is_topmost(hwnd) != desired {
+        return Err("Windows did not apply the requested topmost status".into());
+    }
+    Ok(())
+}
+fn toggle_video_topmost(app: &AppHandle, device: &str, hwnd: HWND) -> Result<bool, String> {
+    let requested = !video_is_topmost(hwnd);
+    apply_video_topmost(app, device, hwnd, requested)?;
+    topmost_requests().lock().map_err(|e| e.to_string())?
+        .insert(device.to_string(), requested);
+    Ok(requested)
 }
 
 pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<bool, String> {
@@ -1171,6 +1229,10 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         }
         if action == "quick_top_toggle" {
             return toggle_video_topmost(app, &device, hwnd);
+        }
+        if action == "quick_screen_off" {
+            crate::commands::phone_toolbar_keyevent(&device, "quick_sleep").await?;
+            return Ok(true);
         }
         if matches!(action, "quick_fullscreen" | "quick_rotate" | "quick_paste" | "quick_screen_off") {
             send_video_shortcut(hwnd, action)?;
@@ -1234,6 +1296,8 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(12));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut last_position: Option<(i32, i32)> = None;
+        let mut native_batch_available = true;
         for _ in 0..2500 { // hard stop after 30 seconds even if mouse state fails
             interval.tick().await;
             let held = (unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } as u16 & 0x8000) != 0;
@@ -1242,19 +1306,43 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
             let video = HWND(hwnd_value as *mut _);
             let new_x = x-dx;
             let new_y = y-dy;
-            let _ = unsafe {
-                SetWindowPos(video, None, new_x, new_y, 0, 0,
-                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
-            };
-            // Move the transparent phone skin and floating toolbar in the
-            // same 12ms tick as SDL; the independent 50ms health monitor is
-            // too slow and visibly separates the bezel during mouse drag.
-            for &(window, left, top) in &companions {
-                let handle = HWND(window as *mut _);
-                let _ = unsafe { SetWindowPos(handle, None,
-                    left.saturating_add(new_x.saturating_sub(start_x)),
-                    top.saturating_add(new_y.saturating_sub(start_y)), 0, 0,
-                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE) };
+            if last_position == Some((new_x, new_y)) { continue; }
+            last_position = Some((new_x, new_y));
+            // One deferred Win32 batch eliminates the three sequential
+            // compositor frames produced by separate SetWindowPos calls.
+            // If Windows rejects batching (e.g. HWND destroyed during drag),
+            // fall back to the previous direct native reposition logic.
+            let mut moved = false;
+            if native_batch_available {
+                let batch_result = (|| -> windows::core::Result<()> {
+                    let flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+                    let mut batch = unsafe { BeginDeferWindowPos(1 + companions.len() as i32) }?;
+                    batch = unsafe {
+                        DeferWindowPos(batch, video, None, new_x, new_y, 0, 0, flags)
+                    }?;
+                    for &(window, left, top) in &companions {
+                        batch = unsafe { DeferWindowPos(batch, HWND(window as *mut _), None,
+                            left.saturating_add(new_x.saturating_sub(start_x)),
+                            top.saturating_add(new_y.saturating_sub(start_y)),
+                            0, 0, flags) }?;
+                    }
+                    unsafe { EndDeferWindowPos(batch) }
+                })();
+                if batch_result.is_ok() {
+                    moved = true;
+                } else {
+                    native_batch_available = false;
+                }
+            }
+            if !moved {
+                let flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+                let _ = unsafe { SetWindowPos(video, None, new_x, new_y, 0, 0, flags) };
+                for &(window, left, top) in &companions {
+                    let _ = unsafe { SetWindowPos(HWND(window as *mut _), None,
+                        left.saturating_add(new_x.saturating_sub(start_x)),
+                        top.saturating_add(new_y.saturating_sub(start_y)),
+                        0, 0, flags) };
+                }
             }
         }
         if let Ok(mut pending) = drags().lock() { pending.remove(&device); }
@@ -1267,6 +1355,9 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
 
 pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), String> {
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
+    if let Ok(mut states) = topmost_requests().lock() {
+        states.insert(device.to_string(), always_on_top);
+    }
     let shell_name = label(device);
     let controls_name = toolbar_label(device);
     if let Some(old) = app.get_webview_window(&shell_name) { let _ = old.close(); }
@@ -1342,6 +1433,7 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
 }
 
 pub fn close(app: &AppHandle, device: &str) {
+    if let Ok(mut topmost) = topmost_requests().lock() { topmost.remove(device); }
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
     if let Ok(mut set) = ink_sessions().lock() { set.remove(device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(device); }

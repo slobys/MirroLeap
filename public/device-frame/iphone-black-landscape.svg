@@ -41,7 +41,7 @@
          This mask also creates the minimal dark rounded corner treatment. -->
     <mask id="transparentScreen" maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="2150">
       <rect width="1000" height="2150" fill="#ffffff"/>
-      <rect x="18" y="18" width="964" height="2114" rx="57" fill="#000000"/>
+      <rect x="18" y="18" width="964" height="2114" rx="72" fill="#000000"/>
     </mask>
   </defs>
   <g id="landscape-rotation" transform="translate(2150 0) rotate(90)">
@@ -73,7 +73,7 @@
 
   <!--
     Seam-free corners require TWO coordinated masks, not a solid rectangle:
-      1. SDL's native Win32 mask has 3px *smaller* radii than this SVG aperture,
+      1. SDL's native Win32 mask has 4px *smaller* radii than this SVG aperture,
          so hard native clip pixels remain hidden behind the casing.
       2. This antialiased rounded gasket covers the native hard-edge staircase.
     The independent rectangular corner matte from v4.3.3 has been REMOVED:
@@ -82,7 +82,7 @@
   -->
   <g id="screen-seam-seal" aria-hidden="true">
     <rect id="video-edge-gasket"
-          x="18" y="18" width="964" height="2114" rx="57"
+          x="18" y="18" width="964" height="2114" rx="72"
           fill="none" stroke="#06080b" stroke-width="7"
           stroke-linejoin="round"/>
   </g>

@@ -123,6 +123,29 @@ describe('MirroLeap software update UI', () => {
     expect(screen.queryByRole('link',{name:'Portable ZIP'})).not.toBeInTheDocument();
   });
 
+  it('checks official preview releases only when requested, without auto-installing', async () => {
+    invokeMock.mockImplementation(async (command:string) => {
+      if (command === 'check_mirroleap_preview_update') {
+        return {...update, latestVersion:'5.0.5',
+          releaseUrl:'https://github.com/slobys/MirroLeap/releases/tag/v5.0.5',
+          downloads:[{...update.downloads[0],
+            name:'MirroLeap_5.0.5_x64_Portable.zip',
+            url:'https://github.com/slobys/MirroLeap/releases/download/v5.0.5/MirroLeap_5.0.5_x64_Portable.zip'}]};
+      }
+      throw Error('Unexpected API');
+    });
+    render(<AppUpdateChecker version="5.0.4"/>);
+    expect(invokeMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'Check MirroLeap preview updates'}));
+    expect(await screen.findByText('Preview update v5.0.5 available')).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledExactlyOnceWith('check_mirroleap_preview_update');
+    expect(screen.getByRole('link',{name:'Portable ZIP'}))
+      .toHaveAttribute('href','https://github.com/slobys/MirroLeap/releases/download/v5.0.5/MirroLeap_5.0.5_x64_Portable.zip');
+    expect(screen.queryByRole('button',{name:'Download, verify and install MirroLeap update'}))
+      .not.toBeInTheDocument();
+    expect(updaterCheck).not.toHaveBeenCalled();
+  });
+
   it('deduplicates checks and shows meaningful offline/rate-limit errors', async () => {
     let reject!: (reason:string) => void;
     invokeMock.mockReturnValueOnce(new Promise((_, rejectPromise) => {reject=rejectPromise;}));

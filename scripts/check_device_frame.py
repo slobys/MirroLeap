@@ -79,7 +79,7 @@ assert all(not (
 gasket = seal.find('svg:rect[@id="video-edge-gasket"]', ns)
 assert gasket is not None, "Antialiased gasket is missing"
 for attr, expected in {
-    "x": "18", "y": "18", "width": "964", "height": "2114", "rx": "57",
+    "x": "18", "y": "18", "width": "964", "height": "2114", "rx": "72",
     "stroke": "#06080b", "stroke-width": "7", "fill": "none"
 }.items():
     assert gasket.attrib.get(attr) == expected, f"Screen gasket {attr} drifted"
@@ -87,7 +87,8 @@ for attr, expected in {
 # metal bezel, not coincident with the antialiased aperture and not absent.
 assert "CreateRoundRectRgn" in backend and "SetWindowRgn" in backend
 assert "native_clip_radius" in backend and "reset_native_corner_clip" in backend
-assert "NATIVE_CORNER_OVERSCAN_PX: i32 = 3" in rust
+assert "SCREEN_CORNER_RADIUS: f64 = 72.0" in rust
+assert "NATIVE_CORNER_OVERSCAN_PX: i32 = 4" in rust
 assert "round_clip_radius" not in backend, (
     "Using exact SVG radius for native mask causes wallpaper-colored seams"
 )
