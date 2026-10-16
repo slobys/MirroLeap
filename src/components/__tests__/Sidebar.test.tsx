@@ -244,4 +244,91 @@ describe('Sidebar Component', () => {
         fireEvent.click(screen.getByText('VWGE5XZHOBAIAAJN-thoiAU'));
         expect(onSelectDevice).toHaveBeenCalledWith(mdnsSerial);
     });
+
+    it('rejects malformed wireless endpoints without making any ADB calls', () => {
+        const onConnect = vi.fn();
+        const onDiagnose = vi.fn();
+        render(<Sidebar {...mockProps} devices={[]} onConnect={onConnect} onDiagnose={onDiagnose}/>);
+        fireEvent.click(screen.getByText('Wireless'));
+        fireEvent.change(screen.getByPlaceholderText('192.168.x.x:5555'), {
+            target: { value: '-s 192.168.1.5' }
+        });
+        fireEvent.click(screen.getByText('Connect'));
+        expect(onConnect).not.toHaveBeenCalled();
+        expect(onDiagnose).not.toHaveBeenCalled();
+        expect(screen.getByRole('status')).toHaveTextContent('valid IPv4 address');
+    });
+
+    it('automatically presents a failed connection diagnosis without a redundant TCP probe', async () => {
+        const onConnect = vi.fn().mockResolvedValue({
+            success: false, message: 'ADB refused',
+            diagnosis: { code: 'port_changed', address:'192.168.2.226:5555',
+                alternatives: ['192.168.2.226:42345','192.168.2.227:42345'] }
+        });
+        const onDiagnose = vi.fn();
+        render(<Sidebar {...mockProps} devices={[]} onConnect={onConnect} onDiagnose={onDiagnose}/>);
+        fireEvent.click(screen.getByText('Wireless'));
+        fireEvent.change(screen.getByPlaceholderText('192.168.x.x:5555'), {
+            target: { value: '192.168.2.226:5555' }
+        });
+        fireEvent.click(screen.getByText('Connect'));
+        const result = await screen.findByRole('status');
+        await waitFor(() => expect(result).toHaveTextContent('saved port is stale'));
+        expect(onConnect).toHaveBeenCalledExactlyOnceWith('192.168.2.226:5555');
+        expect(onDiagnose).not.toHaveBeenCalled();
+        expect(screen.queryByText(/192.168.2.227:42345/)).not.toBeInTheDocument();
+        fireEvent.click(screen.getByText(/Use detected port: 192.168.2.226:42345/));
+        expect(screen.getByPlaceholderText('192.168.x.x:5555')).toHaveValue('192.168.2.226:42345');
+        expect(onConnect).toHaveBeenCalledTimes(1); // Clicking suggestion never auto-connects.
+    });
+
+    it('locks repeated connect clicks and clearly reports ADB connection success', async () => {
+        let finish!: (result: {success:boolean,address:string}) => void;
+        const onConnect = vi.fn().mockImplementation(() => new Promise(resolve => {finish=resolve;}));
+        render(<Sidebar {...mockProps} devices={[]} onConnect={onConnect}/>);
+        fireEvent.click(screen.getByText('Wireless'));
+        fireEvent.change(screen.getByPlaceholderText('192.168.x.x:5555'),{
+            target:{value:'192.168.2.226'}
+        });
+        fireEvent.click(screen.getByText('Connect'));
+        expect(screen.getByRole('status')).toHaveTextContent('Connecting to selected device');
+        fireEvent.click(screen.getByText('...'));
+        expect(onConnect).toHaveBeenCalledTimes(1);
+        expect(onConnect).toHaveBeenCalledWith('192.168.2.226:5555');
+        finish({success:true,address:'192.168.2.226:46555'});
+        await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('ADB connection established'));
+        expect(screen.getByRole('status')).toHaveTextContent('192.168.2.226:46555');
+    });
+
+    it('distinguishes pairing success from a ready/authorized device session', async () => {
+        const onPair = vi.fn().mockResolvedValue({success:true});
+        const onConnect = vi.fn();
+        render(<Sidebar {...mockProps} devices={[]} onPair={onPair} onConnect={onConnect}/>);
+        fireEvent.click(screen.getByText('Wireless'));
+        fireEvent.change(screen.getByPlaceholderText('IP:Port'), {
+            target:{value:'192.168.2.226:37413'}
+        });
+        fireEvent.change(screen.getByPlaceholderText('Pairing Code'), {
+            target:{value:'123456'}
+        });
+        fireEvent.click(screen.getByText('Start Pairing'));
+        await waitFor(()=>expect(onPair).toHaveBeenCalledWith('192.168.2.226:37413','123456'));
+        await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('Pairing succeeded'));
+        expect(screen.getByRole('status')).toHaveTextContent('pairing is not the same as connecting');
+        expect(onConnect).not.toHaveBeenCalled();
+    });
+
+    it('labels discovered pairing versus connection ports and remembered offline devices', () => {
+        render(<Sidebar {...mockProps} devices={[]} pendingDevices={[{
+            serial:'192.168.2.226:5555',state:'offline'
+        }]} historyDevices={['192.168.2.226:5555']} mdnsDevices={[
+            {name:'A',service:'_adb-tls-pairing._tcp',address:'192.168.2.226:41334'},
+            {name:'B',service:'_adb-tls-connect._tcp',address:'192.168.2.227:43117'}
+        ]}/>);
+        fireEvent.click(screen.getByText('Wireless'));
+        expect(screen.getByText('Pairing port')).toBeInTheDocument();
+        expect(screen.getByText('Connection port')).toBeInTheDocument();
+        expect(screen.getAllByText('Offline').length).toBeGreaterThan(0);
+        expect(screen.getByText(/retry automatically with backoff/)).toBeInTheDocument();
+    });
 });

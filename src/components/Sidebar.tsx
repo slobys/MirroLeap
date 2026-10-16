@@ -2,6 +2,9 @@ import React from 'react';
 import { Smartphone, RefreshCw, Usb, Wifi, UploadCloud, Zap, X } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { MdnsDevice, PendingAdbDevice, WirelessDiagnosis, isMdnsDeviceConnected } from '../hooks/useScrcpy';
+import WirelessConnectionStatus from './WirelessConnectionStatus';
+import { historicWirelessStatus, mdnsServiceKind, normalizeWirelessEndpoint,
+    type WirelessFeedback, type WirelessOperationResult } from '../utils/wirelessCenter';
 
 // mDNS wireless-debugging serials look like
 // "adb-<serial>-<random>._adb-tls-connect._tcp" (optionally with an mDNS
@@ -69,8 +72,13 @@ export default function Sidebar({
     const { t } = useI18n();
     const [activeTab, setActiveTab] = React.useState<'usb' | 'wireless'>('usb');
     const [connectIp, setConnectIp] = React.useState('');
-    const [diagnosis, setDiagnosis] = React.useState<WirelessDiagnosis | null>(null);
+    const [connectionFeedback, setConnectionFeedback] = React.useState<WirelessFeedback | null>(null);
     const [isDiagnosing, setIsDiagnosing] = React.useState(false);
+    const [isConnecting, setIsConnecting] = React.useState(false);
+    const [isPairing, setIsPairing] = React.useState(false);
+    const [isUsbSwitching, setIsUsbSwitching] = React.useState(false);
+    const operationRef = React.useRef(false);
+    const generationRef = React.useRef(0);
     const [pairIp, setPairIp] = React.useState('');
     const [pairCode, setPairCode] = React.useState('');
     const pairCodeRef = React.useRef<HTMLInputElement>(null);
@@ -85,22 +93,121 @@ export default function Sidebar({
     const [modalError, setModalError] = React.useState(false);
     const [modalSubmitting, setModalSubmitting] = React.useState(false);
 
+    const updateIp = (next: string) => {
+        generationRef.current += 1;
+        setConnectIp(next);
+        setConnectionFeedback(null);
+    };
+
     const handleConnect = async (ip: string) => {
-        if (!ip) return;
-        setDiagnosis(null);
-        await onConnect(ip);
+        if (operationRef.current || isRefreshing) return;
+        const address = normalizeWirelessEndpoint(ip);
+        if (!address) {
+            setConnectionFeedback({
+                phase: 'needs_action', operation: 'connect', address: ip.trim(),
+                diagnosis: { code: 'invalid', address: ip.trim(), alternatives: [] },
+            });
+            return;
+        }
+        updateIp(address);
+        if (devices.includes(address)) {
+            setConnectionFeedback({ phase: 'connected', operation: 'connect', address });
+            return;
+        }
+        const request = generationRef.current;
+        operationRef.current = true;
+        setIsConnecting(true);
+        setConnectionFeedback({ phase: 'connecting', operation: 'connect', address });
+        try {
+            const result: WirelessOperationResult = await onConnect(address);
+            if (generationRef.current !== request) return;
+            if (result.success) {
+                const connectedAddress = normalizeWirelessEndpoint(result.address || address) || address;
+                // ADB may have recovered a changed mDNS TLS connection port.
+                // Show the verified endpoint rather than a stale 5555 entry.
+                setConnectIp(connectedAddress);
+                setConnectionFeedback({
+                    phase: 'connected', operation: 'connect',
+                    address: connectedAddress,
+                });
+            } else {
+                setConnectionFeedback({ phase: 'diagnosing', operation: 'connect', address });
+                let report = result.diagnosis;
+                if (!report) {
+                    try { report = await onDiagnose(address); } catch { /* keep original failure */ }
+                }
+                if (generationRef.current === request) {
+                    setConnectionFeedback({
+                        phase: report ? 'needs_action' : 'failed',
+                        operation: 'connect', address, diagnosis: report,
+                    });
+                }
+            }
+        } catch {
+            if (generationRef.current === request) {
+                setConnectionFeedback({ phase: 'failed', operation: 'connect', address });
+            }
+        } finally {
+            operationRef.current = false;
+            setIsConnecting(false);
+        }
     };
 
     const handleDiagnose = async () => {
-        if (!connectIp.trim() || isDiagnosing) return;
+        if (!connectIp.trim() || operationRef.current || isRefreshing) return;
+        const address = normalizeWirelessEndpoint(connectIp);
+        if (!address) {
+            setConnectionFeedback({
+                phase: 'needs_action', operation: 'diagnose', address: connectIp.trim(),
+                diagnosis: { code: 'invalid', address: connectIp.trim(), alternatives: [] },
+            });
+            return;
+        }
+        const request = ++generationRef.current;
+        operationRef.current = true;
         setIsDiagnosing(true);
-        setDiagnosis(null);
+        setConnectionFeedback({ phase: 'diagnosing', operation: 'diagnose', address });
         try {
-            setDiagnosis(await onDiagnose(connectIp.trim()));
+            const result = await onDiagnose(address);
+            if (generationRef.current === request) {
+                setConnectionFeedback({
+                    phase: result.code === 'connected' ? 'connected' : 'needs_action',
+                    operation: 'diagnose', address, diagnosis: result,
+                });
+            }
         } catch {
-            setDiagnosis({ code: 'error', address: connectIp.trim(), alternatives: [] });
+            if (generationRef.current === request) {
+                setConnectionFeedback({
+                    phase: 'failed', operation: 'diagnose', address,
+                    diagnosis: { code: 'error', address, alternatives: [] },
+                });
+            }
         } finally {
             setIsDiagnosing(false);
+            operationRef.current = false;
+        }
+    };
+
+    const handleUsbToWireless = async (serial: string) => {
+        if (operationRef.current || isRefreshing) return;
+        const request = ++generationRef.current;
+        operationRef.current = true;
+        setIsUsbSwitching(true);
+        setConnectionFeedback({ phase: 'connecting', operation: 'usb', address: serial });
+        try {
+            const result: WirelessOperationResult = await onUsbToWireless(serial);
+            if (generationRef.current !== request) return;
+            setConnectionFeedback({
+                phase: result.success ? 'connected' : 'failed',
+                operation: 'usb', address: result.address || serial,
+            });
+        } catch {
+            if (generationRef.current === request) {
+                setConnectionFeedback({ phase: 'failed', operation: 'usb', address: serial });
+            }
+        } finally {
+            operationRef.current = false;
+            setIsUsbSwitching(false);
         }
     };
 
@@ -127,7 +234,31 @@ export default function Sidebar({
     // to, to work around the old hardcoded ip:5555 -- raced that native
     // reconnect and opened a second, duplicate session for the same device
     // under a stale ip:port.
-    const completePairing = async (ip: string, code: string) => onPair(ip, code);
+    const completePairing = async (ip: string, code: string): Promise<WirelessOperationResult> => {
+        if (operationRef.current) return { success: false, message: 'Another operation is in progress' };
+        const request = ++generationRef.current;
+        operationRef.current = true;
+        setIsPairing(true);
+        setConnectionFeedback({ phase: 'connecting', operation: 'pair', address: ip });
+        try {
+            const result: WirelessOperationResult = await onPair(ip, code);
+            if (generationRef.current === request) {
+                setConnectionFeedback({
+                    phase: result.success ? 'paired' : 'failed',
+                    operation: 'pair', address: ip,
+                });
+            }
+            return result;
+        } catch {
+            if (generationRef.current === request) {
+                setConnectionFeedback({ phase: 'failed', operation: 'pair', address: ip });
+            }
+            return { success: false };
+        } finally {
+            operationRef.current = false;
+            setIsPairing(false);
+        }
+    };
 
     const submitPairingModal = async () => {
         if (!pairingTarget || !modalCode || modalSubmitting) return;
@@ -280,6 +411,14 @@ export default function Sidebar({
 
                     {activeTab === 'wireless' && (
                         <div className="space-y-5 pt-2">
+                            <div className="space-y-1">
+                                <h3 className="text-xs font-bold text-primary flex items-center gap-2">
+                                    <Wifi size={14}/>{t('sidebar.wirelessCenter.title')}
+                                </h3>
+                                <p className="text-[10px] text-zinc-500 leading-relaxed">
+                                    {t('sidebar.wirelessCenter.manualPort')}
+                                </p>
+                            </div>
                             <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 space-y-1.5">
                                 <div className="flex items-center gap-2">
                                     <div className="w-1 h-1 bg-primary rounded-full" />
@@ -302,8 +441,8 @@ export default function Sidebar({
                                         <button
                                             key={serial}
                                             title={serial}
-                                            onClick={() => onUsbToWireless(serial)}
-                                            disabled={isRefreshing}
+                                            onClick={() => void handleUsbToWireless(serial)}
+                                            disabled={isRefreshing || isConnecting || isDiagnosing || isPairing || isUsbSwitching}
                                             className="w-full flex items-center justify-between gap-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 px-3 py-2 text-left text-zinc-200 text-[10px] font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             <span className="truncate">{deviceFriendlyNames[serial] || deviceModels[serial] || serial}</span>
@@ -324,50 +463,36 @@ export default function Sidebar({
                                             type="text"
                                             placeholder={t('sidebar.ipPlaceholder')}
                                             value={connectIp}
-                                            onChange={(e) => { setConnectIp(e.target.value); setDiagnosis(null); }}
+                                            onChange={(e) => updateIp(e.target.value)}
                                             className="w-full bg-black/40 border border-zinc-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-zinc-200 focus:border-primary/40 focus:bg-black/60 transition-all outline-none"
                                         />
                                     </div>
                                     <button
-                                        onClick={() => handleConnect(connectIp)}
-                                        disabled={isRefreshing}
+                                        onClick={() => void handleConnect(connectIp)}
+                                        disabled={isRefreshing || isConnecting || isDiagnosing || isPairing || isUsbSwitching}
                                         className={`px-4 bg-zinc-800 hover:bg-primary text-zinc-400 hover:text-on-primary rounded-lg text-[10px] font-black uppercase transition-all active:scale-95 ${isRefreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     >
-                                        {isRefreshing ? t('sidebar.connecting') : t('sidebar.connect')}
+                                        {isConnecting || isRefreshing ? t('sidebar.connecting') : t('sidebar.connect')}
                                     </button>
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={handleDiagnose}
-                                    disabled={!connectIp.trim() || isDiagnosing || isRefreshing}
+                                    onClick={() => void handleDiagnose()}
+                                    disabled={!connectIp.trim() || isDiagnosing || isRefreshing || isConnecting || isPairing || isUsbSwitching}
                                     className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg border border-zinc-700/60 text-zinc-300 text-xs hover:text-primary hover:border-primary/40 hover:bg-primary/5 disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                     <RefreshCw size={12} className={isDiagnosing ? 'animate-spin' : ''} />
                                     {isDiagnosing ? t('sidebar.diagnosing') : t('sidebar.diagnose')}
                                 </button>
-                                {diagnosis && (
-                                    <div role="status" aria-live="polite" className="p-3 space-y-2 rounded-lg border border-primary/20 bg-primary/5">
-                                        <p className="text-xs font-bold text-zinc-200">{t('sidebar.diagnosticTitle')}</p>
-                                        <p className="text-xs leading-relaxed text-zinc-400">
-                                            {t('sidebar.diagnostics.' + diagnosis.code)}
-                                        </p>
-                                        {diagnosis.alternatives.map(address => (
-                                            <button
-                                                key={address}
-                                                type="button"
-                                                onClick={() => { setConnectIp(address); setDiagnosis(null); }}
-                                                className="w-full rounded-md border border-primary/30 px-2 py-1.5 text-xs text-primary hover:bg-primary/10 text-left break-all"
-                                            >
-                                                {t('sidebar.useDiscoveredPort')}: {address}
-                                            </button>
-                                        ))}
-                                        {diagnosis.adbError && (
-                                            <p className="text-[10px] text-zinc-500 break-all">{diagnosis.adbError}</p>
-                                        )}
-                                    </div>
-                                )}
+                                {connectionFeedback && <WirelessConnectionStatus
+                                    feedback={connectionFeedback}
+                                    onSelectPort={updateIp}/>}
 
                             </div>
+
+                            <p className="text-[10px] text-zinc-500 leading-relaxed">
+                                {t('sidebar.wirelessCenter.automaticReconnect')}
+                            </p>
 
                             {/* Discovered Devices (mDNS) */}
                             {uniqueMdnsDevices.filter(dev => !isMdnsDeviceConnected(dev, devices)).length > 0 && (
@@ -382,7 +507,7 @@ export default function Sidebar({
                                             .map((dev, idx) => (
                                                 <button
                                                     key={idx}
-                                                    disabled={isRefreshing}
+                                                    disabled={isRefreshing || isConnecting || isDiagnosing || isPairing || isUsbSwitching}
                                                     onClick={() => {
                                                         setPairingTarget(dev);
                                                         setModalCode('');
@@ -392,9 +517,15 @@ export default function Sidebar({
                                                 >
                                                     <div className="flex items-center gap-2 min-w-0">
                                                         <Wifi size={10} className="text-zinc-500 group-hover:text-zinc-300 shrink-0" />
-                                                        <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200 truncate" title={`${dev.address} (${formatMdnsName(dev.name)})`}>
-                                                            {dev.address} ({formatMdnsName(dev.name)})
-                                                        </span>
+                                                        <div className="min-w-0">
+                                                            <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200 block truncate" title={`${dev.address} (${formatMdnsName(dev.name)})`}>
+                                                                {dev.address} ({formatMdnsName(dev.name)})
+                                                            </span>
+                                                            <span className="text-[9px] text-zinc-600">
+                                                                {t('sidebar.wirelessCenter.' + (mdnsServiceKind(dev.service) === 'pairing'
+                                                                    ? 'pairingPort' : 'connectionPort'))}
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                     <div className="text-[8px] text-primary opacity-0 group-hover:opacity-100 uppercase font-black tracking-tighter shrink-0 ml-2">
                                                         {t('sidebar.startPairing')}
@@ -421,16 +552,23 @@ export default function Sidebar({
                                         {historyDevices.map((ip, idx) => (
                                             <button
                                                 key={idx}
-                                                disabled={isRefreshing}
+                                                disabled={isRefreshing || isConnecting || isDiagnosing || isPairing || isUsbSwitching}
                                                 onClick={() => {
-                                                    setConnectIp(ip);
-                                                    handleConnect(ip);
+                                                    void handleConnect(ip);
                                                 }}
                                                 className="w-full flex items-center justify-between p-2 rounded-lg bg-zinc-800/20 border border-zinc-800/50 hover:bg-zinc-800/50 hover:border-zinc-700 transition-all group"
                                             >
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 min-w-0">
                                                     <Wifi size={10} className="text-zinc-500 group-hover:text-zinc-300" />
-                                                    <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200">{ip}</span>
+                                                    <div className="min-w-0 text-left">
+                                                        <span className="text-[10px] font-bold text-zinc-400 group-hover:text-zinc-200 break-all block">{ip}</span>
+                                                        <span className="text-[9px] text-zinc-600">
+                                                            {t('sidebar.wirelessCenter.known' + ({
+                                                                connected: 'Ready', offline: 'Offline',
+                                                                unauthorized: 'Unauthorized', remembered: 'Remembered'
+                                                            }[historicWirelessStatus(ip, devices, pendingDevices)]))}
+                                                        </span>
+                                                    </div>
                                                 </div>
                                                 <div className="text-[8px] text-primary opacity-0 group-hover:opacity-100 uppercase font-black tracking-tighter">
                                                     {t('sidebar.connect')}
@@ -463,11 +601,11 @@ export default function Sidebar({
                                 </div>
                                 <button
                                     onClick={async () => {
-                                        if (!pairIp || !pairCode || isRefreshing) return;
+                                        if (!pairIp || !pairCode || isRefreshing || isPairing) return;
                                         const res = await completePairing(pairIp, pairCode);
                                         if (res.success) setPairCode('');
                                     }}
-                                    disabled={isRefreshing}
+                                    disabled={isRefreshing || isConnecting || isDiagnosing || isPairing || isUsbSwitching}
                                     className={`w-full py-1.5 border border-zinc-800 hover:border-primary/50 hover:bg-primary/5 text-zinc-500 hover:text-primary rounded-lg text-[10px] font-black uppercase transition-all active:scale-[0.98] ${isRefreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 >
                                     {isRefreshing ? t('sidebar.synchronizing') : t('sidebar.startPairing')}

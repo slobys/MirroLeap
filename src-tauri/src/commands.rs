@@ -368,8 +368,13 @@ pub async fn adb_connect(window: Window, ip: String, custom_path: Option<String>
     require_main_window(&window)?;
     let silent = silent.unwrap_or(false);
     let adb_path = get_binary_path("adb", custom_path);
-    let requested = ip.trim();
-    if requested.is_empty() { return Ok(json!({ "success": false, "message": "Enter a device IP address" })); }
+    // Exact unicast endpoint only. Never forward raw user text that could
+    // be interpreted as an adb option or additional argument.
+    let Some(endpoint) = parse_diagnostic_endpoint(&ip) else {
+        return Ok(json!({ "success": false, "message": "Enter a valid unicast IPv4 address and optional TCP port" }));
+    };
+    let requested_address = endpoint.to_string();
+    let requested = requested_address.as_str();
     if !silent { let _ = window.emit("scrcpy-log", format!("[SYSTEM] Connecting to {}...", requested)); }
 
     let (success, mut message) = attempt_adb_connect(&adb_path, requested).await?;
@@ -597,9 +602,13 @@ fn parse_diagnostic_endpoint(raw: &str) -> Option<std::net::SocketAddrV4> {
 /// A TCP probe checks reachability, not ADB authorization or successful pairing.
 #[tauri::command]
 pub async fn diagnose_adb_connection(
+    window: Window,
     ip: String,
     custom_path: Option<String>,
 ) -> serde_json::Value {
+    if let Err(message) = require_main_window(&window) {
+        return json!({ "code": "error", "address": "", "alternatives": [], "adbError": message });
+    }
     let Some(endpoint) = parse_diagnostic_endpoint(&ip) else {
         return json!({"code": "invalid", "address": ip, "alternatives": []});
     };
@@ -657,8 +666,47 @@ mod connection_diagnostics_tests {
     }
     #[test]
     fn rejects_invalid_inputs() {
-        for invalid in ["", "10.0.0.1:0", "10.0.0.1:99999", "example.com:5555", "256.0.0.1:5", "0.0.0.0:5555"] {
+        for invalid in ["", "10.0.0.1:0", "10.0.0.1:99999", "example.com:5555", "256.0.0.1:5", "0.0.0.0:5555",
+            "-s 192.168.1.1", "224.0.0.5:5555", "255.255.255.255:5555", "192.168.1.1;echo bad"] {
             assert!(parse_diagnostic_endpoint(invalid).is_none(), "{invalid}");
+        }
+    }
+}
+
+/// Pairing uses the separate, explicitly displayed Android 11+ pairing port;
+/// do not treat a regular connection endpoint or arbitrary ADB arguments as
+/// a valid pairing instruction.
+fn checked_pairing_inputs(ip: &str, code: &str) -> Result<(String, String), String> {
+    if !ip.contains(':') {
+        return Err("Enter the IP and pairing port shown by Android Wireless debugging.".into());
+    }
+    let Some(endpoint) = parse_diagnostic_endpoint(&ip) else {
+        return Err("Invalid wireless pairing IP and port.".into());
+    };
+    let pairing_code = code.trim();
+    if pairing_code.len() != 6 || !pairing_code.bytes().all(|c| c.is_ascii_digit()) {
+        return Err("Enter the six-digit pairing code shown on your phone.".into());
+    }
+    Ok((endpoint.to_string(), pairing_code.to_string()))
+}
+
+#[cfg(test)]
+mod wireless_pairing_inputs_tests {
+    use super::checked_pairing_inputs;
+
+    #[test]
+    fn pairing_requires_exact_phone_ip_and_six_digit_code() {
+        assert_eq!(
+            checked_pairing_inputs("192.168.2.226:36547", " 123456 ").unwrap(),
+            ("192.168.2.226:36547".into(), "123456".into())
+        );
+        for invalid in ["192.168.2.226", "-x", "example.com:12345",
+            "192.168.2.226:0", "192.168.2.226:70000", "10.0.0.1:1234;rm -rf /",
+            "224.0.0.1:12345"] {
+            assert!(checked_pairing_inputs(invalid, "123456").is_err(), "{invalid}");
+        }
+        for code in ["", "123", "1234567", "-12345", "12345x", "123 456", "123456\nexit"] {
+            assert!(checked_pairing_inputs("192.168.2.226:36547", code).is_err(), "{code}");
         }
     }
 }
@@ -666,15 +714,18 @@ mod connection_diagnostics_tests {
 #[tauri::command]
 pub async fn adb_pair(window: Window, ip: String, code: String, custom_path: Option<String>) -> Result<serde_json::Value, String> {
     require_main_window(&window)?;
+    let (address, pairing_code) = match checked_pairing_inputs(&ip, &code) {
+        Ok(values) => values,
+        Err(message) => return Ok(json!({"success": false, "message": message})),
+    };
     let adb_path = get_binary_path("adb", custom_path);
-    let _ = window.emit("scrcpy-log", format!("[SYSTEM] Pairing with {}...", ip));
+    let _ = window.emit("scrcpy-log", format!("[SYSTEM] Pairing with {}...", address));
 
-    let output = create_command(&adb_path)
-        .arg("pair")
-        .arg(&ip)
-        .arg(&code)
-        .output()
+    let mut command = create_command(&adb_path);
+    command.arg("pair").arg(&address).arg(&pairing_code).kill_on_drop(true);
+    let output = timeout(Duration::from_secs(20), command.output())
         .await
+        .map_err(|_| "Wireless pairing timed out after 20 seconds.".to_string())?
         .map_err(|e| e.to_string())?;
 
     let out_text = String::from_utf8_lossy(&output.stdout).trim().to_string();
