@@ -81,7 +81,7 @@ export default function ControlPanel({
     detectedCameras = [],
     renderDriverSupport = { hostOs: 'unknown', supportsRenderDriver: false, supportedDrivers: [] }
 }: ControlPanelProps) {
-    const { t } = useI18n();
+    const { t, locale } = useI18n();
 
     const handleChange = (field: keyof ScrcpyConfig, value: any) => {
         setConfig({ ...config, [field]: value });
@@ -141,7 +141,7 @@ export default function ControlPanel({
 
     const PerformanceGrid = ({ showResolution = true, showCodec = true }: { showResolution?: boolean, showCodec?: boolean }) => (
         <>
-        <div className={`grid ${showResolution ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {showResolution && (
                 <CustomSelect
                     label={t('controlPanel.resolution')}
@@ -213,6 +213,9 @@ export default function ControlPanel({
                             : t('controlPanel.quickResolutionHint')}
                 </div>
             )}
+        <details className="ml-settings-details">
+            <summary>{locale.startsWith('zh') ? '兼容与同步' : 'Compatibility & sync'} <span>{locale.startsWith('zh') ? '垂直同步、编码器兼容' : 'VSync and encoder limits'}</span></summary>
+            <div className="space-y-3 pt-4">
         <Tooltip text={t('controlPanel.vsyncTooltip')}>
             <div
                 className="flex items-center justify-between gap-2 cursor-pointer group px-2 py-1.5 rounded-lg border border-zinc-800/60 bg-zinc-950/20 hover:border-primary/40 transition-colors"
@@ -242,33 +245,35 @@ export default function ControlPanel({
                 <span className="text-[8px] font-black uppercase tracking-tighter text-zinc-600 group-hover:text-primary/70 transition-colors">v4.1</span>
             </div>
         </Tooltip>
+            </div>
+        </details>
         </>
     );
 
     return (
-        <main className="lg:col-span-6 space-y-4">
-            <div className="glass p-3.5 rounded-2xl border border-zinc-800 bg-zinc-900/50 backdrop-blur-md">
+        <main className="ml-comfort-settings lg:col-span-6 space-y-6 min-w-0 pb-8">
+            <div className="glass p-5 sm:p-6 rounded-2xl border border-zinc-800 bg-zinc-900/50 backdrop-blur-md">
                 <div className="flex items-center gap-2 mb-1.5">
                     <label className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">{t('controlPanel.captureSource')}</label>
                 </div>
-                <div className="grid grid-cols-3 gap-1.5 bg-zinc-950/50 p-1 rounded-xl border border-zinc-800">
+                <div className="grid grid-cols-3 gap-2 bg-zinc-950/50 p-1.5 rounded-xl border border-zinc-800">
                     <button
                         onClick={() => handleChange('sessionMode', 'mirror')}
-                        className={`flex flex-col items-center gap-1.5 py-2.5 rounded-lg transition-all ${config.sessionMode === 'mirror' ? 'bg-primary text-on-primary shadow-lg shadow-primary/20' : 'text-zinc-500 hover:text-primary hover:bg-zinc-950 transition-all'}`}
+                        className={`flex flex-col items-center gap-2 py-4 rounded-xl transition-all ${config.sessionMode === 'mirror' ? 'bg-primary text-on-primary shadow-lg shadow-primary/20' : 'text-zinc-500 hover:text-primary hover:bg-zinc-950 transition-all'}`}
                     >
                         <Monitor size={18} strokeWidth={2.5} />
                         <span className="text-[9px] font-black uppercase tracking-wider">{t('controlPanel.screen')}</span>
                     </button>
                     <button
                         onClick={() => handleChange('sessionMode', 'camera')}
-                        className={`flex flex-col items-center gap-1.5 py-2.5 rounded-lg transition-all ${config.sessionMode === 'camera' ? 'bg-primary text-on-primary shadow-lg shadow-primary/20' : 'text-zinc-500 hover:text-primary hover:bg-zinc-950 transition-all'}`}
+                        className={`flex flex-col items-center gap-2 py-4 rounded-xl transition-all ${config.sessionMode === 'camera' ? 'bg-primary text-on-primary shadow-lg shadow-primary/20' : 'text-zinc-500 hover:text-primary hover:bg-zinc-950 transition-all'}`}
                     >
                         <Camera size={18} strokeWidth={2.5} />
                         <span className="text-[9px] font-black uppercase tracking-wider">{t('controlPanel.camera')}</span>
                     </button>
                     <button
                         onClick={() => handleChange('sessionMode', 'desktop')}
-                        className={`flex flex-col items-center gap-1.5 py-2.5 rounded-lg transition-all ${config.sessionMode === 'desktop' ? 'bg-primary text-on-primary shadow-lg shadow-primary/20' : 'text-zinc-500 hover:text-primary hover:bg-zinc-950 transition-all'}`}
+                        className={`flex flex-col items-center gap-2 py-4 rounded-xl transition-all ${config.sessionMode === 'desktop' ? 'bg-primary text-on-primary shadow-lg shadow-primary/20' : 'text-zinc-500 hover:text-primary hover:bg-zinc-950 transition-all'}`}
                     >
                         <LayoutGrid size={18} strokeWidth={2.5} />
                         <span className="text-[9px] font-black uppercase tracking-wider">{t('controlPanel.desktop')}</span>
@@ -276,7 +281,7 @@ export default function ControlPanel({
                 </div>
             </div>
 
-            <div className="glass p-3.5 rounded-xl space-y-3 transition-all duration-300 border border-zinc-800 bg-zinc-900/40 backdrop-blur-md relative z-20">
+            <div className="glass p-5 sm:p-6 rounded-2xl space-y-5 transition-all duration-300 border border-zinc-800 bg-zinc-900/40 backdrop-blur-md relative z-20">
                 <div className="flex justify-between items-center border-b border-zinc-800/60 pb-1.5 mb-1">
                     <div className="flex items-center gap-3">
                         <h2 className="text-[11px] font-black uppercase text-zinc-400 tracking-widest">{t('controlPanel.engineConfiguration')}</h2>
@@ -293,11 +298,16 @@ export default function ControlPanel({
                     </div>
                 </div>
 
-                <div className="space-y-2.5 relative z-30">
+                <div className="space-y-6 relative z-30">
                     {/* Screen Config */}
                     {config.sessionMode === 'mirror' && (
                         <>
-                            <div className="space-y-3 p-3 rounded-xl border border-zinc-800 bg-zinc-950/20">
+                            <div className={`space-y-2.5 pt-0.5 transition-all duration-300 ${config.otgPure ? 'opacity-30 pointer-events-none grayscale' : 'opacity-100'}`}>
+                                <PerformanceGrid />
+                                <BitrateControl label={t('controlPanel.bitrate')} value={config.bitrate || 8} onChange={(v) => handleChange('bitrate', v)} />
+                            </div>
+
+                            <div className="space-y-4 p-5 rounded-xl border border-zinc-800 bg-zinc-950/20">
                                 <div className="flex items-center gap-2 mb-0.5">
                                     <Keyboard size={12} className="text-primary" />
                                     <span className="text-[9px] font-black uppercase text-zinc-400 tracking-widest">{t('controlPanel.inputEnhancements')}</span>
@@ -353,10 +363,7 @@ export default function ControlPanel({
                                 </div>
                             </div>
 
-                            <div className={`space-y-2.5 pt-0.5 transition-all duration-300 ${config.otgPure ? 'opacity-30 pointer-events-none grayscale' : 'opacity-100'}`}>
-                                <PerformanceGrid />
-                                <BitrateControl label={t('controlPanel.bitrate')} value={config.bitrate || 8} onChange={(v) => handleChange('bitrate', v)} />
-                            </div>
+
                         </>
                     )}
 

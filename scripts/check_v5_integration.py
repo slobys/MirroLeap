@@ -23,11 +23,13 @@ native = read("src-tauri/src/lib.rs")
 hooks = read("src/hooks/useScrcpy.ts")
 ci = read(".github/workflows/desktop-ci.yml")
 
-assert package["version"] == lock["version"] == lock["packages"][""]["version"] == "5.0.0"
+version = package["version"]
+assert re.fullmatch(r"5\.\d+\.\d+", version), "Expected a v5 release"
+assert version == lock["version"] == lock["packages"][""]["version"]
 assert tauri["version"] == package["version"]
 assert tauri["identifier"] == "com.kb.scrcpy-gui-v3", "Existing Windows user settings must survive upgrades"
-assert re.search(r'(?m)^version = "5.0.0"$', crate)
-assert re.search(r'(?m)^name = "mirroleap"\nversion = "5.0.0"$', cargo_lock)
+assert re.search(rf'(?m)^version = "{re.escape(version)}"$', crate)
+assert re.search(rf'(?m)^name = "mirroleap"\nversion = "{re.escape(version)}"$', cargo_lock)
 assert "tauri-plugin-clipboard-manager" in cargo_lock
 assert "tauri-plugin-clipboard-manager" in crate
 assert "@tauri-apps/plugin-clipboard-manager" in package["dependencies"]
@@ -68,10 +70,10 @@ assert 'src="/present-overlay.js"' in read("public/frame.html")
 assert 'data:image/png;base64,' in read("public/present-overlay.js")
 assert "Run-MirroLeap.cmd" in read("README.md")
 for expected in (
-    "MirroLeap_5.0.0_x64_Portable.zip",
-    "MirroLeap_5.0.0_x64-setup.exe",
-    "MirroLeap_5.0.0_x64_en-US.msi",
+    f"MirroLeap_{version}_x64_Portable.zip",
+    f"MirroLeap_{version}_x64-setup.exe",
+    f"MirroLeap_{version}_x64_en-US.msi",
 ):
     assert expected in read("README.md"), expected
-print("MirroLeap v5.0.0: five integrated UI features, Tauri IPC, native dependencies, security scopes, "
+print(f"MirroLeap v{version}: five integrated UI features, Tauri IPC, native dependencies, security scopes, "
       "portable release metadata and CI regression gates verified")

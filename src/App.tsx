@@ -93,7 +93,7 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("5.0.0");
+  const [appVersion, setAppVersion] = useState("5.0.1");
   // Keep the daily workflow lightweight. Older saved scrcpy_* options are
   // still read by useScrcpy, and every advanced feature remains in Settings.
   const [view, setView] = useState<'home' | 'settings'>('home');
@@ -382,7 +382,7 @@ function App() {
             />
           ) : (
             <section className="ml-settings flex flex-col flex-1 min-h-0" aria-label={locale.startsWith('zh') ? '设置' : 'Settings'}>
-              <div className="ml-settings-top shrink-0 px-6 pt-5 pb-3">
+              <div className="ml-settings-top shrink-0 px-5 sm:px-8 pt-6 pb-4">
                 <div className="flex items-center gap-3">
                   <button type="button" className="ml-icon-button" aria-label={locale.startsWith('zh') ? '返回首页' : 'Back to home'}
                     onClick={() => setView('home')}><ArrowLeft size={19}/></button>
@@ -408,10 +408,10 @@ function App() {
                   ))}
                 </nav>
               </div>
-              <div className="ml-settings-body flex-1 overflow-y-auto custom-scrollbar px-5 pb-8 pt-4" key={settingsTab}>
-                <div className="max-w-[900px] mx-auto">
+              <div className="ml-settings-body flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 sm:px-8 pb-12 pt-6" key={settingsTab}>
+                <div className="max-w-[1080px] mx-auto">
                   {settingsTab === 'mirror' && (
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-6">
                     <ControlPanel
                       config={config} setConfig={setConfig} onStart={handleStart}
                       onStop={handleStop} isRunning={sessionRunning}
@@ -439,13 +439,13 @@ function App() {
                     />
                   )}
                   {settingsTab === 'behavior' && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       <SessionBehavior config={config} setConfig={setConfig}/>
                       <ShortcutsPanel/>
                     </div>
                   )}
                   {settingsTab === 'appearance' && (
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-6">
                       <Header
                         onThemeChange={setTheme} currentTheme={theme}
                         colorMode={colorMode} onColorModeChange={setColorMode}
@@ -459,7 +459,7 @@ function App() {
                     </div>
                   )}
                   {settingsTab === 'tools' && (
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-6">
                       <MirroPresentPanel device={activeDevice}
                         running={sessionRunning} customPath={config.scrcpyPath}
                         onRecenter={recenterMirrorWindow}/>
