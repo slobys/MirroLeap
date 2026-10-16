@@ -456,3 +456,37 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .ml-home *, .ml-settings * { transition-duration: 0s !important; }
 }
+
+/* MirroLeap v5: comfortable, scroll-friendly advanced settings only.
+   Keep compact home and floating scrcpy windows untouched. */
+.ml-comfort-settings { max-width: 1120px; margin-inline: auto; }
+.ml-comfort-settings [class~="text-[8px]"],
+.ml-comfort-settings [class~="text-[9px]"],
+.ml-comfort-settings [class~="text-[10px]"] { font-size: 14px; line-height: 1.55; letter-spacing: normal; }
+.ml-comfort-settings [class~="text-[11px]"] { font-size: 15px; line-height: 1.5; letter-spacing: normal; }
+.ml-comfort-settings label { font-size: 14px; line-height: 1.6; }
+.ml-comfort-settings button:not(.custom-range) { min-height: 42px; }
+.ml-comfort-settings button:focus-visible,
+.ml-comfort-settings summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.ml-comfort-settings input[type="text"], .ml-comfort-settings select { min-height: 44px; font-size: 15px; }
+.ml-comfort-settings .ml-settings-details { margin-top: 20px; border-top: 1px solid var(--border-base); padding-top: 16px; }
+.ml-comfort-settings .ml-settings-details summary {
+  cursor: pointer; font-weight: 650; font-size: 15px; color: var(--text-base); padding-block: 8px;
+}
+.ml-comfort-settings .ml-settings-details summary span { font-size: 13px; font-weight: 400; color: var(--text-muted); margin-left: 12px; }
+@media (max-width: 760px) {
+  .ml-comfort-settings { padding-inline: 4px; }
+  .ml-comfort-settings .ml-settings-details summary span { display: block; margin-left: 18px; }
+}
+
+/* Larger, calmer navigation shared by every settings category. */
+.ml-settings-top h1 { font-size: clamp(22px, 2.4vw, 28px); line-height: 1.3; }
+.ml-settings-top p { font-size: 14px; line-height: 1.6; }
+.ml-settings-tab { min-height: 48px; padding-inline: 17px; font-size: 15px; border-radius: 13px; }
+.ml-settings-body { overflow-x: hidden; }
+.ml-settings-body > div { min-width: 0; }
+.ml-settings .ml-version-pill { font-size: 13px; padding: 9px 13px; }
+@media (max-width: 800px) {
+  .ml-settings-top { padding-inline: 18px; }
+  .ml-settings-body { padding-inline: 18px; }
+}
