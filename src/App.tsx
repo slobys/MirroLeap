@@ -20,8 +20,13 @@ import { useScrcpy } from "./hooks/useScrcpy";
 import { getVersion } from '@tauri-apps/api/app';
 import { useI18n } from "./i18n";
 import { ArrowLeft, Keyboard, MonitorPlay, Palette, Settings2, Smartphone, TerminalSquare } from 'lucide-react';
+import './settings-center.css';
 
 type SettingsTab = 'devices' | 'mirror' | 'behavior' | 'appearance' | 'tools';
+const RESOLUTION_LABELS: Record<string, string> = {
+  '3840': '4K', '2560': '2K', '1920': '1080p', '1600': '900p',
+  '1280': '720p', '1024': '576p', '800': '480p',
+};
 
 function App() {
   const { t, locale } = useI18n();
@@ -409,21 +414,33 @@ function App() {
                 </nav>
               </div>
               <div className="ml-settings-body flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 sm:px-8 pb-12 pt-6" key={settingsTab}>
-                <div className="max-w-[1080px] mx-auto">
+                <div className="ml-settings-frame mx-auto">
                   {settingsTab === 'mirror' && (
-                    <div className="flex flex-col gap-6">
-                    <ControlPanel
-                      config={config} setConfig={setConfig} onStart={handleStart}
-                      onStop={handleStop} isRunning={sessionRunning}
-                      onResolutionChange={(size) => void changeMirrorResolution(activeDevice || config.device, size)}
-                      isSwitchingResolution={isSwitchingResolution} detectedCameras={detectedCameras}
-                      renderDriverSupport={renderDriverSupport}
-                      onListOptions={(arg) => { if (activeDevice) listScrcpyOptions(activeDevice, arg); }}
-                    />
-                    <DecoderPerformance config={config} setConfig={setConfig}
-                      support={videoDecoderSupport}
-                      observedMode={observedDecoders[activeDevice]}
-                      running={sessionRunning}/>
+                    <div className="ml-settings-columns ml-mirror-layout">
+                      <ControlPanel
+                        config={config} setConfig={setConfig} onStart={handleStart}
+                        onStop={handleStop} isRunning={sessionRunning}
+                        onResolutionChange={(size) => void changeMirrorResolution(activeDevice || config.device, size)}
+                        isSwitchingResolution={isSwitchingResolution} detectedCameras={detectedCameras}
+                        renderDriverSupport={renderDriverSupport}
+                        onListOptions={(arg) => { if (activeDevice) listScrcpyOptions(activeDevice, arg); }}
+                      />
+                      <aside className="ml-settings-stack" aria-label={locale.startsWith('zh') ? '解码与当前配置' : 'Decoder and current settings'}>
+                        <DecoderPerformance config={config} setConfig={setConfig}
+                          support={videoDecoderSupport}
+                          observedMode={observedDecoders[activeDevice]}
+                          running={sessionRunning}/>
+                        <section className="ml-card ml-settings-summary">
+                          <h2>{locale.startsWith('zh') ? '当前参数概览' : 'Configuration at a glance'}</h2>
+                          <p className="ml-muted">{locale.startsWith('zh') ? '以下是已选择的参数，部分修改在下次投屏时生效。' : 'Selected values; some changes apply on the next session.'}</p>
+                          <dl>
+                            <div><dt>{t('controlPanel.resolution')}</dt><dd>{config.res === '0' || !config.res ? (locale.startsWith('zh') ? '原始' : 'Original') : RESOLUTION_LABELS[String(config.res)] || String(config.res)}</dd></div>
+                            <div><dt>{t('controlPanel.codec')}</dt><dd>{String(config.codec || 'h264').toUpperCase()}</dd></div>
+                            <div><dt>{t('controlPanel.fps')}</dt><dd>{config.fps || (locale.startsWith('zh') ? '自动' : 'Auto')}</dd></div>
+                            <div><dt>{t('controlPanel.bitrate')}</dt><dd>{config.bitrate || 8} Mbps</dd></div>
+                          </dl>
+                        </section>
+                      </aside>
                     </div>
                   )}
                   {settingsTab === 'devices' && (
@@ -439,13 +456,13 @@ function App() {
                     />
                   )}
                   {settingsTab === 'behavior' && (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="ml-behavior-layout">
                       <SessionBehavior config={config} setConfig={setConfig}/>
                       <ShortcutsPanel/>
                     </div>
                   )}
                   {settingsTab === 'appearance' && (
-                    <div className="flex flex-col gap-6">
+                    <div className="ml-settings-columns ml-appearance-layout">
                       <Header
                         onThemeChange={setTheme} currentTheme={theme}
                         colorMode={colorMode} onColorModeChange={setColorMode}
@@ -454,19 +471,25 @@ function App() {
                         isDownloading={isDownloading} downloadProgress={downloadProgress}
                         version={appVersion}
                       />
-                      <AppUpdateChecker version={appVersion}/>
-                      <Footer version={appVersion}/>
+                      <div className="ml-settings-stack">
+                        <AppUpdateChecker version={appVersion}/>
+                        <Footer version={appVersion}/>
+                      </div>
                     </div>
                   )}
                   {settingsTab === 'tools' && (
-                    <div className="flex flex-col gap-6">
-                      <MirroPresentPanel device={activeDevice}
-                        running={sessionRunning} customPath={config.scrcpyPath}
-                        onRecenter={recenterMirrorWindow}/>
-                      <ScreenshotTools device={activeDevice} customPath={config.scrcpyPath}/>
-                      <LogPanel logs={logs} onClear={clearLogs}
-                        onAddLog={(msg) => setLogs((prev: string[]) => [...prev.slice(-100), msg])}
-                        onRunCommand={runTerminalCommand}/>
+                    <div className="ml-settings-columns ml-tools-layout">
+                      <div className="ml-settings-stack">
+                        <MirroPresentPanel device={activeDevice}
+                          running={sessionRunning} customPath={config.scrcpyPath}
+                          onRecenter={recenterMirrorWindow}/>
+                        <ScreenshotTools device={activeDevice} customPath={config.scrcpyPath}/>
+                      </div>
+                      <aside className="ml-settings-stack">
+                        <LogPanel logs={logs} onClear={clearLogs}
+                          onAddLog={(msg) => setLogs((prev: string[]) => [...prev.slice(-100), msg])}
+                          onRunCommand={runTerminalCommand}/>
+                      </aside>
                     </div>
                   )}
                 </div>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ScrcpyConfig } from '../hooks/useScrcpy';
 import Tooltip from './Tooltip';
-import { Coffee, MonitorOff, Volume2, Layers, Maximize, Square, Circle, Folder, Settings2, ChevronDown, ActivitySquare, Move, Smartphone } from 'lucide-react';
+import { Coffee, MonitorOff, Volume2, Layers, Maximize, Square, Circle, Folder, ChevronDown, ActivitySquare, Move, Smartphone } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 const AUDIO_CODEC_VALUES = ['auto', 'opus', 'aac', 'flac', 'raw'] as const;
@@ -14,7 +14,7 @@ interface SessionBehaviorProps {
 }
 
 export default function SessionBehavior({ config, setConfig }: SessionBehaviorProps) {
-    const { t } = useI18n();
+    const { t, locale } = useI18n();
 
     const handleChange = (field: keyof ScrcpyConfig, value: any) => {
         const newConfig = { ...config, [field]: value };
@@ -102,34 +102,45 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
 
     const Toggle = ({ checked, onChange, icon: Icon, label, tooltip, danger = false }: { checked: boolean, onChange: (v: boolean) => void, icon: any, label: string, tooltip: string, danger?: boolean }) => (
         <div
+            role="switch"
+            aria-label={label}
+            aria-checked={checked}
+            tabIndex={0}
             onClick={() => onChange(!checked)}
-            className="flex items-center justify-between gap-3 group cursor-pointer py-1 bg-zinc-950/30 rounded-lg px-2 border border-transparent hover:border-zinc-800 transition-all"
+            onKeyDown={(event) => {
+                if (event.key === ' ' || event.key === 'Enter') {
+                    event.preventDefault();
+                    onChange(!checked);
+                }
+            }}
+            className="ml-settings-switch flex items-center justify-between gap-3 group cursor-pointer rounded-xl px-3 border border-transparent hover:border-zinc-800 transition-all"
         >
             <div className="flex items-center gap-2 min-w-0">
-                <div className={`p-1 rounded-md shrink-0 transition-colors ${checked ? (danger ? 'bg-red-500/10 text-red-500' : 'bg-primary/10 text-primary') : 'bg-zinc-800/50 text-zinc-500 group-hover:text-zinc-300'}`}>
-                    <Icon size={12} />
+                <div className={`p-2 rounded-lg shrink-0 transition-colors ${checked ? (danger ? 'bg-red-500/10 text-red-500' : 'bg-primary/10 text-primary') : 'bg-zinc-800/50 text-zinc-500 group-hover:text-zinc-300'}`}>
+                    <Icon size={16} />
                 </div>
-                <div className="flex items-center gap-1.5 min-w-0">
-                    <span className={`text-[10px] font-bold uppercase tracking-tight truncate transition-colors ${checked ? (danger ? 'text-red-400' : 'text-zinc-200') : 'text-zinc-500 group-hover:text-zinc-400'}`}>
-                        {label}
-                    </span>
-                    <div className="shrink-0">
-                        <Tooltip text={tooltip} />
+                <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`text-sm font-semibold truncate transition-colors ${checked ? (danger ? 'text-red-400' : 'text-zinc-200') : 'text-zinc-500 group-hover:text-zinc-400'}`}>
+                            {label}
+                        </span>
+                        <div className="shrink-0"><Tooltip text={tooltip} /></div>
                     </div>
+                    <p className="ml-setting-hint" title={tooltip}>{tooltip}</p>
                 </div>
             </div>
-            <div className={`w-6 h-3.5 shrink-0 rounded-full p-0.5 transition-all duration-300 ${checked ? (danger ? 'bg-red-600' : 'bg-primary') : 'bg-zinc-800'}`}>
-                <div className={`w-2.5 h-2.5 rounded-full shadow-sm transition-all duration-300 ${checked ? (danger ? 'bg-white translate-x-2.5' : 'bg-[var(--text-on-primary)] translate-x-2.5') : 'bg-white translate-x-0'}`} />
+            <div className={`w-10 h-6 shrink-0 rounded-full p-1 transition-all duration-300 ${checked ? (danger ? 'bg-red-600' : 'bg-primary') : 'bg-zinc-800'}`}>
+                <div className={`w-4 h-4 rounded-full shadow-sm transition-all duration-300 ${checked ? 'bg-white translate-x-4' : 'bg-white translate-x-0'}`} />
             </div>
         </div>
     );
 
     return (
-        <div className="space-y-4">
-            <div className="glass p-3.5 rounded-2xl space-y-2 border border-zinc-800 bg-zinc-900/40 backdrop-blur-md">
-                <div className="flex items-center gap-2 border-b border-zinc-800/50 pb-1.5 mb-1">
-                    <Settings2 size={12} className="text-zinc-500" />
-                    <h2 className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">{t('sessionBehavior.title')}</h2>
+        <div className="ml-behavior-groups">
+            <section className="ml-card ml-settings-group">
+                <div className="ml-settings-group-head">
+                    <Coffee size={18} className="ml-primary" />
+                    <h2>{locale.startsWith('zh') ? '手机与连接' : 'Device & connection'}</h2>
                 </div>
 
                 <div className="flex flex-col gap-1">
@@ -171,6 +182,14 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                             />
                         )}
                     </div>
+                </div>
+            </section>
+            <section className="ml-card ml-settings-group">
+                <div className="ml-settings-group-head">
+                    <Layers size={18} className="ml-primary" />
+                    <h2>{locale.startsWith('zh') ? '窗口与显示' : 'Window & display'}</h2>
+                </div>
+                <div className="flex flex-col gap-1">
                     <Toggle
                         checked={config.alwaysOnTop || false}
                         onChange={(v) => handleChange('alwaysOnTop', v)}
@@ -208,6 +227,14 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                         label={t('sessionBehavior.rememberWindowPosition')}
                         tooltip={t('sessionBehavior.rememberWindowPositionTooltip')}
                     />
+                </div>
+            </section>
+            <section className="ml-card ml-settings-group ml-behavior-recording">
+                <div className="ml-settings-group-head">
+                    <Circle size={18} className="ml-primary" />
+                    <h2>{locale.startsWith('zh') ? '录制与保存' : 'Recording & saving'}</h2>
+                </div>
+                <div className="flex flex-col gap-1">
                     <Toggle
                         checked={config.record || false}
                         onChange={(v) => handleChange('record', v)}
@@ -218,7 +245,7 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                     />
                 </div>
 
-                <div className="pt-2 border-t border-zinc-800/50 space-y-2">
+                <div className="pt-3 border-t border-zinc-800/50 space-y-2">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                             <Folder size={12} className="text-zinc-500" />
@@ -237,7 +264,7 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                         </p>
                     </div>
                 </div>
-            </div>
+            </section>
         </div>
     );
 }

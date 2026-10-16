@@ -35,6 +35,19 @@ async function waitForVite() {
 
 async function verify(page, viewport, scale) {
   await page.setViewportSize(viewport);
+  // The visual fixture runs in Edge/Chromium without a Tauri host. Mock
+  // only the inert event bridge needed to mount presenter controls; actual
+  // Windows IPC and WebView2 startup are checked in separate CI gates.
+  await page.addInitScript(() => {
+    let callback = 0;
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {
+        transformCallback: () => ++callback,
+        invoke: async () => 1,
+      },
+    });
+  });
   const problems = [];
   page.on('pageerror', e => problems.push(e.message));
   await page.goto(base + '/tests/layout/settings.html', {waitUntil:'domcontentloaded'});
@@ -54,6 +67,7 @@ async function verify(page, viewport, scale) {
     };
     const container = el('.ml-settings-body');
     const grid = el('.ml-comfort-settings .grid.grid-cols-1');
+    const outer = el('.ml-mirror-layout');
     const label = el('.ml-comfort-settings label');
     return {
       screen: {width:document.documentElement.scrollWidth,
@@ -63,6 +77,8 @@ async function verify(page, viewport, scale) {
       control:find('.ml-comfort-settings button'),
       labelFont:parseFloat(getComputedStyle(label).fontSize),
       gridColumns:getComputedStyle(grid).gridTemplateColumns.split(' ').length,
+      outerColumns:(getComputedStyle(outer).gridTemplateColumns.match(/minmax\([^)]*\)|\S+/g) || []).length,
+      outerTemplate:getComputedStyle(outer).gridTemplateColumns,
       scrollHeight:container.scrollHeight, clientHeight:container.clientHeight,
       overflowY:getComputedStyle(container).overflowY,
       horizontalOverflow:container.scrollWidth - container.clientWidth,
@@ -81,6 +97,8 @@ async function verify(page, viewport, scale) {
   const expectedColumns = viewport.width < 640 ? 1 : 2;
   assert.equal(geometry.gridColumns, expectedColumns,
     desc + ': incorrect capture-settings column count');
+  assert.equal(geometry.outerColumns, viewport.width > 1050 ? 2 : 1,
+    desc + ': mirrored layout did not adapt to available width: ' + geometry.outerTemplate);
 
   // The bottom action must remain reachable at the minimum window size,
   // even though it is intentionally below the fold instead of being squeezed.
@@ -115,21 +133,48 @@ async function verify(page, viewport, scale) {
 
   const behaviorTab = page.locator('.ml-settings-nav button').nth(2);
   await behaviorTab.click();
-  await page.locator('.ml-settings-body .grid').first().waitFor({state:'visible'});
+  await page.locator('.ml-behavior-groups').waitFor({state:'visible'});
   const behavior = await page.evaluate(() => {
-    const grid = document.querySelector('.ml-settings-body > div > div.grid');
+    const grid = document.querySelector('.ml-behavior-groups');
     if (!grid) throw Error('Behavior grid missing');
     return {
-      columns:getComputedStyle(grid).gridTemplateColumns.split(' ').length,
+      columns:(getComputedStyle(grid).gridTemplateColumns.match(/minmax\([^)]*\)|\S+/g) || []).length,
       scrollHeight:document.querySelector('.ml-settings-body').scrollHeight,
       clientHeight:document.querySelector('.ml-settings-body').clientHeight,
     };
   });
-  assert.equal(behavior.columns, viewport.width < 1024 ? 1 : 2,
+  assert.equal(behavior.columns, viewport.width <= 800 ? 1 : 2,
     desc + ': behavior section overpacked');
+  assert(await page.locator('.ml-settings-group').count() >= 3,
+    desc + ': device/window/recording sections missing');
+
+  const appearanceTab = page.locator('.ml-settings-nav button').nth(3);
+  await appearanceTab.click();
+  await page.locator('.ml-appearance-controls').waitFor({state:'visible'});
+  assert.equal(await page.locator('.ml-theme-swatch').count(), 5,
+    desc + ': theme controls disappeared');
+  const appearanceColumns = await page.locator('.ml-appearance-layout')
+    .evaluate(el => (getComputedStyle(el).gridTemplateColumns.match(/minmax\([^)]*\)|\S+/g) || []).length);
+  assert.equal(appearanceColumns, viewport.width > 1050 ? 2 : 1,
+    desc + ': appearance layout is not responsive');
+
+  const toolsTab = page.locator('.ml-settings-nav button').nth(4);
+  await toolsTab.click();
+  await page.locator('.ml-tools-layout').waitFor({state:'visible'});
+  assert.equal(await page.locator('.ml-tools-layout .ml-card').count(), 2,
+    desc + ': presenter and capture cards missing');
+  const toolColumns = await page.locator('.ml-tools-layout')
+    .evaluate(el => (getComputedStyle(el).gridTemplateColumns.match(/minmax\([^)]*\)|\S+/g) || []).length);
+  assert.equal(toolColumns, viewport.width > 1050 ? 2 : 1,
+    desc + ': tools layout is not responsive');
+  const contentWidth = await page.locator('.ml-settings-body')
+    .evaluate(el => el.scrollWidth - el.clientWidth);
+  assert(contentWidth <= 3, desc + ': tools horizontally overflow by ' + contentWidth);
+  assert(await page.locator('.ml-settings-help-details').count() >= 2,
+    desc + ': compact tools lost safety explanations');
   assert.deepEqual(problems, [], desc + ': React layout errors');
   console.log('PASS', desc,
-    'readable settings / reachable scroll / expandable options / tab navigation');
+    'mirror / grouped behavior / appearance / compact tools / scroll');
 }
 
 try {
@@ -144,6 +189,7 @@ try {
     for (const viewport of [
       {width:940,height:680}, {width:740,height:550},
       {width:1300,height:940}, {width:620,height:480},
+      {width:1080,height:680}, {width:1420,height:1024},
     ]) await verify(page, viewport, scale);
     await context.close();
   }
