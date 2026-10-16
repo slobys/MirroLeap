@@ -45,6 +45,7 @@ jobs:
       - run: python3 scripts/check_annotated_capture.py
       - run: python3 scripts/check_preview_clipboard.py
       - run: python3 scripts/check_wireless_center.py
+      - run: python3 scripts/check_app_update.py
       - run: python3 scripts/check_repository_migration.py
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
@@ -170,6 +171,9 @@ jobs:
           - **v4.8.0 智能无线连接中心**：将连接、诊断、USB 转无线、配对结果汇总在无线设备页。点击连接后立即显示进度，失败时自动展示设备状态、当前连接端口和下一步建议。发现同 IP 的动态端口时可以手动选择，不擅自自动连接，也不扫描整个局域网。
           - **历史地址与授权状态更清楚**：展示历史设备的已连接/离线/等待授权/已记住状态，以及 mDNS 配对端口和连接端口的区别；配对成功不会谎报手机已建立投屏连接。
           - **更安全的 ADB 请求**：仅接受合法 IPv4 和可选端口、阻止重复手动连接；原生配对命令校验六位配对码、强制 20 秒超时并限定主窗口调用，同时保留原有的后台退避重连和连接后状态刷新。
+          - **v4.8.1 应用内安全检查更新（第四阶段独立功能）**：在「设置 → 外观与引擎」提供手动检查 MirroLeap 正式版本，读取独立仓库 GitHub Latest 的 Release 信息；准确比较本机版本、新正式版与高于正式版的开发构建，展示发布说明及只允许当前仓库官方标签与确定文件名的下载链接。
+          - **不自动执行安装器**：仅将经过校验的 Portable ZIP / EXE / MSI / SHA256SUMS 链接交给用户在浏览器手动打开；不上传用户设备、配置、日志或手机画面。代码签名尚未配置，因此不启动自动安装、不请求提权，也不关闭 SmartScreen。
+          - **网络和输入保护**：检查只在用户点击时发起；固定 HTTPS GitHub API 地址、禁止跳转、5 秒连接超时与 12 秒总超时、最多读取 512 KiB 元数据，拒绝测试版/草稿、恶意标签或跨仓库下载地址；离线、限流、异常版本都有独立错误提示。
           - **v4.7.2 窗口稳定性 3.0 第一阶段**：优化 Windows SDL 视频与透明手机外框、悬浮栏的 HWND 跟随，不再在位置/层级完全稳定时每 50ms 重复调用 SetWindowPos。发生拖动、旋转、任务栏/多屏 DPI、最小化恢复或层级异常时立即调整，另外每 2 秒进行一次轻量健康校验。保留原有画笔、窗口控制和视频功能，并增加纯 Rust 决策回归测试。
           - **明确六项功能路线图**：后续依次推进 MirroCapture 截图预览复制、智能无线连接中心、软件内检查更新、GPU 解码优化和 MirroPresent 演示工具；新功能与高风险窗口改造拆分发布，避免互相影响。
           - **v4.7.1 MirroCapture 批注图片导出**：在手机投屏画面完成画笔圈画后，到「设置 → 工具与日志」点击「保存含画笔截图」。截取当前选定 Android 手机的原始 PNG，并将当前手机的透明画笔图层按像素比例合成到原分辨率，生成单独的 MirroLeap-Annotated-*.png 文件，保留原始截图按钮。

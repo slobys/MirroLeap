@@ -32,6 +32,8 @@ jobs:
 
       - name: Wireless connection state and native input safety
         run: python3 scripts/check_wireless_center.py
+      - name: Verify read-only MirroLeap desktop update checker
+        run: python3 scripts/check_app_update.py
 
       - name: Lint Frontend
         run: npm run lint
@@ -88,6 +90,8 @@ jobs:
 
       - name: Wireless connection state and native input safety
         run: python3 scripts/check_wireless_center.py
+      - name: Verify read-only MirroLeap desktop update checker
+        run: python3 scripts/check_app_update.py
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
