@@ -411,7 +411,7 @@ function App() {
               <div className="ml-settings-body flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 sm:px-8 pb-12 pt-6" key={settingsTab}>
                 <div className="max-w-[1080px] mx-auto">
                   {settingsTab === 'mirror' && (
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-6">
                     <ControlPanel
                       config={config} setConfig={setConfig} onStart={handleStart}
                       onStop={handleStop} isRunning={sessionRunning}
@@ -439,13 +439,13 @@ function App() {
                     />
                   )}
                   {settingsTab === 'behavior' && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       <SessionBehavior config={config} setConfig={setConfig}/>
                       <ShortcutsPanel/>
                     </div>
                   )}
                   {settingsTab === 'appearance' && (
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-6">
                       <Header
                         onThemeChange={setTheme} currentTheme={theme}
                         colorMode={colorMode} onColorModeChange={setColorMode}
@@ -459,7 +459,7 @@ function App() {
                     </div>
                   )}
                   {settingsTab === 'tools' && (
-                    <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-6">
                       <MirroPresentPanel device={activeDevice}
                         running={sessionRunning} customPath={config.scrcpyPath}
                         onRecenter={recenterMirrorWindow}/>

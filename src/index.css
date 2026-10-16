@@ -490,3 +490,28 @@ body {
   .ml-settings-top { padding-inline: 18px; }
   .ml-settings-body { padding-inline: 18px; }
 }
+
+/* Comfortable settings typography shared across category panels, without
+   changing home, native frame, hover toolbar or console's monospace content. */
+.ml-settings-body { line-height: 1.55; }
+.ml-settings-body :is(h2,h3) { line-height: 1.4; }
+.ml-settings-body :is(h2,h3)[class~="text-[10px]"],
+.ml-settings-body :is(h2,h3)[class~="text-[11px]"] { font-size: 17px; letter-spacing: normal; }
+.ml-settings-body [class~="text-[8px]"],
+.ml-settings-body [class~="text-[9px]"],
+.ml-settings-body [class~="text-[10px]"],
+.ml-settings-body [class~="text-[11px]"],
+.ml-settings-body .text-xs { font-size: 14px; line-height: 1.55; letter-spacing: normal; }
+.ml-settings-body .text-sm { font-size: 15px; line-height: 1.5; }
+.ml-settings-body :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),select,textarea) {
+  min-height: 44px; font-size: 15px;
+}
+.ml-settings-body :is(input,select,textarea,button):focus-visible {
+  outline: 2px solid var(--primary); outline-offset: 2px;
+}
+.ml-settings-body :is(button,summary) { touch-action: manipulation; }
+.ml-settings-body .grid > * { min-width: 0; }
+@media (max-width: 740px) {
+  .ml-settings-top .ml-version-pill { font-size: 11px; }
+  .ml-settings-top h1 { font-size: 21px; }
+}
