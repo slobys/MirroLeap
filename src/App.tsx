@@ -97,7 +97,7 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("5.0.8");
+  const [appVersion, setAppVersion] = useState("5.0.9");
   const [appVersionReady,setAppVersionReady] = useState(false);
   const {startupRelease, startupInstallKind, checking: checkingUpdate, rememberUpdate} =
     useStartupUpdateCheck(appVersionReady);

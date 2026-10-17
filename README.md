@@ -31,11 +31,11 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
-## 开发分支后续修复（尚未合并及发布）
+## ✨ v5.0.9 · 旋转可靠性与软件更新入口（Windows 实机测试版）
 
-- **旋转**：悬浮栏不再模拟 Windows 的 Alt+R；经受限 ADB 命令请求 Android 窗口管理器临时固定到相反方向，读取 Android 截图和 scrcpy SDL 实际画面尺寸确认成功。正常停止投屏时尝试恢复原来的自动旋转／锁定设置。**如果手机系统或应用拒绝切换会报告失败；异常强制退出时仍可能需要手动恢复手机自动旋转，且不同 ROM 待实机确认。**
+- **旋转**：悬浮栏不再模拟 Windows 的 Alt+R；通过受限 ADB 请求 Android 窗口管理器临时切换到另一方向，依次确认 Android 截图与 scrcpy 视频画面变化，边框随后按真实宽高跟随。正常停止投屏时尝试恢复原来的自动旋转／锁定设置。**手机系统或应用仍可能拒绝方向切换，异常强制退出后也可能需要手动恢复自动旋转，请在真实设备上验收。**
 - **下载**：在更新信息里点击官方 EXE／ZIP／MSI 改为应用受限下载、SHA-256 校验后存入 Windows“下载”文件夹；浏览器无法接管下载时也有明确反馈。仅 NSIS 安装版保留用户主动点击的签名验证在线安装；下载 EXE 不会自动执行。
-- **位置**：设置中的重复 MirroPresent 操作卡片移除，聚光灯和放大镜在手机悬浮栏使用。原设置页软件更新卡片移至首页、设置页右上角可点击版本徽标；每次启动静默检查一次，发现新版显示绿色圆点，用户决定何时打开并升级。
+- **位置**：设置中的重复 MirroPresent 操作卡片移除，聚光灯和放大镜在手机悬浮栏使用。软件更新卡片移至首页、设置页右上角可点击版本徽标；每次启动静默检查一次，发现新版显示绿色圆点，用户决定何时打开并升级。此版作为 **GitHub Pre-release 测试版**提供 Windows EXE、MSI、Portable ZIP 与 SHA-256 校验文件，稳定版不受影响。
 
 ## ✨ v5.0.8 · 真正的手机方向旋转、自动更新提醒与社区外链（测试候选）
 
@@ -85,11 +85,11 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.0.8_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.0.8_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.0.8_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.9_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.9_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.9_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-从 **[MirroLeap GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest)** 的 Assets 下载，不要从 Tags 页面下载源码 ZIP 当作安装包。
+本次 Windows 实机测试请选择 **[v5.0.9 预发布测试版](https://github.com/slobys/MirroLeap/releases/tag/v5.0.9)** 的 Assets；正式稳定版仍可从 [Latest](https://github.com/slobys/MirroLeap/releases/latest) 下载。不要把 Tags 页面提供的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 
