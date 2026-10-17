@@ -17,6 +17,8 @@ export interface AppUpdateInfo {
   publishedAt: string | null;
   changelog: string;
   downloads: ReleaseDownload[];
+  /** The newest official signed release may be a public prerelease. */
+  prerelease?: boolean;
 }
 
 /** Accept only exact canonical GitHub Release paths. This is defense-in-depth

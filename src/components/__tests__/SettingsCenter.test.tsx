@@ -17,7 +17,7 @@ describe('redesigned settings center keeps existing actions accessible', () => {
       colorMode="light"
       onColorModeChange={onColorModeChange}
       binaryStatus={{found:false,message:'Engine not found'}}
-      isDownloading={false} downloadProgress={0} version="5.0.6"
+      isDownloading={false} downloadProgress={0} version="5.0.7"
       onDownload={onDownload} onSetPath={onSetPath} onResetPath={onResetPath}
     />);
     fireEvent.click(screen.getByRole('button', {name:'Astro Blue'}));
@@ -39,7 +39,7 @@ describe('redesigned settings center keeps existing actions accessible', () => {
     const setConfig = vi.fn();
     render(<SessionBehavior config={config} setConfig={setConfig}/>);
     expect(screen.getByText('Device & connection')).toBeInTheDocument();
-    expect(screen.getByText('Window & display')).toBeInTheDocument();
+    expect(screen.queryByText('Window & display')).not.toBeInTheDocument();
     expect(screen.getByText('Recording & saving')).toBeInTheDocument();
     const toggle = screen.getByRole('switch', {name:'Stay Awake'});
     expect(toggle).toHaveAttribute('aria-checked','false');

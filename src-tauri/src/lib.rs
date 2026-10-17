@@ -151,6 +151,7 @@ pub fn run() {
             commands::run_terminal_command,
             commands::check_scrcpy_update,
             app_update::check_mirroleap_update,
+            app_update::install_signed_update,
             app_update::check_mirroleap_preview_update,
             close_splashscreen,
             get_app_version

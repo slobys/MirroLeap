@@ -22,7 +22,7 @@ const layouts = [
   { layout:'tight-ink-left', width:374, height:136 },
 ];
 const file = pathToFileURL(resolve('public/phone-controls.html')).href;
-const names = ['fullscreen','home','back','recents','power','rotate','paste','top'];
+const names = ['fullscreen','home','back','recents','power','rotate','paste','top','remember'];
 const presenterActions = ['spotlight','magnifier','refresh','off'];
 const browser = await chromium.launch({
   channel: process.env.MIRROLEAP_LAYOUT_BROWSER === 'chromium' ? undefined : 'msedge',

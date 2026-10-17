@@ -57,6 +57,10 @@ fn is_present_panel_open(device: &str) -> bool {
     presenter_panels().lock().map(|set| set.contains(device)).unwrap_or(false)
 }
 static VIDEO_TOPMOST_REQUESTS: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+static REMEMBER_WINDOW_POSITIONS: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+fn remember_positions() -> &'static Mutex<HashMap<String, bool>> {
+    REMEMBER_WINDOW_POSITIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 fn topmost_requests() -> &'static Mutex<HashMap<String, bool>> {
     VIDEO_TOPMOST_REQUESTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -478,6 +482,16 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
 
     loop {
         ticker.tick().await;
+        // A video-decoder/audio fallback can replace the transparent shell
+        // with a new WebView of the same label. Do not keep an old follower
+        // repositioning its destroyed HWND or fighting the new follower.
+        let active_frame = app.get_webview_window(&label(&device))
+            .and_then(|view| view.hwnd().ok())
+            .map(|handle| handle.0 as usize);
+        let own_frame = overlay.hwnd().ok().map(|handle| handle.0 as usize);
+        if own_frame.is_none() || active_frame != own_frame {
+            break;
+        }
         let pid = app.state::<ScrcpyState>()
             .processes.lock().ok()
             .and_then(|processes| processes.get(&device).and_then(|child| child.id()));
@@ -1229,9 +1243,22 @@ fn toggle_video_topmost(app: &AppHandle, device: &str, hwnd: HWND) -> Result<boo
     topmost_requests().lock().map_err(|e| e.to_string())?
         .insert(device.to_string(), requested);
     if let Err(error) = apply_video_topmost(app, device, hwnd, requested) {
-        topmost_requests().lock().map_err(|e| e.to_string())?
-            .insert(device.to_string(), previous);
-        return Err(error);
+        // Some systems refuse cross-process WS_EX_TOPMOST changes to an SDL
+        // HWND despite reporting SetWindowPos success. The scrcpy CLI can
+        // deterministically create an always-on-top window from launch, so
+        // hand off a controlled *restart* to the main UI rather than looping
+        // SetWindowPos, claiming success or asking users to disable security.
+        if let Err(dispatch) = app.emit("mirroleap-topmost-restart", serde_json::json!({
+            "device":device, "enabled":requested
+        })) {
+            topmost_requests().lock().map_err(|e| e.to_string())?
+                .insert(device.to_string(), previous);
+            return Err(format!("{error}; could not request fallback restart: {dispatch}"));
+        }
+        let _ = app.emit("scrcpy-log", format!(
+            "[FRAME] Windows refused native topmost change; restarting scrcpy with explicit --always-on-top={requested}"
+        ));
+        return Ok(requested);
     }
     Ok(requested)
 }
@@ -1304,6 +1331,10 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         };
     }
     if action == "quick_status" { return Ok(is_quick_open(&device)); }
+    if action == "quick_remember_status" {
+        return Ok(remember_positions().lock().map_err(|e| e.to_string())?
+            .get(&device).copied().unwrap_or(true));
+    }
     if action == "quick_top_status" {
         return Ok((unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32
             & WS_EX_TOPMOST.0) != 0);
@@ -1326,6 +1357,18 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         }
         if action == "quick_top_toggle" {
             return toggle_video_topmost(app, &device, hwnd);
+        }
+        if action == "quick_remember_toggle" {
+            let updated = {
+                let mut state = remember_positions().lock().map_err(|e| e.to_string())?;
+                let updated = !state.get(&device).copied().unwrap_or(true);
+                state.insert(device.clone(), updated);
+                updated
+            };
+            app.emit("mirroleap-remember-window-position", serde_json::json!({
+                "device": device, "enabled": updated
+            })).map_err(|e| format!("Cannot synchronize saved window preference: {e}"))?;
+            return Ok(updated);
         }
         if matches!(action, "quick_fullscreen" | "quick_rotate" | "quick_paste") {
             send_video_shortcut(hwnd, action)?;
@@ -1447,7 +1490,12 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
     Ok(())
 }
 
-pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), String> {
+pub fn start(
+    app: &AppHandle, device: &str, always_on_top: bool, remember_position: bool,
+) -> Result<(), String> {
+    if let Ok(mut prefs) = remember_positions().lock() {
+        prefs.insert(device.to_string(), remember_position);
+    }
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
     if let Ok(mut present) = presenter_panels().lock() { present.remove(device); }
     if let Ok(mut states) = topmost_requests().lock() {
@@ -1528,6 +1576,7 @@ pub fn start(app: &AppHandle, device: &str, always_on_top: bool) -> Result<(), S
 }
 
 pub fn close(app: &AppHandle, device: &str) {
+    if let Ok(mut prefs) = remember_positions().lock() { prefs.remove(device); }
     if let Ok(mut topmost) = topmost_requests().lock() { topmost.remove(device); }
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
     if let Ok(mut present) = presenter_panels().lock() { present.remove(device); }

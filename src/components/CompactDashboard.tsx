@@ -1,6 +1,6 @@
 import {
     ArrowRight, Check, CircleHelp, Download, MonitorPlay, RefreshCw,
-    Settings2, ShieldCheck, Smartphone, Volume2, VolumeX, Wifi,
+    Settings2, ShieldCheck, Smartphone, Volume2, VolumeX, Wifi, Youtube, Send,
 } from 'lucide-react';
 import type { PendingAdbDevice, ScrcpyConfig } from '../hooks/useScrcpy';
 import { applyMirrorPreset, activeMirrorPreset, type MirrorPreset } from '../utils/mirrorPresets';
@@ -69,6 +69,20 @@ export default function CompactDashboard({
                         </p>
                     </div>
                 </div>
+                <nav className="ml-community-links" aria-label={copy('官方交流频道','Community channels')}>
+                    <a href="https://www.youtube.com/@naiyou" target="_blank" rel="noopener noreferrer"
+                        aria-label={copy('奶油 YouTube 频道','Naiyou YouTube channel')}
+                        className="ml-community-link ml-community-youtube">
+                        <Youtube size={19} aria-hidden="true"/>
+                        <span>YouTube</span>
+                    </a>
+                    <a href="https://t.me/naiyous" target="_blank" rel="noopener noreferrer"
+                        aria-label={copy('奶油 Telegram 群组','Naiyou Telegram group')}
+                        className="ml-community-link ml-community-telegram">
+                        <Send size={17} aria-hidden="true"/>
+                        <span>Telegram</span>
+                    </a>
+                </nav>
                 <div className="flex items-center gap-2 shrink-0">
                     <span className="ml-version-pill" aria-label={copy('软件版本', 'App version')}>v{version}</span>
                     <button type="button" className="ml-icon-button" aria-label={copy('打开设置', 'Open settings')}

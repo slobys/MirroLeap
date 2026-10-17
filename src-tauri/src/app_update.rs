@@ -1,18 +1,20 @@
-//! Read-only update checks for the MirroLeap DESKTOP application.
-//!
-//! Distinct from core_manager.rs, which can update the scrcpy engine.
-//! No installer is downloaded, written, executed, or silently launched here:
-//! the app has no trusted Windows Authenticode/update-signature configuration.
-//! GitHub release metadata is untrusted input even over HTTPS. Validate the
-//! tag, release status and every asset URL before displaying external links.
+//! MirroLeap desktop release discovery and explicitly clicked signed updates.
+//! This is independent of the scrcpy engine updater. Only fixed official
+//! GitHub release URLs may enter the Tauri updater, which verifies the signed
+//! NSIS payload against the pinned public key before installation.
 
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
 use tauri::{AppHandle, Window};
+#[cfg(target_os = "windows")]
+use tauri::{Emitter, Manager};
+#[cfg(target_os = "windows")]
+use tauri_plugin_updater::UpdaterExt;
 
 const RELEASE_API: &str = "https://api.github.com/repos/slobys/MirroLeap/releases/latest";
 const PREVIEW_RELEASES_API: &str = "https://api.github.com/repos/slobys/MirroLeap/releases?per_page=10";
+const ALL_RELEASES_API: &str = "https://api.github.com/repos/slobys/MirroLeap/releases?per_page=20";
 const RELEASE_URL_BASE: &str = "https://github.com/slobys/MirroLeap/releases/tag/";
 const ASSET_URL_BASE: &str = "https://github.com/slobys/MirroLeap/releases/download/";
 const MAX_METADATA_BYTES: usize = 512 * 1024;
@@ -39,6 +41,7 @@ pub struct AppUpdateInfo {
     pub published_at: Option<String>,
     pub changelog: String,
     pub downloads: Vec<ReleaseDownload>,
+    pub prerelease: bool,
 }
 
 fn stable_version(input: &str) -> Option<[u32; 3]> {
@@ -124,7 +127,56 @@ fn interpret_release(current: &str, release: &Value) -> Result<AppUpdateInfo, St
         published_at,
         changelog,
         downloads: official_assets(release, tag, version),
+        prerelease: release.get("prerelease").and_then(Value::as_bool).unwrap_or(false),
     })
+}
+
+fn has_official_updater(release: &Value, tag: &str, version: &str) -> bool {
+    let Some(assets) = release.get("assets").and_then(Value::as_array) else { return false; };
+    ["latest.json", &format!("MirroLeap_{version}_x64-setup.exe.sig")]
+        .iter().all(|name| {
+            let url = format!("{ASSET_URL_BASE}{tag}/{name}");
+            assets.iter().take(40).any(|asset| {
+                asset.get("name").and_then(Value::as_str) == Some(*name) &&
+                asset.get("browser_download_url").and_then(Value::as_str) == Some(url.as_str()) &&
+                asset.get("size").and_then(Value::as_u64).is_some_and(|n| n>0 && n<500000)
+            })
+        })
+}
+
+/// One user-facing channel: choose the numerically newest *complete* official
+/// release whether it is a prerelease or stable. A merely recent GitHub tag
+/// without its signed installer artifacts must not be offered as installable.
+fn interpret_latest_release(current: &str, data: &Value) -> Result<AppUpdateInfo, String> {
+    let releases = data.as_array().ok_or("invalid_release")?;
+    let chosen = releases.iter().take(20).filter_map(|release| {
+        if release.get("draft").and_then(Value::as_bool) != Some(false) ||
+            release.get("prerelease").and_then(Value::as_bool).is_none()
+        { return None; }
+        let tag = release.get("tag_name")?.as_str()?;
+        let version = tag.strip_prefix('v')?;
+        let numbers = stable_version(version)?;
+        if !has_official_updater(release, tag, version) ||
+            !official_assets(release, tag, version).iter().any(|a|a.kind=="exe")
+        { return None; }
+        Some((numbers, release))
+    }).max_by_key(|(version,_)| *version).map(|(_,release)| release)
+        .ok_or("release_unavailable")?;
+    let is_preview = chosen.get("prerelease").and_then(Value::as_bool).unwrap_or(false);
+    let mut adapted = chosen.clone();
+    adapted["prerelease"] = Value::Bool(false);
+    let mut info = interpret_release(current, &adapted)?;
+    info.prerelease = is_preview;
+    Ok(info)
+}
+
+fn signed_manifest_url(version: &str) -> Result<reqwest::Url, String> {
+    if version.starts_with('v') || stable_version(version).is_none() {
+        return Err("invalid_release_version".into());
+    }
+    reqwest::Url::parse(&format!(
+        "{ASSET_URL_BASE}v{version}/latest.json"
+    )).map_err(|e| format!("Invalid official update endpoint: {e}"))
 }
 
 /// Explicit opt-in preview channel. The stable check above remains unchanged
@@ -187,9 +239,68 @@ pub async fn check_mirroleap_update(
     app_handle: AppHandle,
 ) -> Result<AppUpdateInfo, String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
-    let data = fetch_release_json(RELEASE_API).await?;
+    let data = fetch_release_json(ALL_RELEASES_API).await?;
     let local = app_handle.package_info().version.to_string();
-    interpret_release(&local, &data)
+    interpret_latest_release(&local, &data)
+}
+
+#[tauri::command]
+pub async fn install_signed_update(
+    window: Window, app_handle: AppHandle, version: String,
+) -> Result<(), String> {
+    if window.label() != "main" { return Err("main_window_only".into()); }
+    #[cfg(not(target_os = "windows"))]
+    { let _ = (app_handle, version); return Err("Signed one-click updates currently require Windows NSIS".into()); }
+    #[cfg(target_os = "windows")]
+    {
+        if crate::commands::app_install_kind()? != "installed" {
+            return Err("Only a verified NSIS EXE installation can use automatic updates".into());
+        }
+        if !app_handle.state::<crate::ScrcpyState>().processes.lock()
+            .map_err(|e|e.to_string())?.is_empty() {
+            return Err("Stop phone mirroring before installing an application update".into());
+        }
+        let local_version = app_handle.package_info().version.to_string();
+        if stable_version(&version).ok_or("invalid_update_version")? <=
+            stable_version(&local_version).ok_or("invalid_local_version")? {
+            return Err("Update version must be newer than the current application".into());
+        }
+        // Re-query GitHub immediately before installation. Never trust a
+        // version supplied by WebView2 alone or a GitHub attachment URL.
+        let official = interpret_latest_release(
+            &local_version, &fetch_release_json(ALL_RELEASES_API).await?
+        )?;
+        if official.latest_version != version || official.status != "update_available" {
+            return Err("Official release changed: check for updates again".into());
+        }
+        let endpoint = signed_manifest_url(&version)?;
+        let update = app_handle.updater_builder()
+            .endpoints(vec![endpoint]).map_err(|e|e.to_string())?
+            .build().map_err(|e|e.to_string())?
+            .check().await.map_err(|e|format!("Cannot verify official update manifest: {e}"))?
+            .ok_or("No newer signed update was provided by the official release")?;
+        if update.version != version {
+            return Err("Signed manifest version differs from official GitHub Release".into());
+        }
+        let events = app_handle.clone();
+        let mut downloaded = 0_u64;
+        let mut last_percent = -1_i32;
+        update.download_and_install(
+            move |bytes, size| {
+                downloaded += bytes as u64;
+                let percent = size.filter(|total| *total>0)
+                    .map(|total| (100 * downloaded / total).min(100) as i32);
+                if let Some(p) = percent {
+                    if p == last_percent { return; }
+                    last_percent = p;
+                }
+                let _ = events.emit("mirroleap-app-update-progress",
+                    serde_json::json!({"received":downloaded, "total":size, "percent":percent}));
+            },
+            || {},
+        ).await.map_err(|e|format!("Signed update download or installation failed: {e}"))?;
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -207,6 +318,51 @@ pub async fn check_mirroleap_preview_update(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn signed_release(version: &str, prerelease: bool, draft: bool) -> Value {
+        let tag = format!("v{version}");
+        let file = format!("MirroLeap_{version}_x64-setup.exe");
+        let signature = format!("{file}.sig");
+        let asset = |name: &str, size: u64| json!({
+            "name":name,
+            "browser_download_url":format!("{ASSET_URL_BASE}{tag}/{name}"),
+            "size":size,
+        });
+        json!({
+            "tag_name":tag,"draft":draft,"prerelease":prerelease,
+            "published_at":"2026-10-17T08:00:00Z","body":"Official release",
+            "assets":[asset(&file,4900000),asset(&signature,420),asset("latest.json",766)]
+        })
+    }
+
+    #[test]
+    fn unified_update_check_prefers_newest_signed_release_including_prereleases() {
+        let stable = signed_release("5.0.2",false,false);
+        let preview = signed_release("5.0.7",true,false);
+        let mut malicious = signed_release("5.99.0",true,false);
+        malicious["assets"][1]["browser_download_url"]=json!("https://evil.invalid/forged.sig");
+        let draft = signed_release("6.0.0",true,true);
+        let items=json!([stable,malicious,preview,draft]);
+        let selected=interpret_latest_release("5.0.6",&items).unwrap();
+        assert_eq!(selected.latest_version,"5.0.7");
+        assert_eq!(selected.status,"update_available");
+        assert!(selected.prerelease);
+        assert_eq!(selected.downloads.len(),1);
+        assert_eq!(selected.downloads[0].kind,"exe");
+        assert_eq!(interpret_latest_release("5.0.7",&items).unwrap().status,"up_to_date");
+        assert_eq!(interpret_latest_release("5.0.8",&items).unwrap().status,"ahead");
+    }
+
+    #[test]
+    fn signed_endpoint_is_pinned_and_rejects_untrusted_versions() {
+        assert_eq!(signed_manifest_url("5.0.7").unwrap().as_str(),
+            "https://github.com/slobys/MirroLeap/releases/download/v5.0.7/latest.json");
+        for bad in ["", "../5.0.7","5.0.7?download=1","v5.0.7-beta","5.0.7/x","5.0.07"] {
+            assert!(signed_manifest_url(bad).is_err(),"{bad}");
+        }
+        assert!(interpret_latest_release("5.0.2",
+            &json!([signed_release("5.0.7",true,true)])).is_err());
+    }
 
     fn sample_release() -> Value {
         json!({

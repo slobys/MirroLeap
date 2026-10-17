@@ -34,6 +34,10 @@ describe('MirroLeap daily workspace', () => {
         expect(screen.getByRole('combobox', {name: '分辨率'})).toBeInTheDocument();
         expect(screen.queryByText('图形渲染器')).not.toBeInTheDocument();
         expect(screen.queryByText('系统控制台')).not.toBeInTheDocument();
+        expect(screen.getByRole('link',{name:'奶油 YouTube 频道'}))
+            .toHaveAttribute('href','https://www.youtube.com/@naiyou');
+        expect(screen.getByRole('link',{name:'奶油 Telegram 群组'}))
+            .toHaveAttribute('href','https://t.me/naiyous');
         fireEvent.click(screen.getByRole('button', {name:'打开设置'}));
         expect(args.onOpenSettings).toHaveBeenCalledWith('mirror');
     });

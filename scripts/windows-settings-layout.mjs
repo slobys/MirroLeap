@@ -47,6 +47,10 @@ async function verify(page, viewport, scale) {
         invoke: async () => 1,
       },
     });
+    Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', {
+      configurable: true,
+      value: {unregisterListener: () => {}},
+    });
   });
   const problems = [];
   page.on('pageerror', e => problems.push(e.message));
@@ -145,8 +149,11 @@ async function verify(page, viewport, scale) {
   });
   assert.equal(behavior.columns, viewport.width <= 800 ? 1 : 2,
     desc + ': behavior section overpacked');
-  assert(await page.locator('.ml-settings-group').count() >= 3,
-    desc + ': device/window/recording sections missing');
+  assert.equal(await page.locator('.ml-settings-group').count(), 2,
+    desc + ': only device/connection and recording sections belong in behavior settings');
+  assert.equal(await page.locator('.ml-settings-group-head').allTextContents()
+    .then(titles => titles.some(title=>title.includes('窗口与显示') || title.includes('Window & display'))),false,
+    desc + ': duplicate window settings should remain on home or quick toolbar');
 
   const appearanceTab = page.locator('.ml-settings-nav button').nth(3);
   await appearanceTab.click();

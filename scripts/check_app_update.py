@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-"""Cross-layer safety gate for MirroLeap release metadata channels.
+"""Safety gate: single official Release lookup and pinned-key NSIS updater.
 
-The Rust metadata checker is read-only, pinned to GitHub endpoints, and
-may never execute installers. Signed auto-install is separately controlled
-by the Tauri updater plugin and allowed only for eligible NSIS installs.
+No automatic install on check, arbitrary URLs, or portable/MSI replacement.
 """
 from pathlib import Path
 import json
@@ -27,28 +25,36 @@ assert re.search(r'(?m)^version = "' + re.escape(pkg["version"]) + r'"', crate)
 assert 'app_update::check_mirroleap_update' in lib
 assert 'app_update::check_mirroleap_preview_update' in lib
 assert 'window.label() != "main"' in backend
-assert 'https://api.github.com/repos/slobys/MirroLeap/releases/latest' in backend
+assert 'https://api.github.com/repos/slobys/MirroLeap/releases?per_page=20' in backend
 assert 'https://api.github.com/repos/slobys/MirroLeap/releases?per_page=10' in backend
 assert 'reqwest::redirect::Policy::none()' in backend
 assert 'Duration::from_secs(12)' in backend
 assert 'MAX_METADATA_BYTES: usize = 512 * 1024' in backend
 assert '"update_available"' in backend and '"up_to_date"' in backend and '"ahead"' in backend
-assert 'release.get("prerelease").and_then(Value::as_bool) != Some(false)' in backend
+assert 'interpret_latest_release(current: &str' in backend and 'has_official_updater(' in backend
 assert 'asset.get("browser_download_url").and_then(Value::as_str) == Some(expected_url.as_str())' in backend
 assert 'MirroLeap_{version}_x64_Portable.zip' in backend
 assert 'SHA256SUMS.txt' in backend
 assert 'AppUpdateChecker version={appVersion}' in app
-assert "await invoke<AppUpdateInfo>(" in frontend
-assert "'check_mirroleap_preview_update' : 'check_mirroleap_update'" in frontend
-assert "requestedChannel === 'stable' && result.status === 'update_available'" in frontend
-assert "channel === 'stable' && installKind === 'installed'" in frontend
+assert "await invoke<AppUpdateInfo>('check_mirroleap_update')" in frontend
+assert "check('preview')" not in frontend and "channel === 'preview'" not in frontend
+assert "if (result.status === 'update_available')" in frontend
+assert "installKind === 'installed'" in frontend
 assert 'trustedReleaseDownload(info, asset)' in frontend
+assert "invoke<void>('install_signed_update', {version:info.latestVersion})" in frontend
+assert 'pub async fn install_signed_update(' in backend
+assert 'updater_builder()' in backend and '.endpoints(vec![endpoint])' in backend
+assert 'update.download_and_install(' in backend
+assert 'signed_manifest_url(' in backend
+assert 'app_install_kind()' in backend and 'Stop phone mirroring' in backend
+assert 'if update.version != version' in backend, "Signed version mismatch must fail closed"
+
 assert 'trustedReleaseUrl(info)' in frontend and 'Object.prototype.hasOwnProperty.call' in validator
 assert "dangerouslySetInnerHTML" not in frontend
 assert "setInterval(" not in frontend and "useEffect(() => {" in frontend
 for prohibited in ("std::process::Command", "tokio::process::Command",
-                   "std::fs::write", "tokio::fs::write",
-                   "tauri_plugin_shell", "auto_install", "run_installer"):
-    assert prohibited not in backend, f"Update checker must be read-only: {prohibited}"
+                   "std::fs::write", "tokio::fs::write", "tauri_plugin_shell",
+                   "auto_install", "run_installer"):
+    assert prohibited not in backend, f"Update checker must not execute arbitrary programs: {prohibited}"
 assert (root / "src-tauri/src/core_manager.rs").exists(), "scrcpy update remains independent"
-print("Read-only update checker host, release validation, user-click IPC and no-install contract passed")
+print("Unified release discovery and strictly scoped signed-updater installer security checks passed")

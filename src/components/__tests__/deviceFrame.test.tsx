@@ -1,24 +1,21 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import SessionBehavior from '../SessionBehavior';
 
 afterEach(() => vi.restoreAllMocks());
 
-describe('iPhone-style live device shell setting', () => {
-  it('switches device frame on and off independently of video controls on Windows', () => {
+describe('single-source native phone bezel setting', () => {
+  it('does not duplicate the home phone frame control in behavior settings on Windows', () => {
     vi.spyOn(window.navigator, 'userAgent', 'get')
       .mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
 
-    const setConfig = vi.fn();
     render(<SessionBehavior
       config={{ device: 'phone', sessionMode: 'mirror', deviceFrame: true }}
-      setConfig={setConfig}
+      setConfig={vi.fn()}
     />);
-    const label = screen.getByText('iPhone-style slim titanium bezel');
-    fireEvent.click(label);
-    expect(setConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ deviceFrame: false, device: 'phone', sessionMode: 'mirror' })
-    );
+    expect(screen.queryByText('iPhone-style slim titanium bezel')).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch',{name:'Borderless'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch',{name:/Remember window position/})).not.toBeInTheDocument();
   });
 
   it('hides Windows-only device frame option on other operating systems', () => {

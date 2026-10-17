@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { ScrcpyConfig } from '../hooks/useScrcpy';
 import Tooltip from './Tooltip';
-import { Coffee, Volume2, Layers, Square, Circle, Folder, ChevronDown, ActivitySquare, Move, Smartphone } from 'lucide-react';
+import { Coffee, Volume2, Circle, Folder, ChevronDown, ActivitySquare } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 const AUDIO_CODEC_VALUES = ['auto', 'opus', 'aac', 'flac', 'raw'] as const;
@@ -175,37 +175,6 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                             />
                         )}
                     </div>
-                </div>
-            </section>
-            <section className="ml-card ml-settings-group">
-                <div className="ml-settings-group-head">
-                    <Layers size={18} className="ml-primary" />
-                    <h2>{locale.startsWith('zh') ? '窗口与显示' : 'Window & display'}</h2>
-                </div>
-                <div className="flex flex-col gap-1">
-                    <Toggle
-                        checked={config.borderless || false}
-                        onChange={(v) => handleChange('borderless', v)}
-                        icon={Square}
-                        label={t('sessionBehavior.borderless')}
-                        tooltip={t('sessionBehavior.borderlessTooltip')}
-                    />
-                    {typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent) && (
-                        <Toggle
-                            checked={config.deviceFrame !== false}
-                            onChange={(v) => handleChange('deviceFrame', v)}
-                            icon={Smartphone}
-                            label={t('sessionBehavior.deviceFrame')}
-                            tooltip={t('sessionBehavior.deviceFrameTooltip')}
-                        />
-                    )}
-                    <Toggle
-                        checked={config.rememberWindowPosition !== false}
-                        onChange={(v) => handleChange('rememberWindowPosition', v)}
-                        icon={Move}
-                        label={t('sessionBehavior.rememberWindowPosition')}
-                        tooltip={t('sessionBehavior.rememberWindowPositionTooltip')}
-                    />
                 </div>
             </section>
             <section className="ml-card ml-settings-group ml-behavior-recording">

@@ -365,6 +365,9 @@
         <button id="quick-top" aria-label="窗口置顶" aria-pressed="false" title="窗口置顶/取消置顶">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 21V5m-6 6 6-6 6 6M4 3h16"/></svg>置顶
         </button>
+        <button id="quick-remember" aria-label="记住窗口位置" aria-pressed="true" title="下次投屏恢复本次窗口位置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="5" width="18" height="15" rx="2"/><path d="M7 3v4m10-4v4M7 12h10m-5-2v7"/></svg>记住位置
+        </button>
       </div>
     </div>
     <div id="present-tools" role="group" aria-label="MirroPresent 演示工具">
@@ -473,6 +476,14 @@
           button.setAttribute('aria-pressed',String(!!active));
         } catch(error) { report(error); }
       }
+      async function syncRememberState() {
+        try {
+          const enabled = !!(await invoke('quick_remember_status'));
+          const button = document.getElementById('quick-remember');
+          button.classList.toggle('active', enabled);
+          button.setAttribute('aria-pressed', String(enabled));
+        } catch(error) { report(error); }
+      }
       async function syncQuickState() {
         if (quickSwitching) return;
         try {
@@ -539,6 +550,7 @@
         sync() {
           void syncInkState();
           void syncQuickState();
+          void syncRememberState();
           void syncPresentState();
         },
       });
@@ -669,12 +681,30 @@
           button.classList.toggle('active',!!top);
           button.setAttribute('aria-pressed',String(!!top));
           clearReport();
-          actionFeedback(button,'sent',top ? '已开启窗口置顶' : '已取消窗口置顶');
+          actionFeedback(button,'sent',top ?
+            '已请求置顶（系统受限时将自动重启投屏）' :
+            '已请求取消置顶（必要时自动重启投屏）');
         } catch(error) {
           report(error);
           actionFeedback(button,'error','置顶失败 · '+String(error));
         }
         finally { button.disabled=false; button.removeAttribute('aria-busy'); }
+      });
+      document.getElementById('quick-remember').addEventListener('click', async () => {
+        const button = document.getElementById('quick-remember');
+        if (button.disabled || !document.body.classList.contains('quick-open')) return;
+        button.disabled = true;
+        actionFeedback(button, 'busy', '正在调整窗口位置记忆…');
+        try {
+          const enabled = !!(await invoke('quick_remember_toggle'));
+          button.classList.toggle('active', enabled);
+          button.setAttribute('aria-pressed', String(enabled));
+          actionFeedback(button, 'sent', enabled ? '已开启 · 下次记住窗口位置' : '已关闭窗口位置记忆');
+          clearReport();
+        } catch(error) {
+          report(error);
+          actionFeedback(button, 'error', '记住位置失败 · ' + String(error));
+        } finally { button.disabled = false; }
       });
       const quickLabels = Object.freeze({
         fullscreen: '全屏', home: '主页', back: '返回', recents: '最近任务',
@@ -755,6 +785,7 @@
         if (!document.hidden) {
           void syncInkState();
           void syncQuickState();
+          void syncRememberState();
           void syncPresentState();
         }
       });
@@ -762,6 +793,7 @@
       void syncQuickState();
       void syncPresentState();
       void syncTopState();
+      void syncRememberState();
     })();
   </script>
 </body>

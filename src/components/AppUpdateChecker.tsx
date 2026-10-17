@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Download, ExternalLink, LoaderCircle, RefreshCw, ShieldCheck } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import {listen} from '@tauri-apps/api/event';
 import { useI18n } from '../i18n';
 import { explainUpdateError, trustedReleaseDownload, trustedReleaseUrl,
   type AppUpdateInfo } from '../utils/appUpdate';
@@ -8,7 +9,7 @@ import { explainUpdateError, trustedReleaseDownload, trustedReleaseUrl,
 interface Props { version: string; running?: boolean; }
 
 /**
- * Stable release metadata is checked only after a user click. Installation is
+ * Newest complete official release metadata is checked only after a user click. Installation is
  * separately opt-in and uses Tauri's pinned-key signature verification; never
  * execute a GitHub-downloaded file directly. Portable ZIP and MSI installs
  * stay on the manual path to avoid converting one installation into another.
@@ -18,7 +19,6 @@ export default function AppUpdateChecker({version, running = false}: Props) {
   const zh = locale.startsWith('zh');
   const [pending, setPending] = useState(false);
   const [info, setInfo] = useState<AppUpdateInfo | null>(null);
-  const [channel, setChannel] = useState<'stable' | 'preview'>('stable');
   const [error, setError] = useState<string | null>(null);
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeProgress, setUpgradeProgress] = useState<number | null>(null);
@@ -29,30 +29,43 @@ export default function AppUpdateChecker({version, running = false}: Props) {
   const upgradeLock = useRef(false);
 
   useEffect(() => {
-    // Settings tab unmounts on navigation. Old IPC responses may never update
-    // a newly mounted page or overwrite another installed app's version.
-    return () => { generation.current++; };
+    // The browser-only visual fixture has no Tauri event IPC; event listeners
+    // are strictly meaningful inside the real installed desktop WebView.
+    if (!('__TAURI_INTERNALS__' in window)) {
+      return () => { generation.current++; };
+    }
+    let active = true;
+    const unlisten = listen<{percent?:number}>(
+      'mirroleap-app-update-progress', ({payload}) => {
+        if (!active || !upgradeLock.current) return;
+        if (typeof payload?.percent === 'number' && Number.isFinite(payload.percent)) {
+          setUpgradeProgress(Math.max(0, Math.min(100, Math.round(payload.percent))));
+        }
+      });
+    return () => {
+      active = false;
+      generation.current++;
+      void unlisten.then(dispose => dispose());
+    };
   }, []);
 
-  const check = async (requestedChannel: 'stable' | 'preview' = 'stable') => {
+  const check = async () => {
     if (lock.current) return;
     const request = ++generation.current;
     lock.current = true;
-    setChannel(requestedChannel);
     setPending(true);
     setInfo(null);
     setInstallKind('unknown');
     setError(null);
     try {
-      const result = await invoke<AppUpdateInfo>(
-        requestedChannel === 'preview' ? 'check_mirroleap_preview_update' : 'check_mirroleap_update');
+      const result = await invoke<AppUpdateInfo>('check_mirroleap_update');
       if (request !== generation.current) return;
       if (!trustedReleaseUrl(result) ||
           !['update_available', 'up_to_date', 'ahead'].includes(result.status)) {
         setError(explainUpdateError('invalid_release', zh));
         return;
       }
-      if (requestedChannel === 'stable' && result.status === 'update_available') {
+      if (result.status === 'update_available') {
         try {
           const detected = await invoke<string>('get_app_install_kind');
           if (request !== generation.current) return;
@@ -79,7 +92,7 @@ export default function AppUpdateChecker({version, running = false}: Props) {
   const updateAvailable = info?.status === 'update_available';
 
   const installUpdate = async () => {
-    if (lock.current || upgradeLock.current || !updateAvailable || !info || channel !== 'stable' ||
+    if (lock.current || upgradeLock.current || !updateAvailable || !info ||
         installKind !== 'installed' || running) return;
     // The update must be both present in the official stable release metadata
     // and signed by the Tauri updater private key. A release ZIP or EXE cannot
@@ -95,34 +108,9 @@ export default function AppUpdateChecker({version, running = false}: Props) {
           ? '仅支持 NSIS EXE 安装版的一键升级；免安装 ZIP 和 MSI 安装版请下载对应文件手动升级。'
           : 'Signed one-click updates require an NSIS EXE installation. Portable ZIP and MSI versions must be upgraded manually.');
       }
-      const {check} = await import('@tauri-apps/plugin-updater');
-      const signedUpdate = await check({timeout: 12000});
-      if (!signedUpdate || signedUpdate.version !== info.latestVersion) {
-        throw Error(zh
-          ? '签名更新清单与官方正式版本不一致，已取消安装。'
-          : 'Signed updater metadata does not match the official stable release.');
-      }
-      let received = 0;
-      let length = 0;
-      setUpgradeMessage(zh ? '正在下载并验证签名更新包…' : 'Downloading and verifying signed update…');
-      await signedUpdate.downloadAndInstall(event => {
-        if (event.event === 'Started') {
-          length = Number(event.data.contentLength) || 0;
-          received = 0;
-          setUpgradeProgress(0);
-        } else if (event.event === 'Progress') {
-          received += event.data.chunkLength;
-          if (length > 0) {
-            setUpgradeProgress(Math.min(100, Math.floor(100 * received / length)));
-          }
-        } else if (event.event === 'Finished') {
-          setUpgradeProgress(100);
-          setUpgradeMessage(zh ? '签名验证已完成，正在安装…' : 'Signature verified. Installing…');
-        }
-      });
-      setUpgradeMessage(zh ? '安装完成，正在重新启动…' : 'Installed. Restarting…');
-      const {relaunch} = await import('@tauri-apps/plugin-process');
-      await relaunch();
+      setUpgradeMessage(zh ? '正在下载并验证官方签名更新包…' : 'Downloading and verifying the official signed installer…');
+      await invoke<void>('install_signed_update', {version:info.latestVersion});
+      setUpgradeMessage(zh ? '更新安装器已启动，请按提示完成。' : 'Signed installer started. Follow its prompts.');
     } catch (reason) {
       setError((zh ? '在线更新未完成：' : 'One-click update not completed: ') +
         (reason instanceof Error ? reason.message : String(reason)));
@@ -143,8 +131,8 @@ export default function AppUpdateChecker({version, running = false}: Props) {
     </div>
     <p className="ml-muted text-xs leading-relaxed">
       {zh
-        ? '可分别检查正式版和测试版。NSIS EXE 安装版仅支持对已签名正式版一键更新。'
-        : 'Check stable or preview releases. One-click NSIS updates are limited to signed stable releases.'}
+        ? '一键检查最新官方发布版本（包括测试版）。NSIS EXE 安装版可进行签名验证的一键升级。'
+        : 'One click checks the newest signed official release, including previews. NSIS EXE installs support signature-verified in-app updates.'}
     </p>
     <div className="flex flex-wrap items-center gap-3">
       <button type="button" onClick={() => void check()} disabled={pending}
@@ -154,18 +142,12 @@ export default function AppUpdateChecker({version, running = false}: Props) {
         {pending ? (zh ? '正在连接 GitHub…' : 'Checking GitHub…') :
           (zh ? '检查软件更新' : 'Check for updates')}
       </button>
-      <button type="button" onClick={() => void check('preview')} disabled={pending}
-        aria-label={zh ? '检查 MirroLeap 测试版更新' : 'Check MirroLeap preview updates'}
-        className="ml-secondary-action inline-flex items-center gap-2 px-4">
-        {pending && channel === 'preview' ? <LoaderCircle size={16} className="animate-spin"/> : <RefreshCw size={16}/>}
-        {zh ? '检查测试版' : 'Check preview builds'}
-      </button>
       <a href={officialPage} target="_blank" rel="noopener noreferrer"
         className="ml-footer-link inline-flex items-center gap-1">
         <ExternalLink size={13}/>
         {zh ? '官方发布页面' : 'Official releases'}
       </a>
-      {updateAvailable && channel === 'stable' && installKind === 'installed' && <button type="button" onClick={() => void installUpdate()}
+      {updateAvailable && installKind === 'installed' && <button type="button" onClick={() => void installUpdate()}
         disabled={upgrading || pending || running}
         aria-label={zh ? '下载验证并安装 MirroLeap 更新' : 'Download, verify and install MirroLeap update'}
         className="ml-secondary-action inline-flex items-center gap-2 px-4">
@@ -174,17 +156,12 @@ export default function AppUpdateChecker({version, running = false}: Props) {
           (zh ? '一键安装并重启' : 'Install update and restart')}
       </button>}
     </div>
-    {updateAvailable && channel === 'preview' && <p role="note" className="ml-muted text-xs">
-      {zh
-        ? '测试版目前提供官方手动下载；一键安装仍只接收经过签名校验的正式版。'
-        : 'Preview builds provide manual official downloads. One-click installation checks signed stable releases only.'}
-    </p>}
-    {updateAvailable && channel === 'stable' && installKind !== 'installed' && <p role="note" className="ml-muted text-xs">
+    {updateAvailable && installKind !== 'installed' && <p role="note" className="ml-muted text-xs">
       {zh
         ? '当前未检测到可一键升级的 NSIS 安装。请使用下方官方 ZIP、EXE 或 MSI 文件手动升级。'
         : 'No eligible NSIS installation was detected. Use the official ZIP, EXE or MSI download links below to upgrade manually.'}
     </p>}
-    {running && updateAvailable && channel === 'stable' && installKind === 'installed' && <p role="note" className="text-xs text-amber-600">
+    {running && updateAvailable && installKind === 'installed' && <p role="note" className="text-xs text-amber-600">
       {zh ? '先结束正在运行的投屏，再安装更新。' : 'Stop the active phone mirror before installing the update.'}
     </p>}
     {upgradeMessage && <p role="status" className="text-xs text-emerald-600">
@@ -197,18 +174,10 @@ export default function AppUpdateChecker({version, running = false}: Props) {
           <CheckCircle2 size={18} className="text-emerald-600 shrink-0"/>}
         <div className="flex flex-col gap-1">
           <p className="font-semibold text-sm">
-            {updateAvailable ?
-              (channel === 'preview' ?
-                (zh ? `发现测试版 v${info.latestVersion}` : `Preview update v${info.latestVersion} available`) :
-                (zh ? `发现正式版 v${info.latestVersion}` : `Stable update v${info.latestVersion} available`)) :
-              info.status === 'ahead' ?
-                (channel === 'preview' ?
-                  (zh ? `当前版本高于最新测试版 v${info.latestVersion}` : `Installed build is newer than preview v${info.latestVersion}`) :
-                  (zh ? `当前构建高于最新正式版 v${info.latestVersion}；如使用测试版，请点击“检查测试版”`
-                    : `Installed build is newer than stable v${info.latestVersion}; use Check preview builds for test releases`)) :
-                (channel === 'preview' ?
-                  (zh ? `当前已是最新测试版 v${info.latestVersion}` : `Up to date on preview channel: v${info.latestVersion}`) :
-                  (zh ? `当前已是最新正式版 v${info.latestVersion}` : `Up to date: v${info.latestVersion}`))}
+            {updateAvailable ? (zh ? '发现新版本' : 'New version') :
+              info.status === 'ahead' ? (zh ? '当前版本高于已发布版本' : 'Installed build is newer than') :
+              (zh ? '已是最新版本' : 'Up to date:')}
+            {' '}v{info.latestVersion}{info.prerelease ? (zh ? ' · 测试版' : ' · Preview') : ''}
           </p>
           {info.publishedAt && <span className="ml-muted text-xs">{zh ? '发布时间' : 'Published'}：{info.publishedAt.slice(0, 10)}</span>}
         </div>
@@ -239,9 +208,7 @@ export default function AppUpdateChecker({version, running = false}: Props) {
       </div>}
       {releasePage && <a href={releasePage} target="_blank" rel="noopener noreferrer"
         className="ml-footer-link inline-flex items-center self-start gap-1">
-        <ExternalLink size={13}/>{channel === 'preview'
-          ? (zh ? '查看该测试版本的 GitHub 页面' : 'View this preview release')
-          : (zh ? '查看该正式版本的 GitHub 页面' : 'View this stable release')}
+        <ExternalLink size={13}/>{zh ? '查看该版本 GitHub 页面' : 'View this release'}
       </a>}
     </div>}
     <details className="ml-settings-help-details">

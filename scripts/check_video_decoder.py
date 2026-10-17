@@ -28,6 +28,11 @@ assert "build_scrcpy_args_with_decoder(" in native
 assert "video_decoder::choose_decoder(" in native
 assert "video_decoder::is_hardware_decode_error" in native
 assert "forced_decoder_retry_used = true" in native
+assert native.count("restore_phone_frame_after_retry(") >= 4, (
+    "GPU/audio decoder fallback must reattach the native borderless video frame"
+)
+assert 'if wants_device_frame(config) {' in native
+assert 'if config.borderless.unwrap_or(false) || wants_device_frame(config)' not in native
 assert "current_decoder_decision.flag = None" in native
 assert "scrcpy-video-decoder" in native
 assert "is_v5 && advertised" in decoder
@@ -41,4 +46,4 @@ assert "observedDecoders[activeDevice]" in app
 assert "<DecoderPerformance " in app
 assert "GPU selection never upgrades your core" in view
 assert (root / "src/components/__tests__/DecoderPerformance.test.tsx").exists()
-print("scrcpy decoder capability detection, safe flags, bounded fallback, per-device telemetry and UI contracts pass")
+print("scrcpy decoder fallback reattaches native phone frame, safe flags and telemetry verified")

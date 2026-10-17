@@ -29,6 +29,10 @@ fn require_main_window(window: &Window) -> Result<(), String> {
 #[tauri::command]
 pub fn get_app_install_kind(window: Window) -> Result<&'static str, String> {
     require_main_window(&window)?;
+    app_install_kind()
+}
+
+pub(crate) fn app_install_kind() -> Result<&'static str, String> {
     let exe = std::env::current_exe()
         .map_err(|error| format!("Could not identify application location: {error}"))?;
     let dir = exe.parent().ok_or("Application directory missing")?;
@@ -1567,6 +1571,7 @@ pub struct ScrcpyConfig {
     borderless: Option<bool>,
     /// Draw a click-through iPhone-inspired bezel above the live SDL window (Windows only).
     device_frame: Option<bool>,
+    remember_window_position: Option<bool>,
     record: Option<bool>,
     record_path: Option<String>,
     scrcpy_path: Option<String>,
@@ -1969,6 +1974,24 @@ fn wants_device_frame(config: &ScrcpyConfig) -> bool {
         && !config.otg_pure.unwrap_or(false)
 }
 
+#[cfg(target_os = "windows")]
+fn restore_phone_frame_after_retry(
+    app: &AppHandle, window: &Window, config: &ScrcpyConfig,
+) {
+    // The follow task binds one scrcpy PID. Every GPU/audio fallback spawns a
+    // new PID; not recreating the frame left the new SDL window borderless.
+    if wants_device_frame(config) {
+        if let Err(error) = crate::device_frame::start(
+            app, &config.device, config.always_on_top.unwrap_or(false),
+            config.remember_window_position.unwrap_or(true),
+        ) {
+            let _ = window.emit("scrcpy-log", format!(
+                "[FRAME] Could not recreate phone shell after stream retry: {error}"
+            ));
+        }
+    }
+}
+
 fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, audio_codec_override: Option<&str>) -> Vec<String> {
     let mut args = Vec::new();
     
@@ -2024,7 +2047,7 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
         }
         if let Some(aot) = config.always_on_top { if aot { args.push("--always-on-top".to_string()); } }
         if let Some(fs) = config.fullscreen { if fs { args.push("--fullscreen".to_string()); } }
-        if config.borderless.unwrap_or(false) || wants_device_frame(config) {
+        if wants_device_frame(config) {
             args.push("--window-borderless".to_string());
         }
 
@@ -2404,13 +2427,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     // keyboard and pointer control remain scrcpy's own. Never launch the shell
     // for camera/desktop/fullscreen/OTG sessions.
     #[cfg(target_os = "windows")]
-    if wants_device_frame(&config) {
-        if let Err(e) = crate::device_frame::start(
-            &app_handle, &config.device, config.always_on_top.unwrap_or(false)
-        ) {
-            let _ = window.emit("scrcpy-log", format!("[FRAME] Phone shell disabled: {e}. Screen mirroring remains available."));
-        }
-    }
+    restore_phone_frame_after_retry(&app_handle, &window, &config);
     let _ = window.emit("scrcpy-status", json!({ "device": config.device, "running": true }));
 
     // Monitor for exit (and orchestrate the audio codec fallback chain)
@@ -2556,6 +2573,9 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                                     .insert(device_mon.clone(), new_child);
                                 current_audio_flag = new_audio_flag;
                                 current_decoder_error_flag = new_decoder_flag;
+                                #[cfg(target_os = "windows")]
+                                restore_phone_frame_after_retry(
+                                    &app_handle_mon, &window_mon, &config_mon);
                                 continue;
                             }
                             Err(reason) => {
@@ -2601,6 +2621,9 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                                 current_decoder_error_flag = new_decoder_flag;
                                 current_audio_override = Some(next_codec.to_string());
                                 chain_index += 1;
+                                #[cfg(target_os = "windows")]
+                                restore_phone_frame_after_retry(
+                                    &app_handle_mon, &window_mon, &config_mon);
                                 continue;
                             }
                             Err(e) => {
@@ -2646,6 +2669,7 @@ mod tests {
             fullscreen: None,
             borderless: None,
             device_frame: None,
+            remember_window_position: None,
             record: None,
             record_path: None,
             scrcpy_path: None,

@@ -280,6 +280,36 @@ body {
   border-bottom: 1px solid var(--border-base);
   background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
 }
+.ml-community-links {
+  display:flex; align-items:center; justify-content:center;
+  flex-wrap:wrap; gap:10px; min-width:0;
+}
+.ml-community-link {
+  display:inline-flex; align-items:center; gap:8px;
+  min-height:38px; padding:7px 12px; border-radius:11px;
+  border:1px solid var(--border-base);
+  background:color-mix(in srgb, var(--bg-surface) 86%, transparent);
+  color:var(--text-base); font-size:12px; font-weight:700;
+  box-shadow:0 2px 7px rgba(0,0,0,.045);
+  transition: border-color .15s, transform .15s, background .15s;
+  white-space:nowrap; text-decoration:none;
+}
+.ml-community-link:hover {
+  transform: translateY(-1px);
+  border-color:var(--primary);
+  background:color-mix(in srgb,var(--primary) 9%,var(--bg-surface));
+}
+.ml-community-link:focus-visible {outline:2px solid var(--primary);outline-offset:3px;}
+.ml-community-youtube svg {color:#ed343a;}
+.ml-community-telegram svg {color:#269dde;}
+@media (max-width: 850px) {
+  .ml-community-links {gap:5px;}
+  .ml-community-link {gap:5px;padding:7px 8px;font-size:11px;}
+}
+@media (max-width: 630px) {
+  .ml-home-header {flex-wrap:wrap;}
+  .ml-community-links {order:3; width:100%; justify-content:center;}
+}
 .ml-brand-icon {
   display: grid; place-items: center; width: 45px; height: 45px;
   background: #102c2f; color: #a5ffe4;
