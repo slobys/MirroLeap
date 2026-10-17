@@ -141,6 +141,34 @@ pub struct ToolbarPlacement {
     pub zoom_percent: u32,
 }
 
+/// A companion must stay in the SAME topmost or ordinary tier as the
+/// scrcpy anchor. In particular GetWindow(GW_HWNDPREV) can return a foreign
+/// topmost window immediately above an ordinary video. Using that HWND as
+/// hWndInsertAfter silently PROMOTES the companion back to topmost, breaking
+/// the next off -> on toggle even though off previously appeared to succeed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompanionStackChoice {
+    AlreadyAbove,
+    BelowPrevious,
+    TierFront,
+}
+
+/// Pure, cross-platform selection, with Windows HWND details supplied by the
+/// caller. None means the anchor has no predecessor in the desktop Z order.
+pub fn companion_stack_choice(
+    anchor_topmost: bool,
+    previous_is_companion: bool,
+    previous_topmost: Option<bool>,
+) -> CompanionStackChoice {
+    if previous_is_companion {
+        CompanionStackChoice::AlreadyAbove
+    } else if previous_topmost == Some(anchor_topmost) {
+        CompanionStackChoice::BelowPrevious
+    } else {
+        CompanionStackChoice::TierFront
+    }
+}
+
 /// Native HWND companions do not need a SetWindowPos call every 50 ms.
 /// Only actual motion, visibility restoration, unexpected z-order or a
 /// low-frequency health check require the compositor to be repositioned.
@@ -345,6 +373,22 @@ pub fn toolbar_position(frame: FrameRect, cursor_y: i32, desktop: ScreenRect) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn companion_z_order_never_crosses_the_normal_topmost_boundary() {
+        use CompanionStackChoice::{AlreadyAbove, BelowPrevious, TierFront};
+        for topmost in [false,true] {
+            assert_eq!(companion_stack_choice(topmost, true, Some(topmost)), AlreadyAbove);
+            assert_eq!(companion_stack_choice(topmost, false, Some(topmost)), BelowPrevious);
+            assert_eq!(companion_stack_choice(topmost, false, Some(!topmost)), TierFront);
+            assert_eq!(companion_stack_choice(topmost, false, None), TierFront);
+        }
+        // Repeated ON/OFF/ON calls must still produce a relative placement
+        // without accidentally mixing tiers with a foreign desktop window.
+        for desired in [true,false,true,false,true] {
+            assert_eq!(companion_stack_choice(desired,false,Some(!desired)),TierFront);
+        }
+    }
 
     #[test]
     fn clipped_video_covers_the_transparent_svg_aperture() {

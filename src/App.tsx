@@ -6,6 +6,7 @@ import ControlPanel from "./components/ControlPanel";
 import LogPanel from "./components/LogPanel";
 import ScreenshotTools from "./components/ScreenshotTools";
 import AppUpdateChecker from "./components/AppUpdateChecker";
+import StartupUpdateNotice from "./components/StartupUpdateNotice";
 import VersionUpdateBadge from "./components/VersionUpdateBadge";
 import DecoderPerformance from "./components/DecoderPerformance";
 import Header from "./components/Header";
@@ -99,9 +100,14 @@ function App() {
 
   const [appVersion, setAppVersion] = useState("5.0.10");
   const [appVersionReady,setAppVersionReady] = useState(false);
-  const {startupRelease, startupInstallKind, checking: checkingUpdate, rememberUpdate} =
+  const {startupRelease, startupInstallKind, showStartupPrompt,
+    checking: checkingUpdate, rememberUpdate, dismissStartupPrompt} =
     useStartupUpdateCheck(appVersionReady);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const openUpdateCenter = () => {
+    dismissStartupPrompt();
+    setUpdateDialogOpen(true);
+  };
   // Keep the daily workflow lightweight. Older saved scrcpy_* options are
   // still read by useScrcpy, and every advanced feature remains in Settings.
   const [view, setView] = useState<'home' | 'settings'>('home');
@@ -364,7 +370,7 @@ function App() {
               version={appVersion}
               hasUpdate={Boolean(startupRelease)}
               checkingUpdate={checkingUpdate}
-              onOpenUpdate={() => setUpdateDialogOpen(true)}
+              onOpenUpdate={openUpdateCenter}
               devices={devices}
               pendingDevices={pendingDevices}
               deviceModels={deviceModels}
@@ -404,7 +410,7 @@ function App() {
                   </div>
                   <VersionUpdateBadge version={appVersion} locale={locale} showBrand
                     hasUpdate={Boolean(startupRelease)} checking={checkingUpdate}
-                    onClick={() => setUpdateDialogOpen(true)}/>
+                    onClick={openUpdateCenter}/>
                 </div>
                 <nav className="ml-settings-nav flex gap-2 overflow-x-auto custom-scrollbar mt-4 pb-1" aria-label={locale.startsWith('zh') ? '设置分类' : 'Settings categories'}>
                   {([
@@ -511,6 +517,10 @@ function App() {
           downloadProgress={downloadProgress}
           onComplete={completeOnboarding}
         />
+
+        {showStartupPrompt && startupRelease && !updateDialogOpen && !isOnboardingOpen &&
+          <StartupUpdateNotice release={startupRelease} installKind={startupInstallKind}
+            running={sessionRunning} onDismiss={dismissStartupPrompt}/>}
 
         {updateDialogOpen && <div role="presentation"
           className="fixed inset-0 z-[450] flex items-center justify-center p-4"

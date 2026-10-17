@@ -62,6 +62,12 @@ assert "if (!active || requested.current) return;" in startup, (
 assert "setStartupRelease(latest)" in startup
 assert "trustedReleaseUrl(latest)" in startup
 assert "VersionUpdateBadge" in app and "updateDialogOpen" in app
+assert "showStartupPrompt && startupRelease" in app, "Do not drop the startup opt-in dialog"
+assert "StartupUpdateNotice release={startupRelease}" in app
+assert "setShowStartupPrompt(true)" in startup, "Show the popup once for a new release"
+assert "dismissStartupPrompt: () => setShowStartupPrompt(false)" in startup
+assert "setStartupRelease(null)" not in startup, "Later must preserve the update badge"
+assert "showStartupPrompt" in app and "dismissStartupPrompt" in app
 assert "rememberUpdate" in app and "hasUpdate={Boolean(startupRelease)}" in app
 assert "download_official_release_asset" in frontend and "download_official_release_asset" in backend
 assert "sha.finalize()" in backend and "MANUAL_DOWNLOAD_BUSY" in backend

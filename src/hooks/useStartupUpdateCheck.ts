@@ -13,6 +13,7 @@ export function useStartupUpdateCheck(enabled: boolean) {
   const requested = useRef(false);
   const [checking, setChecking] = useState(false);
   const [startupRelease, setStartupRelease] = useState<AppUpdateInfo | null>(null);
+  const [showStartupPrompt, setShowStartupPrompt] = useState(false);
   const [startupInstallKind, setStartupInstallKind] = useState<InstallKind>('other');
 
   useEffect(() => {
@@ -31,6 +32,9 @@ export function useStartupUpdateCheck(enabled: boolean) {
           setStartupInstallKind(kind === 'installed' ? 'installed' :
             kind === 'portable' ? 'portable' : 'other');
           setStartupRelease(latest);
+          // The version badge and once-per-launch opt-in dialog are distinct:
+          // dismissing the dialog must never hide the green update badge.
+          setShowStartupPrompt(true);
         } catch (error) {
           // No startup interruption, download, or installation on failures.
           console.info('[MirroLeap] startup update check unavailable:', error);
@@ -45,13 +49,17 @@ export function useStartupUpdateCheck(enabled: boolean) {
   const rememberUpdate = (info: AppUpdateInfo, kind: InstallKind) => {
     setStartupRelease(info.status === 'update_available' && trustedReleaseUrl(info) ? info : null);
     setStartupInstallKind(kind);
+    // Explicit checks from the version badge must never re-open the startup
+    // dialog, including after the user already selected "Later".
+    setShowStartupPrompt(false);
   };
 
   return {
     startupRelease,
     startupInstallKind,
+    showStartupPrompt,
     checking,
     rememberUpdate,
-    dismissStartupUpdate: () => setStartupRelease(null),
+    dismissStartupPrompt: () => setShowStartupPrompt(false),
   };
 }

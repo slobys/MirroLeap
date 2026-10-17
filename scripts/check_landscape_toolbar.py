@@ -116,6 +116,12 @@ assert "topmost_window_handles(app, device, hwnd)" in native, "Pin every member 
 assert "displayTopState(" in toolbar and "id=\"quick-top-label\"" in toolbar
 assert ".quick-grid button.active" in toolbar, "The selected button must stay visually highlighted"
 assert "syncTopState();" in toolbar and "topSwitching" in toolbar
+assert "companion_insert_after(" in native and "match_companion_tier(" in native
+assert "companion_stack_choice(" in native, "Use same-tier ordering at Z-order boundaries"
+assert "previous.map(video_is_topmost)" in native, "Do not insert behind another tier"
+assert "CompanionStackChoice::TierFront" in native
+assert "restack_above_without_moving(" in native
+assert "match_companion_tier(window, anchor)" in native
 
 # Release integrity and optional authentic code signing do not disable any
 # Windows security mechanism. A trusted CA certificate must be provided.

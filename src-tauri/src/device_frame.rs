@@ -423,19 +423,45 @@ fn inside(x: i32, y: i32, rect: ScreenRect, margin: i32) -> bool {
         && y >= rect.y - margin && y < rect.y + rect.height + margin
 }
 
-/// Insert a companion IMMEDIATELY above its video/shell anchor, instead of
-/// HWND_TOP. This matters when a browser is foreground: elevating a floating
-/// WebView to the absolute top would paint a ghost toolbar over the browser;
-/// keeping it above SDL but below the browser preserves the video stack.
+/// A companion is kept in its anchor's topmost/normal Z-order tier.
+/// GetWindow(GW_HWNDPREV) may return a window from the *other* tier at
+/// the boundary. Blindly inserting above that predecessor changes WS_EX_TOPMOST
+/// (and was able to spoil the next ON -> OFF -> ON click).
+fn companion_insert_after(
+    window: HWND, anchor: HWND,
+) -> (Option<HWND>, windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS) {
+    use crate::frame_layout::{companion_stack_choice, CompanionStackChoice};
+    let pinned = video_is_topmost(anchor);
+    let previous = unsafe { GetWindow(anchor, GW_HWNDPREV) }.ok();
+    match companion_stack_choice(
+        pinned, previous == Some(window),
+        previous.map(video_is_topmost),
+    ) {
+        CompanionStackChoice::AlreadyAbove => (None, SWP_NOACTIVATE | SWP_NOZORDER),
+        CompanionStackChoice::BelowPrevious => (previous, SWP_NOACTIVATE),
+        CompanionStackChoice::TierFront =>
+            (Some(if pinned { HWND_TOPMOST } else { HWND_TOP }), SWP_NOACTIVATE),
+    }
+}
+
+fn match_companion_tier(window: HWND, anchor: HWND) -> Result<(), String> {
+    let pinned = video_is_topmost(anchor);
+    if video_is_topmost(window) != pinned {
+        set_native_window_topmost(window, pinned)?;
+    }
+    Ok(())
+}
+
+/// Position the window above its video/shell anchor without inadvertently
+/// converting a regular window into a topmost window or vice versa.
 fn position_above(window: HWND, anchor: HWND, rect: ScreenRect) -> Result<(), String> {
-    let (after, flags) = match unsafe { GetWindow(anchor, GW_HWNDPREV) } {
-        Ok(previous) if previous == window => (None, SWP_NOACTIVATE | SWP_NOZORDER),
-        Ok(previous) => (Some(previous), SWP_NOACTIVATE),
-        // No predecessor means the anchor is the top of the desktop stack.
-        Err(_) => (Some(HWND_TOP), SWP_NOACTIVATE),
-    };
+    match_companion_tier(window, anchor)?;
+    let (after, flags) = companion_insert_after(window, anchor);
     unsafe { SetWindowPos(window, after, rect.x, rect.y, rect.width, rect.height, flags) }
-        .map_err(|e| format!("Could not position companion above its owner: {e}"))
+        .map_err(|e| format!("Could not position companion above its owner: {e}"))?;
+    // Positioning by HWND can itself alter WS_EX_TOPMOST if Windows moves a
+    // foreign window concurrently. Correct the tier, not the whole mirror.
+    match_companion_tier(window, anchor)
 }
 
 fn place_overlay(overlay: &WebviewWindow, video: HWND, frame: FrameRect) -> Result<(), String> {
@@ -447,14 +473,18 @@ fn place_overlay(overlay: &WebviewWindow, video: HWND, frame: FrameRect) -> Resu
 
 fn place_toolbar(toolbar: &WebviewWindow, overlay: &WebviewWindow, rect: ScreenRect) -> Result<(), String> {
     let hwnd = toolbar.hwnd().map_err(|e| e.to_string())?;
-    // A user is actively pressing toolbar buttons: don't sink that focused
-    // HWND behind an unrelated browser until focus actually changes away.
-    if unsafe { GetForegroundWindow() } == hwnd {
-        return unsafe {
-            SetWindowPos(hwnd, Some(HWND_TOP), rect.x, rect.y, rect.width, rect.height, SWP_NOACTIVATE)
-        }.map_err(|e| format!("Could not position focused toolbar: {e}"));
-    }
     let shell = overlay.hwnd().map_err(|e| e.to_string())?;
+    // A user pressing the toolbar should remain in front, but using HWND_TOP
+    // must not silently undo a previous Unpin operation.
+    if unsafe { GetForegroundWindow() } == hwnd {
+        match_companion_tier(hwnd, shell)?;
+        let pinned = video_is_topmost(shell);
+        unsafe {
+            SetWindowPos(hwnd, Some(if pinned { HWND_TOPMOST } else { HWND_TOP }),
+                rect.x, rect.y, rect.width, rect.height, SWP_NOACTIVATE)
+        }.map_err(|e| format!("Could not position focused toolbar: {e}"))?;
+        return match_companion_tier(hwnd, shell);
+    }
     position_above(hwnd, shell, rect)
 }
 
@@ -1274,6 +1304,19 @@ fn set_native_window_topmost(hwnd: HWND, desired: bool) -> Result<(), String> {
             Err(error) => last_error = Some(error.to_string()),
         }
     }
+    if desired && !video_is_topmost(hwnd) {
+        // SDL or the foreground window may have reset its normal Z-band just
+        // after the first call. Refresh only this HWND's tier, never restart
+        // scrcpy, change phone input, or activate the window.
+        let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+        let _ = unsafe { SetWindowPos(hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags) };
+        match unsafe { SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0,
+            flags | windows::Win32::UI::WindowsAndMessaging::SWP_FRAMECHANGED) } {
+            Ok(()) if video_is_topmost(hwnd) => return Ok(()),
+            Ok(()) => {},
+            Err(error) => last_error = Some(error.to_string()),
+        }
+    }
     Err(match last_error {
         Some(error) => format!("Windows 拒绝实时改变窗口层级：{error}。投屏未重启。"),
         None => "Windows 未确认实时置顶状态。投屏未重启，请重试。".into(),
@@ -1284,21 +1327,22 @@ fn set_native_window_topmost(hwnd: HWND, desired: bool) -> Result<(), String> {
 /// style alone does not guarantee the translucent shell stays ABOVE the video.
 /// Reorder companions without moving/resizing the running stream.
 fn restack_above_without_moving(window: HWND, anchor: HWND) -> Result<(), String> {
-    let (after, flags) = match unsafe { GetWindow(anchor, GW_HWNDPREV) } {
-        Ok(previous) if previous == window => (None, SWP_NOZORDER | SWP_NOACTIVATE),
-        Ok(previous) => (Some(previous), SWP_NOACTIVATE),
-        Err(_) => (Some(HWND_TOP), SWP_NOACTIVATE),
-    };
+    match_companion_tier(window, anchor)?;
+    let (after, flags) = companion_insert_after(window, anchor);
     unsafe { SetWindowPos(window, after, 0, 0, 0, 0,
         flags | SWP_NOMOVE | SWP_NOSIZE) }
-        .map_err(|e| format!("Cannot synchronize the phone overlay stack: {e}"))
+        .map_err(|e| format!("Cannot synchronize the phone overlay stack: {e}"))?;
+    match_companion_tier(window, anchor)
 }
 
 fn apply_video_topmost(app: &AppHandle, device: &str, hwnd: HWND, desired: bool) -> Result<(), String> {
     let handles = topmost_window_handles(app, device, hwnd)?;
     // Reapply in bottom-to-top order: SDL video, click-through bezel, toolbar.
-    for &window in &handles {
-        set_native_window_topmost(window, desired)?;
+    // Identify the specific HWND that fails, rather than leaving the user
+    // guessing whether SDL, the phone skin or the control rail was refused.
+    for (&window, role) in handles.iter().zip(["scrcpy 视频", "真机边框", "悬浮栏"]) {
+        set_native_window_topmost(window, desired)
+            .map_err(|error| format!("{role}：{error}"))?;
     }
     // Keep the three-window stack correct immediately instead of waiting up
     // to two seconds for the geometry follower to repair a buried WebView.
