@@ -12,6 +12,7 @@ backend = (root / "src-tauri/src/app_update.rs").read_text(encoding="utf-8")
 frontend = (root / "src/components/AppUpdateChecker.tsx").read_text(encoding="utf-8")
 validator = (root / "src/utils/appUpdate.ts").read_text(encoding="utf-8")
 app = (root / "src/App.tsx").read_text(encoding="utf-8")
+startup = (root / "src/hooks/useStartupUpdateCheck.ts").read_text(encoding="utf-8")
 lib = (root / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
 caps = json.loads((root / "src-tauri/capabilities/default.json").read_text(encoding="utf-8"))
 cfg = json.loads((root / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
@@ -52,8 +53,14 @@ assert 'if update.version != version' in backend, "Signed version mismatch must 
 assert 'trustedReleaseUrl(info)' in frontend and 'Object.prototype.hasOwnProperty.call' in validator
 assert "dangerouslySetInnerHTML" not in frontend
 assert "setInterval(" not in frontend and "useEffect(() => {" in frontend
-assert "startupUpdateRequested.current" in app
-assert "setStartupRelease(latest)" in app
+assert "useStartupUpdateCheck(appVersionReady)" in app
+assert "requested.current = true" in startup
+assert "const timer = setTimeout(" in startup
+assert "if (!active || requested.current) return;" in startup, (
+    "A canceled StrictMode startup timer must not consume the one release check"
+)
+assert "setStartupRelease(latest)" in startup
+assert "trustedReleaseUrl(latest)" in startup
 assert "StartupUpdateNotice" in app
 assert "open_official_release_link" in backend
 assert "official_release_browser_url(" in backend

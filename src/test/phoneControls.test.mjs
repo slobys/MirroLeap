@@ -8,7 +8,7 @@ const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 
 // Exercise the same self-contained HTML that Tauri loads inside its WebView2
 // child HWND; stub only its narrow native IPC boundary.
-function setup({ failToggle = false, failAction = null } = {}) {
+function setup({ failToggle = false, failAction = null, failReason = 'Native action unavailable' } = {}) {
   const actions = [];
   let enabled = false;
   let quick = false;
@@ -25,7 +25,7 @@ function setup({ failToggle = false, failAction = null } = {}) {
       window.__TAURI__ = { core: { invoke: async (command, { action }) => {
         expect(command).toBe('device_frame_control');
         actions.push(action);
-        if (action === failAction) throw new Error('Native action unavailable');
+        if (action === failAction) throw new Error(failReason);
         if (action === 'ink_toggle') {
           if (failToggle) throw new Error('native canvas not ready');
           enabled = !enabled;
@@ -154,13 +154,33 @@ describe('real Tauri phone-controls HTML', () => {
     await nextTask();
     expect(rotate.dataset.feedback).toBe('sent');
     expect(document.getElementById('quick-feedback').textContent)
-      .toContain('指令已发送：旋转');
+      .toContain('已确认 Android 画面方向切换');
     const failed = document.getElementById('quick-paste');
     failed.click();
     await nextTask();
     expect(failed.dataset.feedback).toBe('error');
     expect(document.getElementById('quick-feedback').textContent)
       .toContain('粘贴失败');
+    expect(document.getElementById('status').dataset.error).toBe('true');
+    dom.window.close();
+  });
+
+  it('shows an Android orientation-lock failure rather than success', async () => {
+    const {dom, document} = setup({
+      failAction: 'quick_rotate',
+      failReason: '手机当前应用没有切换方向。请确认该应用支持横屏并允许自动旋转。',
+    });
+    document.getElementById('quick-toggle').click();
+    await nextTask(); await nextTask();
+    const rotate = document.getElementById('quick-rotate');
+    rotate.click();
+    expect(rotate.dataset.feedback).toBe('busy');
+    expect(document.getElementById('quick-feedback').textContent)
+      .toContain('正在请求 Android 切换方向');
+    await nextTask();
+    expect(rotate.dataset.feedback).toBe('error');
+    expect(document.getElementById('quick-feedback').textContent)
+      .toContain('手机当前应用没有切换方向');
     expect(document.getElementById('status').dataset.error).toBe('true');
     dom.window.close();
   });

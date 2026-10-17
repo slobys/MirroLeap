@@ -716,11 +716,11 @@
           if (button.disabled || !document.body.classList.contains('quick-open')) return;
           button.disabled = true;
           button.setAttribute('aria-busy','true');
-          actionFeedback(button,'busy','正在发送：'+quickLabels[action]);
+          actionFeedback(button,'busy',action === 'rotate' ? '正在请求 Android 切换方向…' : '正在发送：'+quickLabels[action]);
           try {
             await invoke('quick_' + action);
             clearReport();
-            actionFeedback(button,'sent','指令已发送：'+quickLabels[action]);
+            actionFeedback(button,'sent',action === 'rotate' ? '已确认 Android 画面方向切换' : '指令已发送：'+quickLabels[action]);
           } catch (error) {
             report(error);
             actionFeedback(button,'error',quickLabels[action]+'失败 · '+String(error));
