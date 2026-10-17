@@ -1,6 +1,6 @@
 [package]
 name = "mirroleap"
-version = "5.0.11"
+version = "5.0.12"
 authors = ["slobys", "KB-kil0bit contributors"]
 description = "MirroLeap: a lightweight Android mirroring desktop client powered by scrcpy"
 edition = "2021"

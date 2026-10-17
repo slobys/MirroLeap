@@ -31,6 +31,17 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## ✅ v5.0.12 · Windows 正式稳定版
+
+本次将 v5.0.3–v5.0.11 的功能与修复完整整合至 `main`，发布为 **Latest 正式版**。主要包括：
+
+- **稳定投屏窗口**：USB / Wi-Fi、可跟随横竖屏的真机边框、放大镜与悬浮工具栏。悬浮栏原生实时「置顶 / 已置顶」切换，不因切换而重启 scrcpy；用户已实测相关窗口功能。
+- **手机实际方向切换**：通过受限 Android ADB 指令请求真正的横竖屏改变，验证手机画面与 SDL 视频方向后同步外框。部分 Android 系统或应用可能拒绝切换，不保证所有 ROM 都支持。
+- **随用随画**：画笔、撤销、橡皮擦、一键清除，MirroCapture 本地截图预览/复制、原始图与批注图分别保存；MirroPresent 聚光灯和定格放大镜已整合至悬浮栏。
+- **连接与性能**：智能无线连接中心、配对与诊断、GPU 解码支持检测及失败回退、常用场景预设与完整专业设置。
+- **版本检测和更新**：每次启动后台检测一次可信官方新版，有新版自动弹窗并在右上角显示绿色提示点；点击「稍后」不清除提醒状态。升级和下载只能由用户主动确认，NSIS 更新通过项目固定公钥校验签名，手动附件下载校验 SHA-256。
+- **发布安全**：Windows 10/11 x64 提供免安装 ZIP、NSIS EXE 与 MSI 及 SHA-256 文件。正式版代表当前推荐版本，但尚未配置可信 CA 的 Windows Authenticode 代码签名；SmartScreen 仍可能提示，勿关闭系统防护。
+
 ## ✨ v5.0.11 · 连续置顶稳定性与启动更新弹窗（Windows 测试版）
 
 - **连续置顶／取消修复**：在三个 HWND 之间同步 z-order 时，避免把普通窗口错误地排入别人的 topmost 层，导致第三次切换失败；增加保持分层的布局测试和单窗口 native tier 复核。不重启 scrcpy，不断开 ADB。
@@ -97,11 +108,11 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.0.11_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.0.11_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.0.11_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.12_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.12_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.12_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-本次 Windows 实机测试请选择 **[v5.0.11 预发布测试版](https://github.com/slobys/MirroLeap/releases/tag/v5.0.11)** 的 Assets；正式稳定版仍可从 [Latest](https://github.com/slobys/MirroLeap/releases/latest) 下载。不要把 Tags 页面提供的源码 ZIP 当作安装包。
+**正式版请到 [MirroLeap v5.0.12 Release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.12) 或 [Latest](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 
