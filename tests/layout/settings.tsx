@@ -13,9 +13,8 @@ import ControlPanel from '../../src/components/ControlPanel';
 import SessionBehavior from '../../src/components/SessionBehavior';
 import DecoderPerformance from '../../src/components/DecoderPerformance';
 import Header from '../../src/components/Header';
-import AppUpdateChecker from '../../src/components/AppUpdateChecker';
 import Footer from '../../src/components/Footer';
-import MirroPresentPanel from '../../src/components/MirroPresentPanel';
+import VersionUpdateBadge from '../../src/components/VersionUpdateBadge';
 import ScreenshotTools from '../../src/components/ScreenshotTools';
 import LogPanel from '../../src/components/LogPanel';
 import type { ScrcpyConfig } from '../../src/hooks/useScrcpy';
@@ -50,7 +49,7 @@ function SettingsFixture() {
             <h1 className="font-bold text-xl flex items-center gap-2"><Settings2 size={20} className="ml-primary"/> 设置与高级功能</h1>
             <p className="ml-muted text-xs mt-0.5">常用功能在首页，全部专业选项在这里。</p>
           </div>
-          <span className="ml-version-pill">MirroLeap v5.0.8</span>
+          <VersionUpdateBadge version="5.0.8" locale="zh-CN" hasUpdate onClick={()=>{}} showBrand/>
         </div>
         <nav className="ml-settings-nav flex gap-2 overflow-x-auto custom-scrollbar mt-4 pb-1" aria-label="设置分类">
           {tabs.map(({id, text, Icon}) => (
@@ -85,11 +84,10 @@ function SettingsFixture() {
               onColorModeChange={()=>{}} binaryStatus={{found:true,message:'ready'}}
               onDownload={()=>{}} onSetPath={()=>{}} onResetPath={()=>{}}
               isDownloading={false} downloadProgress={0} version="5.0.8"/>
-            <div className="ml-settings-stack"><AppUpdateChecker version="5.0.8"/><Footer version="5.0.8"/></div>
+            <div className="ml-settings-stack"><Footer version="5.0.8"/></div>
           </div>}
           {tab === 'tools' && <div className="ml-settings-columns ml-tools-layout">
             <div className="ml-settings-stack">
-              <MirroPresentPanel device="" running={false} onRecenter={async()=>{}}/>
               <ScreenshotTools device=""/>
             </div>
             <aside className="ml-settings-stack">

@@ -1209,9 +1209,10 @@ fn real_video_orientation_changed(before:(i32,i32),after:(i32,i32))->bool {
 }
 
 async fn rotate_phone_and_verify(app: &AppHandle, device: &str, pid: u32) -> Result<(), String> {
-    let before = capture_screen(pid)
+    // Extract plain dimensions before await: do not retain non-Send HWND.
+    let initial = capture_screen(pid)
+        .map(|captured| (captured.screen.width, captured.screen.height))
         .ok_or("Phone video unavailable: restore mirroring before rotation")?;
-    let initial = (before.screen.width,before.screen.height);
     // No synthetic Alt+R: SDL key injection could report success while Android
     // never receives a rotation request. Ask Android's window manager directly.
     // The override is temporary and restored when mirroring ends.

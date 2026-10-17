@@ -96,7 +96,13 @@ async fn rotation_command(adb_path: &str, device: &str, args: &[&str]) -> Result
 
 async fn get_mode(adb_path: &str, device: &str) -> Result<RotationMode,String> {
     let text = rotation_command(adb_path,device,&[]).await?;
-    parse_mode(&text).ok_or_else(|| format!(
+    if let Some(mode) = parse_mode(&text) { return Ok(mode); }
+    // Some OEM wrappers return successful shell exit codes for help text.
+    // Probe the legacy alias before reporting unsupported window-manager CLI.
+    if let Ok(fallback) = adb(adb_path,device,&["shell","wm","user-rotation"]).await {
+        if let Some(mode) = parse_mode(&fallback) { return Ok(mode); }
+    }
+    Err(format!(
         "Android did not report a supported rotation state: {}",
         text.chars().take(90).collect::<String>()))
 }
@@ -154,20 +160,25 @@ pub(crate) async fn rotate(state: &ScrcpyState, device: &str) -> Result<(),Strin
         .map(|(w,h)| w > h).unwrap_or(false);
     let target = choose_target(before,natural);
     set_mode(&adb_path,device,RotationMode::Locked(target)).await?;
-
-    for _ in 0..9 {
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        if let Ok(after) = screenshot_size(&adb_path,device).await {
-            if (before.0 > before.1) != (after.0 > after.1) {
-                entries.insert(device.to_owned(), Override {
-                    original: prior, applied: target, adb: adb_path,
-                });
-                return Ok(());
+    // Track immediately after the successful setting: if verification times
+    // out AND restoration fails, a later normal stop can still restore it.
+    entries.insert(device.to_owned(), Override {
+        original: prior, applied: target, adb: adb_path.clone(),
+    });
+    let rotated = timeout(Duration::from_secs(14), async {
+        for _ in 0..9 {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            if let Ok(after) = screenshot_size(&adb_path,device).await {
+                if (before.0 > before.1) != (after.0 > after.1) {
+                    return true;
+                }
             }
         }
-    }
+        false
+    }).await.unwrap_or(false);
+    if rotated { return Ok(()); }
     // Do not leave an ineffective override enabled on a direction-locked app.
-    // A reset error is reported rather than claiming that phone state is safe.
+    // A reset error is reported, and the stored restore state is retained.
     set_mode(&adb_path,device,prior).await.map_err(|e|
         format!("手机画面未切换，且恢复旋转设置失败：{e}"))?;
     entries.remove(device);

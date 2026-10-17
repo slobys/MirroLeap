@@ -173,6 +173,8 @@ async function verify(page, viewport, scale) {
   const appearanceTab = page.locator('.ml-settings-nav button').nth(3);
   await appearanceTab.click();
   await page.locator('.ml-appearance-controls').waitFor({state:'visible'});
+  assert.equal(await page.locator('.ml-version-dot').count(), 1,
+    desc + ': update indicator missing from shared version badge');
   assert.equal(await page.locator('.ml-theme-swatch').count(), 5,
     desc + ': theme controls disappeared');
   const appearanceColumns = await page.locator('.ml-appearance-layout')
@@ -183,8 +185,8 @@ async function verify(page, viewport, scale) {
   const toolsTab = page.locator('.ml-settings-nav button').nth(4);
   await toolsTab.click();
   await page.locator('.ml-tools-layout').waitFor({state:'visible'});
-  assert.equal(await page.locator('.ml-tools-layout .ml-card').count(), 2,
-    desc + ': presenter and capture cards missing');
+  assert.equal(await page.locator('.ml-tools-layout .ml-card').count(), 1,
+    desc + ': screenshot card missing or duplicate presenter card returned');
   const toolColumns = await page.locator('.ml-tools-layout')
     .evaluate(el => (getComputedStyle(el).gridTemplateColumns.match(/minmax\([^)]*\)|\S+/g) || []).length);
   assert.equal(toolColumns, viewport.width > 1050 ? 2 : 1,
@@ -192,8 +194,10 @@ async function verify(page, viewport, scale) {
   const contentWidth = await page.locator('.ml-settings-body')
     .evaluate(el => el.scrollWidth - el.clientWidth);
   assert(contentWidth <= 3, desc + ': tools horizontally overflow by ' + contentWidth);
-  assert(await page.locator('.ml-settings-help-details').count() >= 2,
-    desc + ': compact tools lost safety explanations');
+  assert(await page.locator('.ml-settings-help-details').count() >= 1,
+    desc + ': screenshot card lost safety explanations');
+  assert.equal(await page.getByText('MirroPresent',{exact:true}).count(), 0,
+    desc + ': presenter settings should not duplicate floating controls');
   assert.deepEqual(problems, [], desc + ': React layout errors');
   console.log('PASS', desc,
     'mirror / grouped behavior / appearance / compact tools / scroll');

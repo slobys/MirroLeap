@@ -327,8 +327,15 @@ async fn expected_release_hash(client: &reqwest::Client,
     if response.content_length().is_some_and(|n| n > 32_768) {
         return Err("Official checksum manifest is too large".into());
     }
-    let bytes = response.bytes().await.map_err(|e| format!("Cannot read checksum list: {e}"))?;
-    if bytes.len() > 32_768 { return Err("Checksum manifest is too large".into()); }
+    let mut response = response;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await
+        .map_err(|e| format!("Cannot read checksum list: {e}"))? {
+        if bytes.len().saturating_add(chunk.len()) > 32_768 {
+            return Err("Checksum manifest is too large".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     let text = std::str::from_utf8(&bytes).map_err(|_| "Invalid checksum manifest encoding")?;
     checksum_entry(text, &asset.name).ok_or("Release file is missing its unique SHA-256 entry".into())
 }
@@ -564,6 +571,24 @@ mod tests {
         }
         for bad_version in ["", "v5.0.8", "5.0.8/../../evil", "5.0.8?download=1"] {
             assert!(official_release_browser_url(bad_version,"page").is_err());
+        }
+    }
+
+    #[test]
+    fn official_manual_download_must_have_exact_unique_checksum_and_allowed_kind() {
+        let name="MirroLeap_5.0.8_x64-setup.exe";
+        let good="b".repeat(64);
+        let text=format!("{good}  {name}\n");
+        assert_eq!(checksum_entry(&text,name),Some(good.clone()));
+        assert_eq!(checksum_entry(&format!("{text}{good} *{name}\n"),name),None,
+            "Duplicated checksum entries must fail closed");
+        assert_eq!(checksum_entry(&format!("{good}  ../{name}\n"),name),None);
+        assert_eq!(checksum_entry(&format!("not-a-hash  {name}\n"),name),None);
+        for kind in ["exe","portable","msi","checksums"] {
+            assert!(release_download_kind(kind));
+        }
+        for bad in ["","page","../../evil","exe.exe","https://evil.invalid"] {
+            assert!(!release_download_kind(bad));
         }
     }
 
