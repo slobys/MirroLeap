@@ -32,7 +32,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos,
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
     GetWindowRect, GW_HWNDPREV, GetWindowThreadProcessId,
-    IsIconic, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow,
+    IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow,
     GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST, HWND_TOPMOST, HWND_NOTOPMOST,
     HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
     SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
@@ -539,7 +539,9 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             continue;
         }
         if topmost_checked_at.map(|t| t.elapsed() > Duration::from_millis(650)).unwrap_or(true) {
-            if let Ok(state) = topmost_requests().lock() {
+            // A click owns this lock for its complete native transaction.
+            // Skip this health tick rather than competing with the live toggle.
+            if let Ok(state) = topmost_requests().try_lock() {
                 if let Some(&desired) = state.get(&device) {
                     let companions_match = [overlay.hwnd().ok(), toolbar.hwnd().ok()]
                         .into_iter().flatten()
@@ -548,8 +550,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                         let _ = apply_video_topmost(&app, &device, hwnd, desired);
                     }
                 }
+                topmost_checked_at = Some(Instant::now());
             }
-            topmost_checked_at = Some(Instant::now());
         }
         if video_was_unavailable {
             // The video can be restored while the browser still owns focus.
@@ -1232,63 +1234,107 @@ async fn rotate_phone_and_verify(app: &AppHandle, device: &str, pid: u32) -> Res
 fn video_is_topmost(hwnd: HWND) -> bool {
     (unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32 & WS_EX_TOPMOST.0) != 0
 }
-fn apply_video_topmost(app: &AppHandle, device: &str, hwnd: HWND, desired: bool) -> Result<(), String> {
+
+/// A phone mirror uses three independent top-level HWNDs. Toggling only the
+/// scrcpy SDL window can strand the WebView bezel or toolbar behind other apps.
+/// Treat the session as pinned only when ALL three native windows confirm it.
+fn topmost_window_handles(app: &AppHandle, device: &str, video: HWND) -> Result<[HWND; 3], String> {
+    if !unsafe { IsWindow(Some(video)) }.as_bool() {
+        return Err("scrcpy 投屏窗口已失效，请重新打开投屏。".into());
+    }
+    let shell = app.get_webview_window(&label(device))
+        .ok_or("真机边框暂不可用，请稍后再试。")?
+        .hwnd().map_err(|e| format!("Cannot read phone frame window: {e}"))?;
+    let toolbar = app.get_webview_window(&toolbar_label(device))
+        .ok_or("悬浮工具栏暂不可用，请稍后再试。")?
+        .hwnd().map_err(|e| format!("Cannot read toolbar window: {e}"))?;
+    if !unsafe { IsWindow(Some(shell)) }.as_bool() || !unsafe { IsWindow(Some(toolbar)) }.as_bool() {
+        return Err("手机边框或工具栏窗口已失效，请重试。".into());
+    }
+    Ok([video, shell, toolbar])
+}
+
+fn session_is_topmost(handles: &[HWND; 3]) -> bool {
+    handles.iter().all(|&hwnd| video_is_topmost(hwnd))
+}
+
+/// Native Win32 SetWindowPos changes the EXISTING HWND without restarting
+/// scrcpy, touching Android/ADB, or disrupting the video stream. The requested
+/// z-tier must be confirmed: a successful API call alone is not proof.
+fn set_native_window_topmost(hwnd: HWND, desired: bool) -> Result<(), String> {
     let placement = if desired { HWND_TOPMOST } else { HWND_NOTOPMOST };
-    // Some SDL/desktop compositions reorder windows while a transparent
-    // WebView has mouse focus. Request and verify the native state before
-    // changing companion windows, with one explicit frame refresh retry.
-    for pass in 0..2 {
+    let mut last_error = None;
+    for attempt in 0..2 {
         let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE |
-            if pass == 1 { windows::Win32::UI::WindowsAndMessaging::SWP_FRAMECHANGED }
+            if attempt == 1 { windows::Win32::UI::WindowsAndMessaging::SWP_FRAMECHANGED }
             else { windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS(0) };
-        unsafe { SetWindowPos(hwnd, Some(placement), 0, 0, 0, 0, flags) }
-            .map_err(|e| format!("Cannot update native scrcpy video topmost: {e}"))?;
-        if video_is_topmost(hwnd) == desired { break; }
-    }
-    if video_is_topmost(hwnd) != desired {
-        return Err("Windows refused to change SDL video topmost; the request was not confirmed".into());
-    }
-    for name in [label(device), toolbar_label(device)] {
-        if let Some(window) = app.get_webview_window(&name) {
-            window.set_always_on_top(desired)
-                .map_err(|e| format!("Could not change phone frame topmost: {e}"))?;
-            if let Ok(handle) = window.hwnd() {
-                unsafe { SetWindowPos(handle, Some(placement), 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) }
-                    .map_err(|e| format!("Cannot synchronize phone bezel topmost: {e}"))?;
-            }
+        match unsafe { SetWindowPos(hwnd, Some(placement), 0, 0, 0, 0, flags) } {
+            Ok(()) if video_is_topmost(hwnd) == desired => return Ok(()),
+            Ok(()) => {},
+            Err(error) => last_error = Some(error.to_string()),
         }
+    }
+    Err(match last_error {
+        Some(error) => format!("Windows 拒绝实时改变窗口层级：{error}。投屏未重启。"),
+        None => "Windows 未确认实时置顶状态。投屏未重启，请重试。".into(),
+    })
+}
+
+/// HWND_NOTOPMOST is a no-op for an already-normal window, so changing the
+/// style alone does not guarantee the translucent shell stays ABOVE the video.
+/// Reorder companions without moving/resizing the running stream.
+fn restack_above_without_moving(window: HWND, anchor: HWND) -> Result<(), String> {
+    let (after, flags) = match unsafe { GetWindow(anchor, GW_HWNDPREV) } {
+        Ok(previous) if previous == window => (None, SWP_NOZORDER | SWP_NOACTIVATE),
+        Ok(previous) => (Some(previous), SWP_NOACTIVATE),
+        Err(_) => (Some(HWND_TOP), SWP_NOACTIVATE),
+    };
+    unsafe { SetWindowPos(window, after, 0, 0, 0, 0,
+        flags | SWP_NOMOVE | SWP_NOSIZE) }
+        .map_err(|e| format!("Cannot synchronize the phone overlay stack: {e}"))
+}
+
+fn apply_video_topmost(app: &AppHandle, device: &str, hwnd: HWND, desired: bool) -> Result<(), String> {
+    let handles = topmost_window_handles(app, device, hwnd)?;
+    // Reapply in bottom-to-top order: SDL video, click-through bezel, toolbar.
+    for &window in &handles {
+        set_native_window_topmost(window, desired)?;
+    }
+    // Keep the three-window stack correct immediately instead of waiting up
+    // to two seconds for the geometry follower to repair a buried WebView.
+    restack_above_without_moving(handles[1], handles[0])?;
+    restack_above_without_moving(handles[2], handles[1])?;
+    if !handles.iter().all(|&window| video_is_topmost(window) == desired) {
+        return Err("手机视频、边框与悬浮栏的窗口层级未能一致，未确认切换。".into());
     }
     Ok(())
 }
+
 fn toggle_video_topmost(app: &AppHandle, device: &str, hwnd: HWND) -> Result<bool, String> {
-    let previous = topmost_requests().lock().map_err(|e| e.to_string())?
-        .get(device).copied().unwrap_or_else(|| video_is_topmost(hwnd));
-    let requested = !previous;
-    // Store the desired state BEFORE SetWindowPos. The health follower may
-    // wake during this transition; previously it could restore the old
-    // state between our native SetWindowPos and the actual verification.
-    topmost_requests().lock().map_err(|e| e.to_string())?
-        .insert(device.to_string(), requested);
-    if let Err(error) = apply_video_topmost(app, device, hwnd, requested) {
-        // Some systems refuse cross-process WS_EX_TOPMOST changes to an SDL
-        // HWND despite reporting SetWindowPos success. The scrcpy CLI can
-        // deterministically create an always-on-top window from launch, so
-        // hand off a controlled *restart* to the main UI rather than looping
-        // SetWindowPos, claiming success or asking users to disable security.
-        if let Err(dispatch) = app.emit("mirroleap-topmost-restart", serde_json::json!({
-            "device":device, "enabled":requested
-        })) {
-            topmost_requests().lock().map_err(|e| e.to_string())?
-                .insert(device.to_string(), previous);
-            return Err(format!("{error}; could not request fallback restart: {dispatch}"));
-        }
-        let _ = app.emit("scrcpy-log", format!(
-            "[FRAME] Windows refused native topmost change; restarting scrcpy with explicit --always-on-top={requested}"
-        ));
-        return Ok(requested);
+    // Serialize the click with the 650ms follow-loop health repair. Otherwise
+    // the follower can reapply the old tier between a user click and its ACK.
+    let mut requests = topmost_requests().lock().map_err(|e| e.to_string())?;
+    let handles = topmost_window_handles(app, device, hwnd)?;
+    let before = session_is_topmost(&handles);
+    // A half-pinned session is displayed as OFF; its next click repairs ON.
+    let desired = !before;
+    if let Err(error) = apply_video_topmost(app, device, hwnd, desired) {
+        // Do not report success, retain an unconfirmed desired value, or
+        // restart/reconnect Android. Best-effort restore the previous tier.
+        let rollback = apply_video_topmost(app, device, hwnd, before);
+        requests.insert(device.to_owned(), before);
+        return Err(match rollback {
+            Ok(()) => format!("实时置顶未生效：{error}。投屏保持运行，请重试。"),
+            Err(restore) => format!("实时置顶未生效：{error}；恢复原窗口层级也失败：{restore}。投屏未重启。"),
+        });
     }
-    Ok(requested)
+    requests.insert(device.to_owned(), desired);
+    drop(requests);
+    let _ = app.emit("scrcpy-log", format!(
+        "[FRAME] Live topmost {} without restarting scrcpy on {device}",
+        if desired { "enabled" } else { "disabled" }
+    ));
+    Ok(desired)
 }
 
 pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<bool, String> {
@@ -1365,8 +1411,10 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             .get(&device).copied().unwrap_or(true));
     }
     if action == "quick_top_status" {
-        return Ok((unsafe { GetWindowLongPtrW(HWND(hwnd_value as *mut _), GWL_EXSTYLE) } as u32
-            & WS_EX_TOPMOST.0) != 0);
+        // Report the verified three-window state, not a cached intention or
+        // only the SDL HWND while the visible bezel is behind other apps.
+        let handles = topmost_window_handles(app, &device, HWND(hwnd_value as *mut _))?;
+        return Ok(session_is_topmost(&handles));
     }
     if action == "quick_toggle" {
         if !is_quick_open(&device) && presentation_mode(&device) != "off" {

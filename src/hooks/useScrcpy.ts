@@ -201,7 +201,6 @@ export function useScrcpy() {
     const mdnsDevicesRef = useRef<MdnsDevice[]>([]);
     const reconnectAttemptsRef = useRef(new Map<string, { failures: number; retryAfter: number; pending: boolean }>());
     const rememberWindowPositionRef = useRef(true);
-    const topmostRestartLock = useRef(false);
     const liveConfigRef = useRef(config);
     const liveRunningDevicesRef = useRef(runningDevices);
     const livePositionsRef = useRef(windowPositions);
@@ -851,72 +850,6 @@ export function useScrcpy() {
             console.error(e);
         }
     };
-
-    // Fallback for Windows systems that disallow native cross-process HWND
-    // always-on-top style changes. Restart scrcpy with its own supported flag.
-    useEffect(() => {
-        let active = true;
-        const unlisten = listen<{device:string,enabled:boolean}>(
-            'mirroleap-topmost-restart', ({payload}) => {
-                if (!active || !payload || typeof payload.device !== 'string' ||
-                    typeof payload.enabled !== 'boolean') return;
-                const device = payload.device;
-                if (topmostRestartLock.current || resolutionSwitchLock.current ||
-                    !liveRunningDevicesRef.current.includes(device)) return;
-                topmostRestartLock.current = true;
-                void (async () => {
-                    let dispose: (() => void) | undefined;
-                    let timer: ReturnType<typeof setTimeout> | undefined;
-                    let didStop = false;
-                    const previous = liveConfigRef.current;
-                    const updated = {...previous, device, alwaysOnTop: payload.enabled};
-                    try {
-                        let confirmStop!: () => void;
-                        let timeoutStop!: (reason: Error) => void;
-                        const stopped = new Promise<void>((resolve,reject)=>{
-                            confirmStop = resolve; timeoutStop = reject;
-                        });
-                        dispose = await listen<{device:string,running:boolean}>(
-                            'scrcpy-status', event => {
-                                if (event.payload.device === device && event.payload.running === false) {
-                                    confirmStop();
-                                }
-                            });
-                        timer = setTimeout(()=>timeoutStop(new Error(
-                            'Topmost restart did not receive a stop acknowledgement')),8000);
-                        await invoke('stop_scrcpy',{device});
-                        await stopped;
-                        didStop = true;
-                        const position = updated.rememberWindowPosition !== false ?
-                            livePositionsRef.current[device] : undefined;
-                        await invoke('run_scrcpy',{config:{
-                            ...updated,windowX:position?.x,windowY:position?.y,
-                        }});
-                        setConfig(old => old.device === device ?
-                            {...old,alwaysOnTop:payload.enabled} : old);
-                        setLogs(old=>[...old.slice(-100),
-                            '[FRAME] Restarted scrcpy with always-on-top ' +
-                            (payload.enabled ? 'enabled.' : 'disabled.')]);
-                    } catch(error) {
-                        setLogs(old=>[...old.slice(-100),
-                            '[FRAME] Topmost restart failed: '+String(error)]);
-                        if (didStop) {
-                            try {
-                                await invoke('run_scrcpy',{config:previous});
-                            } catch(restoreError) {
-                                setLogs(old=>[...old.slice(-100),
-                                    '[FRAME] Mirror recovery failed: '+String(restoreError)]);
-                            }
-                        }
-                    } finally {
-                        if (timer) clearTimeout(timer);
-                        if (dispose) dispose();
-                        topmostRestartLock.current = false;
-                    }
-                })();
-            });
-        return () => {active = false;void unlisten.then(dispose=>dispose());};
-    },[]);
 
     /** Snaps the running mirror window for `device` back to the centre of the
      *  primary screen. Recovers a window whose saved position no longer lands

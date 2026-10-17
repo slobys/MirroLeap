@@ -100,6 +100,23 @@ assert "crate::android_rotation::rotate(" in native
 assert 'send_video_shortcut(HWND(hwnd_value as *mut _), "quick_rotate")' not in native
 assert "android_rotation::restore(" in (root / "src-tauri/src/commands.rs").read_text(encoding="utf-8")
 
+# A live topmost click must never stop/restart Android mirroring. Native
+# acknowledgement covers SDL video, the bezel and the interactive toolbar;
+# failed changes are rolled back rather than reported as successfully pinned.
+hooks = (root / "src/hooks/useScrcpy.ts").read_text(encoding="utf-8")
+assert "mirroleap-topmost-restart" not in native and "mirroleap-topmost-restart" not in hooks, (
+    "Pin/unpin must never kill and restart the scrcpy process"
+)
+toggle = native.split("fn toggle_video_topmost(", 1)[1].split("\n}\n", 1)[0]
+assert "stop_scrcpy" not in toggle and "run_scrcpy" not in toggle
+assert "session_is_topmost(&handles)" in toggle, "Toggle from verified native state, not cached intent"
+assert "topmost_requests().try_lock()" in native, "Follow loop must not race with the live toggle"
+assert "set_native_window_topmost(" in native and "HWND_NOTOPMOST" in native
+assert "topmost_window_handles(app, device, hwnd)" in native, "Pin every member of the window stack"
+assert "displayTopState(" in toolbar and "id=\"quick-top-label\"" in toolbar
+assert ".quick-grid button.active" in toolbar, "The selected button must stay visually highlighted"
+assert "syncTopState();" in toolbar and "topSwitching" in toolbar
+
 # Release integrity and optional authentic code signing do not disable any
 # Windows security mechanism. A trusted CA certificate must be provided.
 sign = (root / "scripts/windows-sign-and-checksum.ps1").read_text(encoding="utf-8")

@@ -59,7 +59,7 @@ function setup({ failToggle = false, failAction = null, failReason = 'Native act
       } } };
     },
   });
-  return { dom, document: dom.window.document, actions };
+  return { dom, document: dom.window.document, actions, setTop(value) { top = !!value; } };
 }
 
 describe('real Tauri phone-controls HTML', () => {
@@ -140,6 +140,74 @@ describe('real Tauri phone-controls HTML', () => {
     await nextTask(); await nextTask();
     expect(document.body.classList.contains('quick-open')).toBe(false);
     expect(document.body.classList.contains('inking')).toBe(true);
+    dom.window.close();
+  });
+
+  it('shows verified pin state immediately and keeps its green indicator after feedback', async () => {
+    const {dom, document, actions} = setup();
+    document.getElementById('quick-toggle').click();
+    await nextTask(); await nextTask();
+    const top = document.getElementById('quick-top');
+    expect(top.getAttribute('aria-pressed')).toBe('false');
+    expect(document.getElementById('quick-top-label').textContent).toBe('置顶');
+    expect(document.getElementById('quick-feedback').textContent)
+      .toContain('普通窗口');
+    top.click();
+    top.click(); // one in-flight user click must produce only one native request
+    await nextTask(); await nextTask();
+    expect(actions.filter(action => action === 'quick_top_toggle')).toHaveLength(1);
+    expect(top.getAttribute('aria-pressed')).toBe('true');
+    expect(top.classList.contains('active')).toBe(true);
+    expect(document.getElementById('quick-top-label').textContent).toBe('已置顶');
+    expect(top.getAttribute('aria-label')).toBe('取消窗口置顶');
+    expect(dom.window.getComputedStyle(top).backgroundColor).toMatch(/18,\s*185,\s*151/);
+    expect(document.getElementById('quick-feedback').textContent)
+      .toContain('没有中断');
+    await new Promise(resolve => setTimeout(resolve, 3550));
+    expect(document.getElementById('quick-feedback').textContent)
+      .toContain('已置顶');
+    expect(top.classList.contains('active')).toBe(true);
+    top.click();
+    await nextTask(); await nextTask();
+    expect(top.getAttribute('aria-pressed')).toBe('false');
+    expect(document.getElementById('quick-top-label').textContent).toBe('置顶');
+    dom.window.close();
+  });
+
+  it('shows a native topmost failure without claiming success or toggling the button', async () => {
+    const {dom, document, actions} = setup({
+      failAction:'quick_top_toggle',
+      failReason:'Windows refused the live HWND z-order change',
+    });
+    document.getElementById('quick-toggle').click();
+    await nextTask(); await nextTask();
+    const top = document.getElementById('quick-top');
+    top.click();
+    expect(top.dataset.feedback).toBe('busy');
+    await nextTask(); await nextTask();
+    expect(top.getAttribute('aria-pressed')).toBe('false');
+    expect(top.classList.contains('active')).toBe(false);
+    expect(document.getElementById('quick-feedback').textContent).toContain('实时置顶失败');
+    expect(document.getElementById('quick-feedback').textContent).toContain('Windows refused');
+    expect(actions).toContain('quick_top_status');
+    expect(actions).not.toContain('stop_scrcpy');
+    dom.window.close();
+  });
+
+  it('resynchronizes the real topmost state when the toolbar is reopened', async () => {
+    const {dom, document, setTop} = setup();
+    document.getElementById('quick-toggle').click();
+    await nextTask(); await nextTask();
+    setTop(true); // Native tier changed after a Windows restore.
+    dom.window.scrcpyControls.sync();
+    await nextTask(); await nextTask();
+    const top = document.getElementById('quick-top');
+    expect(top.getAttribute('aria-pressed')).toBe('true');
+    expect(document.getElementById('quick-top-label').textContent).toBe('已置顶');
+    setTop(false);
+    dom.window.dispatchEvent(new dom.window.Event('focus'));
+    await nextTask(); await nextTask();
+    expect(top.getAttribute('aria-pressed')).toBe('false');
     dom.window.close();
   });
 

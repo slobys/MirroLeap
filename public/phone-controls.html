@@ -191,6 +191,18 @@
     .quick-grid button { width:100%; height:46px; min-height:46px; gap:1px; font-size:11px;
       background:rgba(113,129,147,.17); }
     .quick-grid button svg { width:18px; height:18px; }
+    /* Higher specificity than .quick-grid button keeps the active indicator
+       visible after transient feedback ends. */
+    .quick-grid button.active {
+      background:rgba(18,185,151,.34); color:#a6fff0;
+      outline:1px solid rgba(18,185,151,.64);
+    }
+    #quick-top { position:relative; }
+    #quick-top.active::after {
+      content:''; position:absolute; top:3px; right:4px;
+      width:6px; height:6px; border-radius:50%;
+      background:#5ff1c4; box-shadow:0 0 5px #5ff1c4;
+    }
     .quick-grid button[data-feedback="busy"] {
       background: rgba(245, 158, 11, .26); color: #ffdb9a;
       outline: 1px solid rgba(245, 158, 11, .7);
@@ -362,8 +374,8 @@
         <button id="quick-paste" aria-label="粘贴" title="粘贴电脑剪贴板文本 (Alt+V)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2M9 10h6M9 14h6"/></svg>粘贴
         </button>
-        <button id="quick-top" aria-label="窗口置顶" aria-pressed="false" title="窗口置顶/取消置顶">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 21V5m-6 6 6-6 6 6M4 3h16"/></svg>置顶
+        <button id="quick-top" aria-label="窗口置顶" aria-pressed="false" title="实时置顶 · 无需重新投屏">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 21V5m-6 6 6-6 6 6M4 3h16"/></svg><span id="quick-top-label">置顶</span>
         </button>
         <button id="quick-remember" aria-label="记住窗口位置" aria-pressed="true" title="下次投屏恢复本次窗口位置">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="5" width="18" height="15" rx="2"/><path d="M7 3v4m10-4v4M7 12h10m-5-2v7"/></svg>记住位置
@@ -408,6 +420,9 @@
       let switching = false;
       let quickSwitching = false;
       let presenterSwitching = false;
+      let topSwitching = false;
+      let topSyncSequence = 0;
+      let pinned = false;
       let presenterTimer = null;
       function presentFeedback(state, message) {
         if (presenterTimer !== null) clearTimeout(presenterTimer);
@@ -456,7 +471,7 @@
         feedbackTimer = setTimeout(() => {
           delete button.dataset.feedback;
           delete quickFeedback.dataset.feedback;
-          quickFeedback.textContent = '快捷操作 · 手机';
+          quickFeedback.textContent = pinned ? '已置顶 · 点击可取消' : '普通窗口 · 点击可置顶';
           quickFeedback.title = '';
           feedbackTimer = null;
         }, state === 'error' ? 6000 : 3500);
@@ -468,12 +483,26 @@
         quickButton.classList.toggle('active', expanded);
         quickButton.setAttribute('aria-pressed', String(expanded));
       }
+      function displayTopState(value) {
+        pinned = !!value;
+        const button = document.getElementById('quick-top');
+        button.classList.toggle('active', pinned);
+        button.setAttribute('aria-pressed', String(pinned));
+        button.setAttribute('aria-label', pinned ? '取消窗口置顶' : '窗口置顶');
+        button.title = pinned ? '已置顶 · 点击立即取消（不重启投屏）' :
+          '普通窗口 · 点击立即置顶（不重启投屏）';
+        document.getElementById('quick-top-label').textContent = pinned ? '已置顶' : '置顶';
+        if (feedbackTimer === null) {
+          quickFeedback.textContent = pinned ? '已置顶 · 点击可取消' : '普通窗口 · 点击可置顶';
+        }
+      }
       async function syncTopState() {
+        if (topSwitching || !document.body.classList.contains('quick-open')) return;
+        const sequence = ++topSyncSequence;
         try {
-          const active=await invoke('quick_top_status');
-          const button=document.getElementById('quick-top');
-          button.classList.toggle('active',!!active);
-          button.setAttribute('aria-pressed',String(!!active));
+          const active = await invoke('quick_top_status');
+          // Ignore stale responses that could overwrite a newer user click.
+          if (!topSwitching && sequence === topSyncSequence) displayTopState(active);
         } catch(error) { report(error); }
       }
       async function syncRememberState() {
@@ -550,6 +579,7 @@
         sync() {
           void syncInkState();
           void syncQuickState();
+          void syncTopState();
           void syncRememberState();
           void syncPresentState();
         },
@@ -616,6 +646,7 @@
           quickSwitching = false;
           quickButton.disabled = false;
           await syncQuickState();
+          await syncTopState();
           await syncInkState();
           await syncPresentState();
         }
@@ -672,23 +703,29 @@
       }
       document.getElementById('quick-top').addEventListener('click', async () => {
         const button=document.getElementById('quick-top');
-        if (button.disabled || !document.body.classList.contains('quick-open')) return;
+        if (topSwitching || button.disabled || !document.body.classList.contains('quick-open')) return;
+        topSwitching = true;
+        topSyncSequence++;
         button.disabled=true;
         button.setAttribute('aria-busy','true');
-        actionFeedback(button,'busy','正在切换窗口置顶…');
+        actionFeedback(button,'busy','正在实时切换窗口置顶…');
         try {
+          // Rust returns success only if SDL, bezel and toolbar all confirm.
           const top=await invoke('quick_top_toggle');
-          button.classList.toggle('active',!!top);
-          button.setAttribute('aria-pressed',String(!!top));
+          displayTopState(top);
           clearReport();
           actionFeedback(button,'sent',top ?
-            '已请求置顶（系统受限时将自动重启投屏）' :
-            '已请求取消置顶（必要时自动重启投屏）');
+            '已置顶 · 手机投屏没有中断' :
+            '已取消置顶 · 手机投屏没有中断');
         } catch(error) {
           report(error);
-          actionFeedback(button,'error','置顶失败 · '+String(error));
+          actionFeedback(button,'error','实时置顶失败 · '+String(error));
+        } finally {
+          topSwitching = false;
+          button.disabled = false;
+          button.removeAttribute('aria-busy');
+          await syncTopState();
         }
-        finally { button.disabled=false; button.removeAttribute('aria-busy'); }
       });
       document.getElementById('quick-remember').addEventListener('click', async () => {
         const button = document.getElementById('quick-remember');
@@ -779,12 +816,14 @@
       window.addEventListener('focus', () => {
         void syncInkState();
         void syncQuickState();
+        void syncTopState();
         void syncPresentState();
       });
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
           void syncInkState();
           void syncQuickState();
+          void syncTopState();
           void syncRememberState();
           void syncPresentState();
         }
