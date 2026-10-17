@@ -5,11 +5,15 @@ import {
 import type { PendingAdbDevice, ScrcpyConfig } from '../hooks/useScrcpy';
 import {invoke} from '@tauri-apps/api/core';
 import {useState, type MouseEvent} from 'react';
+import VersionUpdateBadge from './VersionUpdateBadge';
 import { applyMirrorPreset, activeMirrorPreset, type MirrorPreset } from '../utils/mirrorPresets';
 
 type Props = {
     locale: string;
     version: string;
+    hasUpdate: boolean;
+    checkingUpdate?: boolean;
+    onOpenUpdate: () => void;
     devices: string[];
     pendingDevices: PendingAdbDevice[];
     deviceModels: Record<string, string>;
@@ -42,7 +46,8 @@ const resolutions = [
 ];
 
 export default function CompactDashboard({
-    locale, version, devices, pendingDevices, deviceModels, deviceFriendlyNames,
+    locale, version, hasUpdate, checkingUpdate, onOpenUpdate,
+    devices, pendingDevices, deviceModels, deviceFriendlyNames,
     runningDevices, activeDevice, onSelectDevice, onRefresh, isRefreshing,
     config, onConfigChange, onResolutionChange, isSwitchingResolution,
     onStart, onStop, onOpenSettings, coreReady, onDownloadCore,
@@ -105,7 +110,9 @@ export default function CompactDashboard({
                 </nav>
                 {communityError && <span role="alert" className="text-xs text-red-500">{communityError}</span>}
                 <div className="flex items-center gap-2 shrink-0">
-                    <span className="ml-version-pill" aria-label={copy('软件版本', 'App version')}>v{version}</span>
+                    <VersionUpdateBadge version={version} locale={locale}
+                        hasUpdate={hasUpdate} checking={checkingUpdate}
+                        onClick={onOpenUpdate}/>
                     <button type="button" className="ml-icon-button" aria-label={copy('打开设置', 'Open settings')}
                         title={copy('设置与高级功能', 'Settings and advanced features')}
                         onClick={() => onOpenSettings('mirror')}>

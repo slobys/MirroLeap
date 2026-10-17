@@ -12,7 +12,7 @@ const config: ScrcpyConfig = {
 };
 function props(overrides: Partial<React.ComponentProps<typeof CompactDashboard>> = {}) {
     return {
-        locale: 'zh-CN', version: '4.6.0',
+        locale: 'zh-CN', version: '4.6.0', hasUpdate:false, onOpenUpdate:vi.fn(),
         devices: [selected, 'usb-device'], pendingDevices: [],
         deviceModels: {}, deviceFriendlyNames: { [selected]: 'Xiaomi 14 Ultra' },
         runningDevices: [], activeDevice: selected,
@@ -61,6 +61,16 @@ describe('MirroLeap daily workspace', () => {
         fireEvent.click(screen.getByRole('button', {name:'打开设置'}));
         expect(args.onOpenSettings).toHaveBeenCalledWith('mirror');
     });
+    it('offers a shared version button with a green dot only when an update exists', () => {
+        const args=props({hasUpdate:true});
+        const {container,rerender}=render(<CompactDashboard {...args}/>);
+        expect(container.querySelector('.ml-version-dot')).not.toBeNull();
+        fireEvent.click(screen.getByRole('button',{name:/v4\.6\.0.*发现新版/}));
+        expect(args.onOpenUpdate).toHaveBeenCalledOnce();
+        rerender(<CompactDashboard {...props({hasUpdate:false})}/>);
+        expect(container.querySelector('.ml-version-dot')).toBeNull();
+    });
+
     it('allows selecting a device, refreshing and opening Wi-Fi pairing', () => {
         const args = props();
         render(<CompactDashboard {...args}/>);

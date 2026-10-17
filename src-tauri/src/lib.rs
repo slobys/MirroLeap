@@ -1,5 +1,6 @@
 mod commands;
 mod app_update;
+mod android_rotation;
 mod capture_compositor;
 mod video_decoder;
 mod core_manager;
@@ -23,6 +24,8 @@ use std::os::unix::process::CommandExt;
 
 pub struct ScrcpyState {
     pub processes: Mutex<HashMap<String, Child>>,
+    /// ADB binary resolved for each active mirror (supports custom core paths).
+    pub adb_paths: Mutex<HashMap<String, String>>,
     pub active_device: Mutex<Option<String>>,
     /// A raw window position captured by `stop_scrcpy` right before it kills
     /// the process (the window is still exactly where the user left it at
@@ -92,6 +95,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(ScrcpyState {
                 processes: Mutex::new(HashMap::new()),
+                adb_paths: Mutex::new(HashMap::new()),
                 active_device: Mutex::new(None),
                 final_capture_hint: Mutex::new(HashMap::new()),
             });
@@ -153,6 +157,7 @@ pub fn run() {
             commands::check_scrcpy_update,
             app_update::check_mirroleap_update,
             app_update::open_official_release_link,
+            app_update::download_official_release_asset,
             app_update::install_signed_update,
             app_update::check_mirroleap_preview_update,
             close_splashscreen,

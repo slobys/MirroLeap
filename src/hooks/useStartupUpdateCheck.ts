@@ -11,6 +11,7 @@ type InstallKind = 'installed' | 'portable' | 'other';
  */
 export function useStartupUpdateCheck(enabled: boolean) {
   const requested = useRef(false);
+  const [checking, setChecking] = useState(false);
   const [startupRelease, setStartupRelease] = useState<AppUpdateInfo | null>(null);
   const [startupInstallKind, setStartupInstallKind] = useState<InstallKind>('other');
 
@@ -20,6 +21,7 @@ export function useStartupUpdateCheck(enabled: boolean) {
     const timer = setTimeout(() => {
       if (!active || requested.current) return;
       requested.current = true;
+      setChecking(true);
       void (async () => {
         try {
           const latest = await invoke<AppUpdateInfo>('check_mirroleap_update');
@@ -32,15 +34,24 @@ export function useStartupUpdateCheck(enabled: boolean) {
         } catch (error) {
           // No startup interruption, download, or installation on failures.
           console.info('[MirroLeap] startup update check unavailable:', error);
+        } finally {
+          if (active) setChecking(false);
         }
       })();
     }, 1400);
     return () => { active = false; clearTimeout(timer); };
   }, [enabled]);
 
+  const rememberUpdate = (info: AppUpdateInfo, kind: InstallKind) => {
+    setStartupRelease(info.status === 'update_available' && trustedReleaseUrl(info) ? info : null);
+    setStartupInstallKind(kind);
+  };
+
   return {
     startupRelease,
     startupInstallKind,
+    checking,
+    rememberUpdate,
     dismissStartupUpdate: () => setStartupRelease(null),
   };
 }

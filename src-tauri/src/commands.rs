@@ -208,7 +208,7 @@ pub(crate) async fn phone_toolbar_keyevent(device: &str, action: &str) -> Result
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-fn create_command<S: AsRef<std::ffi::OsStr>>(program: S) -> TokioCommand {
+pub(crate) fn create_command<S: AsRef<std::ffi::OsStr>>(program: S) -> TokioCommand {
     let cmd = TokioCommand::new(program);
     #[cfg(target_os = "windows")]
     {
@@ -837,7 +837,7 @@ pub async fn adb_shell(window: Window, device: String, command: String, custom_p
 /// and no phone screenshot bytes are sent over the network by MirroLeap.
 const MAX_SCREENSHOT_PNG_SIZE: usize = 24 * 1024 * 1024;
 
-fn validate_capture_device(device: &str) -> Result<(), String> {
+pub(crate) fn validate_capture_device(device: &str) -> Result<(), String> {
     if device.is_empty() || device.len() > 160 || device.starts_with('-') ||
         !device.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
     {
@@ -2476,6 +2476,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
 
     let initial_scrcpy_pid = child.id();
     state.processes.lock().unwrap().insert(config.device.clone(), child);
+    state.adb_paths.lock().unwrap().insert(config.device.clone(), adb_exe_path.clone());
 
     // Render a *transparent shell* over the native SDL window; video rendering,
     // keyboard and pointer control remain scrcpy's own. Never launch the shell
@@ -2699,6 +2700,17 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                     }
                 }
             }
+        }
+        // The whole scrcpy session (including GPU/audio retries) has ended.
+        // Restore the phone's previous free/locked mode if the user explicitly
+        // rotated it via the hover controls; do not leave auto-rotate altered.
+        if let Err(error) = crate::android_rotation::restore(
+            &app_handle_mon.state::<ScrcpyState>(), &device_mon).await {
+            let _ = window_mon.emit("scrcpy-log", format!("[ROTATE] Could not restore Android rotation: {error}"));
+        }
+        let state_mon = app_handle_mon.state::<ScrcpyState>();
+        if !state_mon.processes.lock().unwrap().contains_key(&device_mon) {
+            state_mon.adb_paths.lock().unwrap().remove(&device_mon);
         }
     });
 
@@ -3145,6 +3157,11 @@ pub async fn stop_scrcpy(window: Window, state: State<'_, ScrcpyState>, device: 
 /// the current toolbar window belongs to this device. Expose no unguarded
 /// Tauri IPC entry point for arbitrary webviews to stop other sessions.
 pub async fn stop_scrcpy_impl(state: State<'_, ScrcpyState>, device: String) -> Result<(), String> {
+    // Best-effort restoration before closing this session. The monitor also
+    // retries on natural SDL closure, so a transient ADB outage is reported.
+    if let Err(error) = crate::android_rotation::restore(&state, &device).await {
+        eprintln!("[ROTATE] Could not restore device orientation on stop: {error}");
+    }
     let child = {
         let mut processes = state.processes.lock().unwrap();
         processes.remove(&device)

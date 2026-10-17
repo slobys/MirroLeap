@@ -1153,12 +1153,10 @@ fn send_video_shortcut(hwnd: HWND, action: &str) -> Result<(), String> {
     // SDL polls real keyboard state. PostMessage(WM_SYSKEYDOWN) returns
     // success even when SDL ignores the synthetic event. Instead move input
     // focus to the PID-validated scrcpy video and inject real scan codes.
-    // MOD+Right only rotates the desktop *display*, causing the outer bezel
-    // to turn landscape while Android content stays sideways. MOD+R instead
-    // requests a real device-orientation change (apps may refuse it).
+    // Only controls that are safe to send as scrcpy shortcuts remain here.
+    // Android rotation uses a verified ADB window-manager request below.
     let (scan, extended) = match action {
         "quick_fullscreen" => (0x21_u16, false),
-        "quick_rotate" => (0x13_u16, false),
         "quick_paste" => (0x2F_u16, false),
         _ => return Err("Unsupported scrcpy shortcut".into()),
     };
@@ -1210,13 +1208,15 @@ fn real_video_orientation_changed(before:(i32,i32),after:(i32,i32))->bool {
     (before.0>before.1) != (after.0>after.1)
 }
 
-async fn rotate_phone_and_verify(hwnd_value: usize, pid: u32) -> Result<(), String> {
+async fn rotate_phone_and_verify(app: &AppHandle, device: &str, pid: u32) -> Result<(), String> {
     let before = capture_screen(pid)
         .ok_or("Phone video unavailable: restore mirroring before rotation")?;
-    let initial=(before.screen.width,before.screen.height);
-    // No non-Send Win32 HWND may survive into the async timer polling loop.
-    send_video_shortcut(HWND(hwnd_value as *mut _), "quick_rotate")?;
-    for _ in 0..18 {
+    let initial = (before.screen.width,before.screen.height);
+    // No synthetic Alt+R: SDL key injection could report success while Android
+    // never receives a rotation request. Ask Android's window manager directly.
+    // The override is temporary and restored when mirroring ends.
+    crate::android_rotation::rotate(&app.state::<ScrcpyState>(), device).await?;
+    for _ in 0..22 {
         tokio::time::sleep(Duration::from_millis(250)).await;
         if let Some(after) = capture_screen(pid) {
             if real_video_orientation_changed(initial,(after.screen.width,after.screen.height)) {
@@ -1225,7 +1225,7 @@ async fn rotate_phone_and_verify(hwnd_value: usize, pid: u32) -> Result<(), Stri
             }
         }
     }
-    Err("手机当前应用没有切换方向。请确认该应用支持横屏并允许自动旋转，已保留原来的投屏画面。".into())
+    Err("Android 已切换横竖屏，但 scrcpy 投屏视频尚未同步。请尝试重新投屏；停止投屏时会恢复原旋转设置。".into())
 }
 
 fn video_is_topmost(hwnd: HWND) -> bool {
@@ -1402,7 +1402,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             if presentation_mode(&device) != "off" {
                 set_presentation_mode(app, &device, "off").await?;
             }
-            rotate_phone_and_verify(hwnd_value, pid).await?;
+            rotate_phone_and_verify(app, &device, pid).await?;
         } else if matches!(action, "quick_fullscreen" | "quick_paste") {
             send_video_shortcut(HWND(hwnd_value as *mut _), action)?;
         } else {

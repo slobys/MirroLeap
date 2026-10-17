@@ -6,9 +6,8 @@ import ControlPanel from "./components/ControlPanel";
 import LogPanel from "./components/LogPanel";
 import ScreenshotTools from "./components/ScreenshotTools";
 import AppUpdateChecker from "./components/AppUpdateChecker";
-import StartupUpdateNotice from "./components/StartupUpdateNotice";
+import VersionUpdateBadge from "./components/VersionUpdateBadge";
 import DecoderPerformance from "./components/DecoderPerformance";
-import MirroPresentPanel from "./components/MirroPresentPanel";
 import Header from "./components/Header";
 import SessionBehavior from "./components/SessionBehavior";
 import Footer from "./components/Footer";
@@ -20,7 +19,7 @@ import { useScrcpy } from "./hooks/useScrcpy";
 import { getVersion } from '@tauri-apps/api/app';
 import { useI18n } from "./i18n";
 import {useStartupUpdateCheck} from "./hooks/useStartupUpdateCheck";
-import { ArrowLeft, Keyboard, MonitorPlay, Palette, Settings2, Smartphone, TerminalSquare } from 'lucide-react';
+import { ArrowLeft, Keyboard, MonitorPlay, Palette, Settings2, Smartphone, TerminalSquare, X } from 'lucide-react';
 import './settings-center.css';
 
 type SettingsTab = 'devices' | 'mirror' | 'behavior' | 'appearance' | 'tools';
@@ -44,7 +43,6 @@ function App() {
     runScrcpy,
     stopScrcpy,
     changeMirrorResolution,
-    recenterMirrorWindow,
     downloadScrcpy,
     checkScrcpy,
     scrcpyStatus,
@@ -101,8 +99,9 @@ function App() {
 
   const [appVersion, setAppVersion] = useState("5.0.8");
   const [appVersionReady,setAppVersionReady] = useState(false);
-  const {startupRelease, startupInstallKind, dismissStartupUpdate} =
+  const {startupRelease, startupInstallKind, checking: checkingUpdate, rememberUpdate} =
     useStartupUpdateCheck(appVersionReady);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   // Keep the daily workflow lightweight. Older saved scrcpy_* options are
   // still read by useScrcpy, and every advanced feature remains in Settings.
   const [view, setView] = useState<'home' | 'settings'>('home');
@@ -363,6 +362,9 @@ function App() {
             <CompactDashboard
               locale={locale}
               version={appVersion}
+              hasUpdate={Boolean(startupRelease)}
+              checkingUpdate={checkingUpdate}
+              onOpenUpdate={() => setUpdateDialogOpen(true)}
               devices={devices}
               pendingDevices={pendingDevices}
               deviceModels={deviceModels}
@@ -400,7 +402,9 @@ function App() {
                     <h1 className="font-bold text-xl flex items-center gap-2"><Settings2 size={20} className="ml-primary"/> {locale.startsWith('zh') ? '设置与高级功能' : 'Settings & advanced features'}</h1>
                     <p className="ml-muted text-xs mt-0.5">{locale.startsWith('zh') ? '常用功能在首页，全部专业选项在这里。' : 'Every advanced option remains available here.'}</p>
                   </div>
-                  <span className="ml-version-pill">MirroLeap v{appVersion}</span>
+                  <VersionUpdateBadge version={appVersion} locale={locale} showBrand
+                    hasUpdate={Boolean(startupRelease)} checking={checkingUpdate}
+                    onClick={() => setUpdateDialogOpen(true)}/>
                 </div>
                 <nav className="ml-settings-nav flex gap-2 overflow-x-auto custom-scrollbar mt-4 pb-1" aria-label={locale.startsWith('zh') ? '设置分类' : 'Settings categories'}>
                   {([
@@ -476,7 +480,6 @@ function App() {
                         version={appVersion}
                       />
                       <div className="ml-settings-stack">
-                        <AppUpdateChecker version={appVersion} running={sessionRunning}/>
                         <Footer version={appVersion}/>
                       </div>
                     </div>
@@ -484,9 +487,6 @@ function App() {
                   {settingsTab === 'tools' && (
                     <div className="ml-settings-columns ml-tools-layout">
                       <div className="ml-settings-stack">
-                        <MirroPresentPanel device={activeDevice}
-                          running={sessionRunning} customPath={config.scrcpyPath}
-                          onRecenter={recenterMirrorWindow}/>
                         <ScreenshotTools device={activeDevice} customPath={config.scrcpyPath}/>
                       </div>
                       <aside className="ml-settings-stack">
@@ -512,11 +512,24 @@ function App() {
           onComplete={completeOnboarding}
         />
 
-        {startupRelease && <StartupUpdateNotice
-          release={startupRelease} installKind={startupInstallKind}
-          running={sessionRunning}
-          onDismiss={dismissStartupUpdate}
-        />}
+        {updateDialogOpen && <div role="presentation"
+          className="fixed inset-0 z-[450] flex items-center justify-center p-4"
+          style={{background:'rgba(6,12,24,.62)',backdropFilter:'blur(5px)'}}>
+          <section role="dialog" aria-modal="true" aria-labelledby="update-center-heading"
+            className="ml-card w-full max-w-[650px] max-h-[88vh] overflow-y-auto p-5 shadow-2xl border border-[var(--border-base)]">
+            <div className="flex items-center justify-between gap-4 mb-3">
+              <h2 id="update-center-heading" className="font-bold text-lg">
+                {locale.startsWith('zh') ? 'MirroLeap 版本与更新' : 'MirroLeap versions & updates'}
+              </h2>
+              <button type="button" className="ml-icon-button"
+                aria-label={locale.startsWith('zh') ? '关闭更新窗口' : 'Close updates'}
+                onClick={() => setUpdateDialogOpen(false)}><X size={18}/></button>
+            </div>
+            <AppUpdateChecker version={appVersion} running={sessionRunning}
+              initialInfo={startupRelease} initialInstallKind={startupInstallKind}
+              onResult={rememberUpdate}/>
+          </section>
+        </div>}
 
         <ThemedModal
           isOpen={alertState.isOpen}

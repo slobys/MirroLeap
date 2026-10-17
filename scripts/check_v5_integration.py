@@ -41,14 +41,17 @@ ui = {
     "src/components/ScreenshotTools.tsx": "<ScreenshotTools",
     "src/components/AppUpdateChecker.tsx": "<AppUpdateChecker",
     "src/components/DecoderPerformance.tsx": "<DecoderPerformance",
-    "src/components/MirroPresentPanel.tsx": "<MirroPresentPanel",
 }
 for file, element in ui.items():
     assert (root / file).exists(), file
     assert element in app, f"{element} must be actually mounted in App.tsx"
 assert "<Sidebar" in app
 assert "videoDecoderSupport" in hooks and "observedDecoders" in hooks
-assert "recenterMirrorWindow" in app
+assert "recenterMirrorWindow" in hooks, "Existing shortcut recentering must remain"
+assert 'id="present-toggle"' in read("public/phone-controls.html")
+assert "<MirroPresentPanel" not in app, "Presenter controls belong on floating rail"
+assert "<VersionUpdateBadge" in app and "onOpenUpdate=" in app
+assert "app_update::download_official_release_asset" in native
 for ipc in (
     "commands::preview_saved_screenshot",
     "commands::get_video_decoder_support",

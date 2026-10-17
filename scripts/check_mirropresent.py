@@ -54,7 +54,10 @@ assert "Screenshot is not" not in native
 assert "MAX_PRESENTER_BYTES: usize = 8 * 1024 * 1024" in native
 assert 'device_frame_ack' in native and "INK_ACK_NONCE.fetch_add" in native
 assert "Duration::from_secs(8)" in native
-assert "<MirroPresentPanel device={activeDevice}" in main
+assert "<MirroPresentPanel device={activeDevice}" not in main, "Avoid duplicated presenter tools in Settings"
+assert 'id="present-toggle"' in (root / "public/phone-controls.html").read_text(), (
+    "MirroPresent must remain available on the floating phone rail"
+)
 assert "MirroCapture saves phone pixels and optional pen ink" in panel
 assert "presentations" not in cfg.get("identifier", "")
 assert (root / "src/test/mirroPresent.test.mjs").exists()

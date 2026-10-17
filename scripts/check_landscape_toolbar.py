@@ -90,6 +90,16 @@ assert "shell_position_checked_at" in native and "toolbar_position_checked_at" i
 assert "recent_restore" in native and "video_was_unavailable" in native
 assert "window.scrcpyControls?.setLayout" in native
 
+# ADB window-manager rotates actual Android pixels; legacy Alt+R simulation
+# must not regress into a false-success notification.
+rotation = (root / "src-tauri/src/android_rotation.rs").read_text(encoding="utf-8")
+assert 'cmd", "window", "user-rotation"' in rotation
+assert '["exec-out","screencap","-p"]' in rotation
+assert "saved.original" in rotation and "pub(crate) async fn restore(" in rotation
+assert "crate::android_rotation::rotate(" in native
+assert 'send_video_shortcut(HWND(hwnd_value as *mut _), "quick_rotate")' not in native
+assert "android_rotation::restore(" in (root / "src-tauri/src/commands.rs").read_text(encoding="utf-8")
+
 # Release integrity and optional authentic code signing do not disable any
 # Windows security mechanism. A trusted CA certificate must be provided.
 sign = (root / "scripts/windows-sign-and-checksum.ps1").read_text(encoding="utf-8")

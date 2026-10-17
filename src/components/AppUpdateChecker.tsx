@@ -6,7 +6,13 @@ import { useI18n } from '../i18n';
 import { explainUpdateError, trustedReleaseDownload, trustedReleaseUrl,
   type AppUpdateInfo } from '../utils/appUpdate';
 
-interface Props { version: string; running?: boolean; }
+interface Props {
+  version: string;
+  running?: boolean;
+  initialInfo?: AppUpdateInfo | null;
+  initialInstallKind?: 'installed' | 'portable' | 'other';
+  onResult?: (info: AppUpdateInfo, kind: 'installed' | 'portable' | 'other') => void;
+}
 
 /**
  * Newest complete official release metadata is checked only after a user click. Installation is
@@ -14,16 +20,24 @@ interface Props { version: string; running?: boolean; }
  * execute a GitHub-downloaded file directly. Portable ZIP and MSI installs
  * stay on the manual path to avoid converting one installation into another.
  */
-export default function AppUpdateChecker({version, running = false}: Props) {
+export default function AppUpdateChecker({
+  version, running = false, initialInfo = null, initialInstallKind = 'other', onResult,
+}: Props) {
   const {locale} = useI18n();
   const zh = locale.startsWith('zh');
   const [pending, setPending] = useState(false);
-  const [info, setInfo] = useState<AppUpdateInfo | null>(null);
+  const [info, setInfo] = useState<AppUpdateInfo | null>(initialInfo);
   const [error, setError] = useState<string | null>(null);
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeProgress, setUpgradeProgress] = useState<number | null>(null);
   const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null);
-  const [installKind, setInstallKind] = useState<'unknown' | 'portable' | 'installed' | 'other'>('unknown');
+  const [installKind, setInstallKind] = useState<'unknown' | 'portable' | 'installed' | 'other'>(
+    initialInfo ? initialInstallKind : 'unknown');
+  const [downloadKind,setDownloadKind] = useState<string|null>(null);
+  const [downloadProgress,setDownloadProgress] = useState<number|null>(null);
+  const [downloadMessage,setDownloadMessage] = useState<string|null>(null);
+  const downloadLock = useRef(false);
+  const downloadKindRef = useRef<string|null>(null);
   const generation = useRef(0);
   const lock = useRef(false);
   const upgradeLock = useRef(false);
@@ -42,10 +56,18 @@ export default function AppUpdateChecker({version, running = false}: Props) {
           setUpgradeProgress(Math.max(0, Math.min(100, Math.round(payload.percent))));
         }
       });
+    const unlistenDownload = listen<{percent?:number,kind?:string}>(
+      'mirroleap-manual-download-progress',({payload}) => {
+        if (!active || !downloadLock.current || payload?.kind !== downloadKindRef.current) return;
+        if (typeof payload?.percent === 'number' && Number.isFinite(payload.percent)) {
+          setDownloadProgress(Math.max(0, Math.min(100, Math.round(payload.percent))));
+        }
+      });
     return () => {
       active = false;
       generation.current++;
       void unlisten.then(dispose => dispose());
+      void unlistenDownload.then(dispose => dispose());
     };
   }, []);
 
@@ -65,19 +87,20 @@ export default function AppUpdateChecker({version, running = false}: Props) {
         setError(explainUpdateError('invalid_release', zh));
         return;
       }
+      let kind: 'installed' | 'portable' | 'other' = 'other';
       if (result.status === 'update_available') {
         try {
           const detected = await invoke<string>('get_app_install_kind');
           if (request !== generation.current) return;
-          setInstallKind(detected === 'installed' ? 'installed' :
-            detected === 'portable' ? 'portable' : 'other');
+          kind = detected === 'installed' ? 'installed' :
+            detected === 'portable' ? 'portable' : 'other';
         } catch {
-          // Unknown installation type must never show the installer button.
           if (request !== generation.current) return;
-          setInstallKind('other');
         }
       }
+      setInstallKind(kind);
       setInfo(result);
+      onResult?.(result, kind);
     } catch (reason) {
       if (request === generation.current) setError(explainUpdateError(reason, zh));
     } finally {
@@ -94,7 +117,36 @@ export default function AppUpdateChecker({version, running = false}: Props) {
     event.preventDefault();
     void invoke('open_official_release_link',{
       version:info?.latestVersion || version,kind,
+    }).then(()=>{
+      setDownloadMessage(zh?'已请求在系统默认浏览器中打开官方链接。':'The official link was handed to your default browser.');
     }).catch(reason=>setError((zh?'无法打开系统浏览器：':'Could not open the browser: ')+String(reason)));
+  };
+  const downloadOfficial = async(event:MouseEvent<HTMLAnchorElement>,kind:string) => {
+    // Browser previews follow their GitHub anchors. The installed WebView2
+    // saves directly to Downloads, avoiding blocked popup/download handling.
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    event.preventDefault();
+    if (!info || !trustedReleaseUrl(info) || downloadLock.current) return;
+    downloadLock.current = true;
+    downloadKindRef.current = kind;
+    setDownloadKind(kind);
+    setDownloadProgress(null);
+    setDownloadMessage(null);
+    setError(null);
+    try {
+      const path = await invoke<string>('download_official_release_asset',{
+        version:info.latestVersion,kind,
+      });
+      setDownloadMessage(zh
+        ? '文件已校验并保存到：' + path + '。不会自动运行安装程序。'
+        : 'Verified file saved to: ' + path + '. The installer was not launched.');
+    } catch(reason) {
+      setError((zh?'下载失败，请尝试“查看该版本 GitHub 页面”：':'Download failed. Try the official release page: ')+String(reason));
+    } finally {
+      downloadLock.current = false;
+      downloadKindRef.current = null;
+      setDownloadKind(null);
+    }
   };
   const updateAvailable = info?.status === 'update_available';
 
@@ -176,6 +228,10 @@ export default function AppUpdateChecker({version, running = false}: Props) {
       {upgradeMessage}{upgradeProgress !== null ? ` ${upgradeProgress}%` : ''}
     </p>}
     {error && <p role="alert" className="text-xs text-amber-600 leading-relaxed">{error}</p>}
+    {(downloadMessage || downloadKind) && <p role="status" className="text-xs text-emerald-600 break-all">
+      {downloadKind ? (zh ? '正在校验并下载官方文件…' : 'Downloading and verifying official asset…') +
+        (downloadProgress === null ? '' : ' ' + downloadProgress + '%') : downloadMessage}
+    </p>}
     {info && <div role="status" aria-live="polite" className="flex flex-col gap-3 rounded-lg border border-[var(--border-base)] p-3">
       <div className="flex items-start gap-2">
         {updateAvailable ? <Download size={18} className="ml-primary shrink-0"/> :
@@ -201,10 +257,10 @@ export default function AppUpdateChecker({version, running = false}: Props) {
         <div className="flex flex-wrap gap-3">
           {downloads.map(asset => <a key={asset.kind}
             href={trustedReleaseDownload(info, asset) || undefined}
-            onClick={event=>openOfficialLink(event,asset.kind)}
+            onClick={event=>void downloadOfficial(event,asset.kind)}
             target="_blank" rel="noopener noreferrer"
             className="ml-footer-link inline-flex items-center gap-1 text-xs">
-            <Download size={13}/>
+            {downloadKind === asset.kind ? <LoaderCircle size={13} className="animate-spin"/> : <Download size={13}/>}
             {asset.kind === 'portable' ? (zh ? '免安装 ZIP' : 'Portable ZIP') :
               asset.kind === 'exe' ? 'EXE' : asset.kind === 'msi' ? 'MSI' :
                 (zh ? 'SHA-256 校验文件' : 'SHA-256 manifest')}

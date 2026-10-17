@@ -6,9 +6,7 @@
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
-use tauri::{AppHandle, Window};
-#[cfg(target_os = "windows")]
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Window, Emitter, Manager};
 #[cfg(target_os = "windows")]
 use tauri_plugin_updater::UpdaterExt;
 
@@ -275,6 +273,164 @@ fn official_release_browser_url(version: &str, kind: &str) -> Result<String, Str
     Ok(path)
 }
 
+
+fn checksum_entry(manifest: &str, filename: &str) -> Option<String> {
+    let mut found = None;
+    for line in manifest.lines() {
+        let mut words = line.split_whitespace();
+        let (Some(hash), Some(name)) = (words.next(), words.next()) else { continue };
+        if words.next().is_some() || name.trim_start_matches('*') != filename ||
+            hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let value = hash.to_ascii_lowercase();
+        if found.replace(value.clone()).is_some() { return None; }
+    }
+    found
+}
+
+fn release_download_kind(kind: &str) -> bool {
+    matches!(kind, "exe" | "msi" | "portable" | "checksums")
+}
+
+fn download_client() -> Result<reqwest::Client, String> {
+    // GitHub Release downloads redirect to GitHub-controlled asset hosts.
+    // Never follow an unexpected or non-TLS redirect into an untrusted host.
+    let policy = reqwest::redirect::Policy::custom(|attempt| {
+        let host = attempt.url().host_str().unwrap_or("");
+        if attempt.previous().len() < 6 && attempt.url().scheme() == "https" &&
+            matches!(host, "github.com" | "release-assets.githubusercontent.com" |
+                "objects.githubusercontent.com") {
+            attempt.follow()
+        } else {
+            attempt.stop()
+        }
+    });
+    reqwest::Client::builder()
+        .user_agent("MirroLeap-Official-Manual-Download")
+        .redirect(policy)
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(300))
+        .build().map_err(|e| format!("Cannot create safe downloader: {e}"))
+}
+
+async fn expected_release_hash(client: &reqwest::Client,
+    info: &AppUpdateInfo, asset: &ReleaseDownload) -> Result<String, String> {
+    if let Some(hash) = &asset.sha256 { return Ok(hash.clone()); }
+    // Older GitHub assets may not expose an API digest. In that case require
+    // the release's exact checksum manifest; never accept unchecked binaries.
+    let checksums = info.downloads.iter().find(|entry| entry.kind == "checksums")
+        .ok_or("This release has no verifiable SHA-256 checksum")?;
+    let response = client.get(&checksums.url).send().await
+        .map_err(|e| format!("Cannot fetch official SHA256SUMS: {e}"))?;
+    if !response.status().is_success() { return Err("Official checksum download failed".into()); }
+    if response.content_length().is_some_and(|n| n > 32_768) {
+        return Err("Official checksum manifest is too large".into());
+    }
+    let bytes = response.bytes().await.map_err(|e| format!("Cannot read checksum list: {e}"))?;
+    if bytes.len() > 32_768 { return Err("Checksum manifest is too large".into()); }
+    let text = std::str::from_utf8(&bytes).map_err(|_| "Invalid checksum manifest encoding")?;
+    checksum_entry(text, &asset.name).ok_or("Release file is missing its unique SHA-256 entry".into())
+}
+
+static MANUAL_DOWNLOAD_BUSY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+struct ManualDownloadGuard;
+impl ManualDownloadGuard {
+    fn acquire() -> Result<Self, String> {
+        if MANUAL_DOWNLOAD_BUSY.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return Err("Another official download is already running".into());
+        }
+        Ok(Self)
+    }
+}
+impl Drop for ManualDownloadGuard {
+    fn drop(&mut self) {
+        MANUAL_DOWNLOAD_BUSY.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// User-click-only download. Windows WebView2 may refuse external executable
+/// downloads even when an anchor has a valid href. Save directly to Downloads,
+/// compare SHA-256 with the official release metadata/manifest and NEVER run it.
+#[tauri::command]
+pub async fn download_official_release_asset(
+    window: Window, app_handle: AppHandle, version: String, kind: String,
+) -> Result<String, String> {
+    if window.label() != "main" { return Err("main_window_only".into()); }
+    if !release_download_kind(&kind) || stable_version(&version).is_none() ||
+        version.starts_with('v') { return Err("Untrusted release download request".into()); }
+    let _busy = ManualDownloadGuard::acquire()?;
+    let local = app_handle.package_info().version.to_string();
+    let info = interpret_latest_release(&local, &fetch_release_json(ALL_RELEASES_API).await?)?;
+    if info.status != "update_available" || info.latest_version != version {
+        return Err("Official release changed; check for updates again".into());
+    }
+    let asset = info.downloads.iter().find(|entry| entry.kind == kind)
+        .ok_or("Official release file is unavailable")?;
+    let client = download_client()?;
+    let expected = expected_release_hash(&client, &info, asset).await?;
+    let downloads = app_handle.path().download_dir()
+        .map_err(|e| format!("Cannot locate Downloads folder: {e}"))?;
+    tokio::fs::create_dir_all(&downloads).await
+        .map_err(|e| format!("Cannot prepare Downloads folder: {e}"))?;
+    let response = client.get(&asset.url).send().await
+        .map_err(|e| format!("Cannot download official asset: {e}"))?;
+    if !response.status().is_success() { return Err("Official download URL failed".into()); }
+    if response.content_length().is_some_and(|n| n != asset.size) {
+        return Err("GitHub asset length does not match release metadata".into());
+    }
+    let mut response = response;
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncWriteExt;
+    let mut sha = Sha256::new();
+    let mut received = 0_u64;
+    // Each candidate uses a unique temporary file. Never overwrite a user's
+    // previous downloads or expose a partial installer as a completed EXE.
+    for i in 0..100 {
+        let filename = if i == 0 { asset.name.clone() } else {
+            let (stem, extension) = asset.name.rsplit_once('.')
+                .ok_or("Invalid official filename")?;
+            format!("{stem} ({i}).{extension}")
+        };
+        let target = downloads.join(&filename);
+        if target.exists() { continue; }
+        let part = downloads.join(format!(".{filename}.mirroleap-part"));
+        let mut file = match tokio::fs::OpenOptions::new().write(true)
+            .create_new(true).open(&part).await {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(format!("Cannot create download: {error}")),
+            };
+        let download_result = async {
+            while let Some(chunk) = response.chunk().await
+                .map_err(|e| format!("Official download interrupted: {e}"))? {
+                received = received.saturating_add(chunk.len() as u64);
+                if received > asset.size {
+                    return Err("Downloaded file exceeds official release size".to_string());
+                }
+                sha.update(&chunk);
+                file.write_all(&chunk).await.map_err(|e| format!("Download write failed: {e}"))?;
+                let percent = (100 * received / asset.size).min(100);
+                let _ = app_handle.emit("mirroleap-manual-download-progress",
+                    serde_json::json!({"kind":kind,"percent":percent}));
+            }
+            if received != asset.size || format!("{:x}", sha.finalize()) != expected {
+                return Err("Official release SHA-256 mismatch; file discarded".into());
+            }
+            file.flush().await.map_err(|e| format!("Cannot flush download: {e}"))?;
+            file.sync_all().await.map_err(|e| format!("Cannot finish download: {e}"))?;
+            drop(file);
+            tokio::fs::rename(&part, &target).await
+                .map_err(|e| format!("Cannot finalize download: {e}"))?;
+            Ok::<String,String>(target.to_string_lossy().into_owned())
+        }.await;
+        if download_result.is_err() { let _ = tokio::fs::remove_file(&part).await; }
+        return download_result;
+    }
+    Err("Too many files already exist in Downloads for this release".into())
+}
 #[tauri::command]
 pub async fn install_signed_update(
     window: Window, app_handle: AppHandle, version: String,
