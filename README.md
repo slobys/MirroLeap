@@ -31,11 +31,11 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
-## 🔧 开发中 · 悬浮栏真正实时置顶（尚未发布）
+## ✨ v5.0.10 · 悬浮栏真正实时置顶（Windows 实机测试版）
 
 - **不重启、不掉线**：点击悬浮栏置顶或取消置顶时，原生 Windows 直接调整现有 scrcpy 视频、真机边框和悬浮栏的 HWND Z 顺序；彻底移除旧的“修改置顶失败就结束投屏并用新参数重启”的路径。
 - **单击生效并确认**：只有三个窗口的原生置顶状态全部得到验证才返回成功，失败时尝试回滚、保持投屏，不再错误显示已置顶；跟随器与按钮切换串行，防止旧状态抢写。
-- **视觉状态常驻**：置顶按钮由“置顶”变为绿色“已置顶”，再次单击立即取消；恢复、重新展开和前台切换时主动查询实时状态。此修复仍需 Windows 真机跨应用置顶和取消置顶验收，并不包含在已经发布的 v5.0.9 安装包中。
+- **视觉状态常驻**：置顶按钮由“置顶”变为绿色“已置顶”，再次单击立即取消；恢复、重新展开和前台切换时主动查询实时状态。此修复需要 Windows 真机跨应用置顶和取消置顶验收，v5.0.9 仍可用于回退。
 
 ## ✨ v5.0.9 · 旋转可靠性与软件更新入口（Windows 实机测试版）
 
@@ -91,11 +91,11 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.0.9_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.0.9_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.0.9_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.10_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.10_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.10_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-本次 Windows 实机测试请选择 **[v5.0.9 预发布测试版](https://github.com/slobys/MirroLeap/releases/tag/v5.0.9)** 的 Assets；正式稳定版仍可从 [Latest](https://github.com/slobys/MirroLeap/releases/latest) 下载。不要把 Tags 页面提供的源码 ZIP 当作安装包。
+本次 Windows 实机测试请选择 **[v5.0.10 预发布测试版](https://github.com/slobys/MirroLeap/releases/tag/v5.0.10)** 的 Assets；正式稳定版仍可从 [Latest](https://github.com/slobys/MirroLeap/releases/latest) 下载。不要把 Tags 页面提供的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 
