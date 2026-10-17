@@ -98,7 +98,7 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("5.0.10");
+  const [appVersion, setAppVersion] = useState("5.0.11");
   const [appVersionReady,setAppVersionReady] = useState(false);
   const {startupRelease, startupInstallKind, showStartupPrompt,
     checking: checkingUpdate, rememberUpdate, dismissStartupPrompt} =
