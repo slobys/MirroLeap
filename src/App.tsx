@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import Sidebar from "./components/Sidebar";
@@ -6,6 +6,7 @@ import ControlPanel from "./components/ControlPanel";
 import LogPanel from "./components/LogPanel";
 import ScreenshotTools from "./components/ScreenshotTools";
 import AppUpdateChecker from "./components/AppUpdateChecker";
+import StartupUpdateNotice from "./components/StartupUpdateNotice";
 import DecoderPerformance from "./components/DecoderPerformance";
 import MirroPresentPanel from "./components/MirroPresentPanel";
 import Header from "./components/Header";
@@ -18,6 +19,7 @@ import ThemedModal from "./components/ThemedModal";
 import { useScrcpy } from "./hooks/useScrcpy";
 import { getVersion } from '@tauri-apps/api/app';
 import { useI18n } from "./i18n";
+import {trustedReleaseUrl,type AppUpdateInfo} from "./utils/appUpdate";
 import { ArrowLeft, Keyboard, MonitorPlay, Palette, Settings2, Smartphone, TerminalSquare } from 'lucide-react';
 import './settings-center.css';
 
@@ -97,7 +99,12 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("5.0.7");
+  const [appVersion, setAppVersion] = useState("5.0.8");
+  const [appVersionReady,setAppVersionReady] = useState(false);
+  const startupUpdateRequested = useRef(false);
+  const [startupRelease,setStartupRelease] = useState<AppUpdateInfo|null>(null);
+  const [startupInstallKind,setStartupInstallKind] =
+    useState<'installed'|'portable'|'other'>('other');
   // Keep the daily workflow lightweight. Older saved scrcpy_* options are
   // still read by useScrcpy, and every advanced feature remains in Settings.
   const [view, setView] = useState<'home' | 'settings'>('home');
@@ -138,6 +145,7 @@ function App() {
       try {
         const v = await getVersion();
         setAppVersion(v);
+        setAppVersionReady(true);
 
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('close_splashscreen');
@@ -149,6 +157,33 @@ function App() {
     const timer = setTimeout(initApp, 500);
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    // Once per app launch, quietly check the newest complete signed official
+    // release. This only shows a confirmation dialog, never downloads or
+    // installs in the background; network failures never interrupt startup.
+    if (!appVersionReady || startupUpdateRequested.current ||
+        !('__TAURI_INTERNALS__' in window)) return;
+    startupUpdateRequested.current = true;
+    let active = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const {invoke}=await import('@tauri-apps/api/core');
+          const latest=await invoke<AppUpdateInfo>('check_mirroleap_update');
+          if (!active || latest.status!=='update_available' || !trustedReleaseUrl(latest)) return;
+          const kind=await invoke<string>('get_app_install_kind').catch(()=> 'other');
+          if (!active) return;
+          setStartupInstallKind(kind==='installed'?'installed':
+            kind==='portable'?'portable':'other');
+          setStartupRelease(latest);
+        } catch(error) {
+          console.info('[MirroLeap] startup update check unavailable:',error);
+        }
+      })();
+    },1400);
+    return ()=>{active=false;clearTimeout(timer);};
+  },[appVersionReady]);
 
   useEffect(() => {
     // Initial check (once on mount) - Silent to avoid log clatter. adb's own
@@ -505,6 +540,12 @@ function App() {
           downloadProgress={downloadProgress}
           onComplete={completeOnboarding}
         />
+
+        {startupRelease && <StartupUpdateNotice
+          release={startupRelease} installKind={startupInstallKind}
+          running={sessionRunning}
+          onDismiss={()=>setStartupRelease(null)}
+        />}
 
         <ThemedModal
           isOpen={alertState.isOpen}

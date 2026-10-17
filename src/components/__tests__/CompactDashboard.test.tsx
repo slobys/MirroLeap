@@ -1,7 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CompactDashboard from '../CompactDashboard';
 import type { ScrcpyConfig } from '../../hooks/useScrcpy';
+const {invokeMock}=vi.hoisted(()=>({invokeMock:vi.fn()}));
+vi.mock('@tauri-apps/api/core',()=>({invoke:invokeMock}));
 
 const selected = '192.168.2.226:5555';
 const config: ScrcpyConfig = {
@@ -25,6 +27,24 @@ function props(overrides: Partial<React.ComponentProps<typeof CompactDashboard>>
 }
 
 describe('MirroLeap daily workspace', () => {
+    beforeEach(()=>invokeMock.mockReset().mockResolvedValue(undefined));
+    afterEach(()=>{delete (window as unknown as {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__;});
+    it('opens YouTube and Telegram using an allowlisted Rust OS browser handoff',async()=>{
+        Object.defineProperty(window,'__TAURI_INTERNALS__',{value:{},configurable:true});
+        render(<CompactDashboard {...props()}/>);
+        fireEvent.click(screen.getByRole('link',{name:'奶油 YouTube 频道'}));
+        fireEvent.click(screen.getByRole('link',{name:'奶油 Telegram 群组'}));
+        await waitFor(()=>expect(invokeMock).toHaveBeenCalledTimes(2));
+        expect(invokeMock).toHaveBeenNthCalledWith(1,'open_official_community_link',{destination:'youtube'});
+        expect(invokeMock).toHaveBeenNthCalledWith(2,'open_official_community_link',{destination:'telegram'});
+    });
+    it('shows an explicit error if Windows has no default browser',async()=>{
+        Object.defineProperty(window,'__TAURI_INTERNALS__',{value:{},configurable:true});
+        invokeMock.mockRejectedValueOnce(new Error('No browser'));
+        render(<CompactDashboard {...props()}/>);
+        fireEvent.click(screen.getByRole('link',{name:'奶油 YouTube 频道'}));
+        await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('无法打开外部浏览器'));
+    });
     it('shows only the common actions and keeps advanced controls behind Settings', () => {
         const args = props();
         render(<CompactDashboard {...args}/>);

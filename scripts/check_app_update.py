@@ -52,8 +52,16 @@ assert 'if update.version != version' in backend, "Signed version mismatch must 
 assert 'trustedReleaseUrl(info)' in frontend and 'Object.prototype.hasOwnProperty.call' in validator
 assert "dangerouslySetInnerHTML" not in frontend
 assert "setInterval(" not in frontend and "useEffect(() => {" in frontend
+assert "startupUpdateRequested.current" in app
+assert "setStartupRelease(latest)" in app
+assert "StartupUpdateNotice" in app
+assert "open_official_release_link" in backend
+assert "official_release_browser_url(" in backend
+assert 'kind.as_str()' not in backend
+assert 'app_handle.shell().open(path, None)' in backend
+assert 'open_official_community_link' in (root / 'src-tauri/src/commands.rs').read_text(encoding='utf-8')
 for prohibited in ("std::process::Command", "tokio::process::Command",
-                   "std::fs::write", "tokio::fs::write", "tauri_plugin_shell",
+                   "std::fs::write", "tokio::fs::write",
                    "auto_install", "run_installer"):
     assert prohibited not in backend, f"Update checker must not execute arbitrary programs: {prohibited}"
 assert (root / "src-tauri/src/core_manager.rs").exists(), "scrcpy update remains independent"

@@ -66,6 +66,25 @@ pub fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+/// Only two explicitly trusted community destinations may be opened from
+/// MirroLeap's main window. A WebView cannot submit arbitrary URLs or
+/// executable paths to the OS shell.
+#[tauri::command]
+pub fn open_official_community_link(
+    window: Window, app_handle: tauri::AppHandle, destination: &str,
+) -> Result<(), String> {
+    require_main_window(&window)?;
+    let url = match destination {
+        "youtube" => "https://www.youtube.com/@naiyou",
+        "telegram" => "https://t.me/naiyous",
+        _ => return Err("Unknown or untrusted community destination".into()),
+    };
+    use tauri_plugin_shell::ShellExt;
+    #[allow(deprecated)]
+    app_handle.shell().open(url, None)
+        .map_err(|error| format!("Cannot open the official link in your browser: {error}"))
+}
+
 fn get_binary_path(binary_name: &str, custom_folder: Option<String>) -> String {
     let exe_ext = std::env::consts::EXE_EXTENSION;
     let binary_filename = if exe_ext.is_empty() {
@@ -1028,6 +1047,14 @@ mod saved_screenshot_preview_tests {
 /// Trusted toolbar and main-window presenter refresh both use the same
 /// bounded in-memory ADB screenshot path; neither writes anything to disk.
 #[cfg(target_os = "windows")]
+fn retryable_presenter_orientation_error(error: &str) -> bool {
+    error.contains("Phone rotated while capturing snapshot") ||
+    error.contains("Snapshot could not load or the phone rotated") ||
+    error.contains("Video aspect ratio changed") ||
+    error.contains("Phone presentation view has not loaded")
+}
+
+#[cfg(target_os = "windows")]
 pub(crate) async fn refresh_presenter_image(
     app: &tauri::AppHandle, device: &str, custom_path: Option<String>,
 ) -> Result<(), String> {
@@ -1035,8 +1062,35 @@ pub(crate) async fn refresh_presenter_image(
     if crate::device_frame::presentation_mode(device) != "magnifier" {
         return Err("Enable MirroPresent frozen magnifier before refreshing".into());
     }
-    let png = capture_device_png(device, custom_path).await?;
-    crate::device_frame::set_presentation_snapshot(app, device, &png).await
+    // ADB captures a screenshot at a different instant from the SDL video
+    // size and the WebView frame's CSS orientation. During rotation all three
+    // may briefly disagree. Retry only this transient condition and never
+    // keep retrying malformed PNGs, missing devices or permission failures.
+    let capture = async {
+        let mut last_orientation_error = String::new();
+        for attempt in 0..5 {
+            if crate::device_frame::presentation_mode(device) != "magnifier" {
+                return Err("Magnifier was closed while waiting for orientation".into());
+            }
+            let png = capture_device_png(device, custom_path.clone()).await?;
+            match crate::device_frame::set_presentation_snapshot(app, device, &png).await {
+                Ok(()) => return Ok(()),
+                Err(error) if retryable_presenter_orientation_error(&error) => {
+                    last_orientation_error = error;
+                    if attempt < 4 {
+                        tokio::time::sleep(Duration::from_millis(350)).await;
+                        continue;
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(format!(
+            "截图与投屏方向尚未同步，请等待横竖屏切换完成后重试：{last_orientation_error}"
+        ))
+    };
+    tokio::time::timeout(Duration::from_secs(24), capture).await
+        .map_err(|_| "等待手机方向稳定超时，请稍后重试放大镜".to_string())?
 }
 
 /// Main-window-only presentation tools, scoped to an existing Android session

@@ -17,7 +17,7 @@ describe('redesigned settings center keeps existing actions accessible', () => {
       colorMode="light"
       onColorModeChange={onColorModeChange}
       binaryStatus={{found:false,message:'Engine not found'}}
-      isDownloading={false} downloadProgress={0} version="5.0.7"
+      isDownloading={false} downloadProgress={0} version="5.0.8"
       onDownload={onDownload} onSetPath={onSetPath} onResetPath={onResetPath}
     />);
     fireEvent.click(screen.getByRole('button', {name:'Astro Blue'}));

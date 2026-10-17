@@ -31,6 +31,12 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## ✨ v5.0.8 · 真正的手机方向旋转、自动更新提醒与社区外链（测试候选）
+
+这次根据 Windows/Android 实机截图修复 5 项体验问题。**旋转**不再使用只旋转电脑投屏外壳的 scrcpy Alt+右方向键，而是通过 Alt+R 请求 Android 应用切换横竖屏，并检测视频内容的实际方向变化；应用锁定方向时明确提示而不转动边框。**定格放大镜**遇到手机截图、SDL 视频与 WebView 边框在旋转时短暂不同步，有限等待并自动重试，仍严格拒绝异常图片并在失败时恢复触控。
+
+**行为设置**恢复手机与连接／录制与保存的左右双列布局，窄窗口自动改为单列。软件现在**每次启动后静默检查一次**官方最新完整签名 Release，有新版本才弹出可关闭的升级提示；下载安装必须由用户主动点击。NSIS EXE 安装版使用内置 Tauri 公钥验签安装，Portable ZIP/MSI 则在系统默认浏览器打开官方文件页面；不绕过 Windows 安全防护。首页的 [YouTube 奶油频道](https://www.youtube.com/@naiyou) 和 [Telegram 奶油群组](https://t.me/naiyous) 采用 Rust 严格白名单调用系统默认浏览器，不再依赖 WebView2 无权限的新窗口打开操作。所有下载路径同样严格绑定官方仓库与版本。
+
 ## ✨ v5.0.7 · 在线升级与窗口稳定性修复（测试候选）
 
 本版根据 v5.0.6 实机反馈，着重修复 **Windows 置顶被拒绝**、**D3D11 强制 GPU 解码回退后丢失真机边框**、在线更新只显示 v5.0.2 等问题。置顶优先尝试操作已确认的 SDL/外框窗口，当 Windows 不允许动态置顶时由主界面串行停止并重启 scrcpy，改由其原生 `--always-on-top` 参数完成；这个重启仍需实机确认。D3D11 或音频兼容回退创建了新的 scrcpy 进程后，现在会重建对应手机边框及悬浮栏并停止旧跟随器，防止留下无边框视频。
@@ -73,9 +79,9 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.0.7_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.0.7_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.0.7_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.8_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.8_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.8_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
 从 **[MirroLeap GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest)** 的 Assets 下载，不要从 Tags 页面下载源码 ZIP 当作安装包。
 

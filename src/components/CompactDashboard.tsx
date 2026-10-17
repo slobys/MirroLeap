@@ -3,6 +3,8 @@ import {
     Settings2, ShieldCheck, Smartphone, Volume2, VolumeX, Wifi, Youtube, Send,
 } from 'lucide-react';
 import type { PendingAdbDevice, ScrcpyConfig } from '../hooks/useScrcpy';
+import {invoke} from '@tauri-apps/api/core';
+import {useState, type MouseEvent} from 'react';
 import { applyMirrorPreset, activeMirrorPreset, type MirrorPreset } from '../utils/mirrorPresets';
 
 type Props = {
@@ -52,6 +54,22 @@ export default function CompactDashboard({
     const selected = devices.includes(activeDevice);
     const deviceLabel = (serial: string) =>
         deviceFriendlyNames[serial] || deviceModels[serial] || serial;
+    const [communityError,setCommunityError] = useState<string|null>(null);
+    const openCommunity = async(event:MouseEvent<HTMLAnchorElement>, destination:'youtube'|'telegram')=>{
+        // Ordinary web previews may use the external link directly. The
+        // installed WebView2 has no default external-window permission,
+        // so dispatch only an allowlisted destination to Rust.
+        if (!('__TAURI_INTERNALS__' in window)) return;
+        event.preventDefault();
+        setCommunityError(null);
+        try {
+            await invoke('open_official_community_link',{destination});
+        } catch(error) {
+            setCommunityError(zh ? '无法打开外部浏览器，请检查默认浏览器设置。' :
+                'Could not open the default browser.');
+            console.warn('[MirroLeap] community browser open failed:',error);
+        }
+    };
 
     return (
         <main className="ml-home flex flex-col w-full h-full min-h-0">
@@ -71,18 +89,21 @@ export default function CompactDashboard({
                 </div>
                 <nav className="ml-community-links" aria-label={copy('官方交流频道','Community channels')}>
                     <a href="https://www.youtube.com/@naiyou" target="_blank" rel="noopener noreferrer"
+                        onClick={event=>void openCommunity(event,'youtube')}
                         aria-label={copy('奶油 YouTube 频道','Naiyou YouTube channel')}
                         className="ml-community-link ml-community-youtube">
                         <Youtube size={19} aria-hidden="true"/>
                         <span>YouTube</span>
                     </a>
                     <a href="https://t.me/naiyous" target="_blank" rel="noopener noreferrer"
+                        onClick={event=>void openCommunity(event,'telegram')}
                         aria-label={copy('奶油 Telegram 群组','Naiyou Telegram group')}
                         className="ml-community-link ml-community-telegram">
                         <Send size={17} aria-hidden="true"/>
                         <span>Telegram</span>
                     </a>
                 </nav>
+                {communityError && <span role="alert" className="text-xs text-red-500">{communityError}</span>}
                 <div className="flex items-center gap-2 shrink-0">
                     <span className="ml-version-pill" aria-label={copy('软件版本', 'App version')}>v{version}</span>
                     <button type="button" className="ml-icon-button" aria-label={copy('打开设置', 'Open settings')}

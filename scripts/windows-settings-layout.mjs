@@ -151,6 +151,21 @@ async function verify(page, viewport, scale) {
     desc + ': behavior section overpacked');
   assert.equal(await page.locator('.ml-settings-group').count(), 2,
     desc + ': only device/connection and recording sections belong in behavior settings');
+  const cardRects = await page.locator('.ml-behavior-groups > .ml-settings-group')
+    .evaluateAll(nodes => nodes.map(node=>{
+      const rect=node.getBoundingClientRect();
+      return {left:rect.left,top:rect.top,width:rect.width};
+    }));
+  assert.equal(cardRects.length,2,desc+': missing behavior cards');
+  if (viewport.width > 800) {
+    assert(Math.abs(cardRects[0].top-cardRects[1].top)<4,
+      desc+': recording must occupy the previously empty right column');
+    assert(cardRects[1].left>cardRects[0].left+cardRects[0].width-2,
+      desc+': recording card overlaps the phone settings');
+  } else {
+    assert(cardRects[1].top>=cardRects[0].top,
+      desc+': recording card is not reachable below mobile settings');
+  }
   assert.equal(await page.locator('.ml-settings-group-head').allTextContents()
     .then(titles => titles.some(title=>title.includes('窗口与显示') || title.includes('Window & display'))),false,
     desc + ': duplicate window settings should remain on home or quick toolbar');

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { CheckCircle2, Download, ExternalLink, LoaderCircle, RefreshCw, ShieldCheck } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import {listen} from '@tauri-apps/api/event';
@@ -89,6 +89,13 @@ export default function AppUpdateChecker({version, running = false}: Props) {
   const officialPage = 'https://github.com/slobys/MirroLeap/releases';
   const releasePage = info && trustedReleaseUrl(info);
   const downloads = info?.downloads.filter(asset => trustedReleaseDownload(info, asset)) || [];
+  const openOfficialLink = (event:MouseEvent<HTMLAnchorElement>,kind:string) => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    event.preventDefault();
+    void invoke('open_official_release_link',{
+      version:info?.latestVersion || version,kind,
+    }).catch(reason=>setError((zh?'无法打开系统浏览器：':'Could not open the browser: ')+String(reason)));
+  };
   const updateAvailable = info?.status === 'update_available';
 
   const installUpdate = async () => {
@@ -143,6 +150,7 @@ export default function AppUpdateChecker({version, running = false}: Props) {
           (zh ? '检查软件更新' : 'Check for updates')}
       </button>
       <a href={officialPage} target="_blank" rel="noopener noreferrer"
+        onClick={event=>openOfficialLink(event,'list')}
         className="ml-footer-link inline-flex items-center gap-1">
         <ExternalLink size={13}/>
         {zh ? '官方发布页面' : 'Official releases'}
@@ -193,6 +201,7 @@ export default function AppUpdateChecker({version, running = false}: Props) {
         <div className="flex flex-wrap gap-3">
           {downloads.map(asset => <a key={asset.kind}
             href={trustedReleaseDownload(info, asset) || undefined}
+            onClick={event=>openOfficialLink(event,asset.kind)}
             target="_blank" rel="noopener noreferrer"
             className="ml-footer-link inline-flex items-center gap-1 text-xs">
             <Download size={13}/>
@@ -207,6 +216,7 @@ export default function AppUpdateChecker({version, running = false}: Props) {
         </p>
       </div>}
       {releasePage && <a href={releasePage} target="_blank" rel="noopener noreferrer"
+        onClick={event=>openOfficialLink(event,'page')}
         className="ml-footer-link inline-flex items-center self-start gap-1">
         <ExternalLink size={13}/>{zh ? '查看该版本 GitHub 页面' : 'View this release'}
       </a>}

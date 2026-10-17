@@ -36,7 +36,9 @@ assert "presentation_refresh_snapshot" in lib
 assert "require_main_window(&window)?;" in commands
 assert "validate_capture_device(&device)?;" in commands
 assert "presentation_mode(device) != \"magnifier\"" in commands
-assert "capture_device_png(device, custom_path).await?" in commands
+assert "capture_device_png(device, custom_path.clone()).await?" in commands
+assert "retryable_presenter_orientation_error" in commands
+assert "Duration::from_secs(24)" in commands
 assert "set_presentation_snapshot(app, device, &png).await" in commands
 assert "refresh_presenter_image(&app_handle, &device, custom_path).await" in commands
 assert "clip-path: inset(0 round" in html, "Presenter canvas must stay inside the rounded video aperture"

@@ -91,7 +91,7 @@
 /* Settings behavior: related switches, then recording, then shortcuts. */
 .ml-behavior-layout { display: grid; gap: 20px; min-width: 0; }
 .ml-behavior-groups { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; align-items: start; }
-.ml-behavior-recording { grid-column: 1/-1; }
+.ml-behavior-recording { grid-column: auto; }
 .ml-behavior-groups .ml-settings-group { min-width: 0; }
 .ml-settings .ml-settings-switch { min-height: 65px; padding-block: 8px; }
 .ml-settings .ml-settings-switch:hover { background: var(--bg-elevated); border-color: var(--border-subtle); }

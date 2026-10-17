@@ -244,6 +244,37 @@ pub async fn check_mirroleap_update(
     interpret_latest_release(&local, &data)
 }
 
+/// Native browser handoff, intentionally restricted to exact official release
+/// assets instead of arbitrary URLs. WebView2 <a target=_blank> alone cannot
+/// reliably open external URLs on Windows.
+#[tauri::command]
+pub fn open_official_release_link(
+    window: Window, app_handle: AppHandle, version: String, kind: String,
+) -> Result<(), String> {
+    if window.label() != "main" { return Err("main_window_only".into()); }
+    let path = official_release_browser_url(&version, &kind)?;
+    use tauri_plugin_shell::ShellExt;
+    #[allow(deprecated)]
+    app_handle.shell().open(path, None)
+        .map_err(|e| format!("Could not open official release in browser: {e}"))
+}
+
+fn official_release_browser_url(version: &str, kind: &str) -> Result<String, String> {
+    if version.starts_with('v') || stable_version(&version).is_none() {
+        return Err("Untrusted release version".into());
+    }
+    let path = match kind {
+        "list" => "https://github.com/slobys/MirroLeap/releases".to_string(),
+        "page" => format!("{RELEASE_URL_BASE}v{version}"),
+        "portable" => format!("{ASSET_URL_BASE}v{version}/MirroLeap_{version}_x64_Portable.zip"),
+        "exe" => format!("{ASSET_URL_BASE}v{version}/MirroLeap_{version}_x64-setup.exe"),
+        "msi" => format!("{ASSET_URL_BASE}v{version}/MirroLeap_{version}_x64_en-US.msi"),
+        "checksums" => format!("{ASSET_URL_BASE}v{version}/SHA256SUMS.txt"),
+        _ => return Err("Untrusted release asset type".into()),
+    };
+    Ok(path)
+}
+
 #[tauri::command]
 pub async fn install_signed_update(
     window: Window, app_handle: AppHandle, version: String,
@@ -362,6 +393,22 @@ mod tests {
         }
         assert!(interpret_latest_release("5.0.2",
             &json!([signed_release("5.0.7",true,true)])).is_err());
+    }
+
+    #[test]
+    fn release_browser_handoff_is_restricted_to_official_assets() {
+        assert_eq!(official_release_browser_url("5.0.8","page").unwrap(),
+            "https://github.com/slobys/MirroLeap/releases/tag/v5.0.8");
+        assert_eq!(official_release_browser_url("5.0.8","portable").unwrap(),
+            "https://github.com/slobys/MirroLeap/releases/download/v5.0.8/MirroLeap_5.0.8_x64_Portable.zip");
+        assert_eq!(official_release_browser_url("5.0.8","list").unwrap(),
+            "https://github.com/slobys/MirroLeap/releases");
+        for bad_kind in ["", "https://evil.invalid", "../shell", "file", "script"] {
+            assert!(official_release_browser_url("5.0.8",bad_kind).is_err());
+        }
+        for bad_version in ["", "v5.0.8", "5.0.8/../../evil", "5.0.8?download=1"] {
+            assert!(official_release_browser_url(bad_version,"page").is_err());
+        }
     }
 
     fn sample_release() -> Value {
