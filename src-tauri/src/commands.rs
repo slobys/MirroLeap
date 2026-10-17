@@ -1976,7 +1976,7 @@ fn wants_device_frame(config: &ScrcpyConfig) -> bool {
 
 #[cfg(target_os = "windows")]
 fn restore_phone_frame_after_retry(
-    app: &AppHandle, window: &Window, config: &ScrcpyConfig,
+    app: &tauri::AppHandle, window: &Window, config: &ScrcpyConfig,
 ) {
     // The follow task binds one scrcpy PID. Every GPU/audio fallback spawns a
     // new PID; not recreating the frame left the new SDL window borderless.
