@@ -55,6 +55,16 @@ describe('once-per-launch startup update check', () => {
     expect(invokeMock).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps the update status until a subsequent check confirms up to date', async () => {
+    const {result}=renderHook(() => useStartupUpdateCheck(true));
+    await act(async()=>{await vi.advanceTimersByTimeAsync(1400);});
+    expect(result.current.startupRelease?.latestVersion).toBe('5.0.9');
+    act(()=>result.current.rememberUpdate({...release,status:'up_to_date'},'other'));
+    expect(result.current.startupRelease).toBeNull();
+    act(()=>result.current.rememberUpdate(release,'installed'));
+    expect(result.current.startupRelease?.latestVersion).toBe('5.0.9');
+  });
+
   it('never checks outside Tauri or after unmounting', async () => {
     delete (window as Window & {__TAURI_INTERNALS__?: unknown}).__TAURI_INTERNALS__;
     const first = renderHook(() => useStartupUpdateCheck(true));
