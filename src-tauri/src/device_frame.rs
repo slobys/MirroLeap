@@ -1210,11 +1210,12 @@ fn real_video_orientation_changed(before:(i32,i32),after:(i32,i32))->bool {
     (before.0>before.1) != (after.0>after.1)
 }
 
-async fn rotate_phone_and_verify(hwnd: HWND, pid: u32) -> Result<(), String> {
+async fn rotate_phone_and_verify(hwnd_value: usize, pid: u32) -> Result<(), String> {
     let before = capture_screen(pid)
         .ok_or("Phone video unavailable: restore mirroring before rotation")?;
     let initial=(before.screen.width,before.screen.height);
-    send_video_shortcut(hwnd, "quick_rotate")?;
+    // No non-Send Win32 HWND may survive into the async timer polling loop.
+    send_video_shortcut(HWND(hwnd_value as *mut _), "quick_rotate")?;
     for _ in 0..18 {
         tokio::time::sleep(Duration::from_millis(250)).await;
         if let Some(after) = capture_screen(pid) {
@@ -1295,7 +1296,8 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         .map_err(|e| e.to_string())?
         .get(&device).and_then(|child| child.id())
         .ok_or("scrcpy 会话已结束")?;
-    let hwnd = crate::commands::find_window_by_pid(pid).ok_or("投屏窗口不可见")?;
+    let hwnd_value = crate::commands::find_window_by_pid(pid)
+        .ok_or("投屏窗口不可见")?.0 as usize;
 
     if action == "present_status" { return Ok(is_present_panel_open(&device)); }
     if action == "present_is_spotlight" { return Ok(presentation_mode(&device) == "spotlight"); }
@@ -1362,7 +1364,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             .get(&device).copied().unwrap_or(true));
     }
     if action == "quick_top_status" {
-        return Ok((unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32
+        return Ok((unsafe { GetWindowLongPtrW(HWND(hwnd_value as *mut _), GWL_EXSTYLE) } as u32
             & WS_EX_TOPMOST.0) != 0);
     }
     if action == "quick_toggle" {
@@ -1382,7 +1384,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             return Err("Open the phone quick-control panel first".into());
         }
         if action == "quick_top_toggle" {
-            return toggle_video_topmost(app, &device, hwnd);
+            return toggle_video_topmost(app, &device, HWND(hwnd_value as *mut _));
         }
         if action == "quick_remember_toggle" {
             let updated = {
@@ -1400,9 +1402,9 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             if presentation_mode(&device) != "off" {
                 set_presentation_mode(app, &device, "off").await?;
             }
-            rotate_phone_and_verify(hwnd, pid).await?;
+            rotate_phone_and_verify(hwnd_value, pid).await?;
         } else if matches!(action, "quick_fullscreen" | "quick_paste") {
-            send_video_shortcut(hwnd, action)?;
+            send_video_shortcut(HWND(hwnd_value as *mut _), action)?;
         } else {
             crate::commands::phone_toolbar_keyevent(&device, action).await?;
         }
@@ -1417,7 +1419,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
     }
     match action {
         "minimize" => {
-            unsafe { ShowWindow(hwnd, SW_MINIMIZE); }
+            unsafe { ShowWindow(HWND(hwnd_value as *mut _), SW_MINIMIZE); }
             Ok(is_inking(&device))
         }
         "close" => {
@@ -1426,7 +1428,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             Ok(false)
         }
         "drag" => {
-            begin_drag(app, device.clone(), hwnd)?;
+            begin_drag(app, device.clone(), HWND(hwnd_value as *mut _))?;
             Ok(is_inking(&device))
         }
         _ => Err("Unsupported device-frame action".into()),
