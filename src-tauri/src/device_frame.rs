@@ -18,7 +18,8 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindo
 use tauri::webview::PageLoadEvent;
 use windows::Win32::Foundation::{HWND, POINT, RECT, LPARAM, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
+    ClientToScreen, CreateRectRgn, CreateRoundRectRgn, DeleteObject,
+    GetMonitorInfoW, GetRgnBox, GetWindowRgn, PtInRegion,
     MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, SetWindowRgn,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -39,7 +40,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::frame_layout::{
-    companion_needs_reposition, expand_screen, is_frame_edge_hover, native_clip_radius, toolbar_placement,
+    companion_needs_reposition, corner_clip_action, expand_screen,
+    is_frame_edge_hover, is_fullscreen_client, native_clip_radius, toolbar_placement,
     FrameRect, ScreenRect, ToolbarLayout, TOOLBAR_HEIGHT, TOOLBAR_WIDTH,
 };
 use crate::ScrcpyState;
@@ -346,21 +348,29 @@ fn capture_screen(pid: u32) -> Option<CapturedWindow> {
 /// pixels smaller, so the entire visible rounded aperture remains backed by
 /// live SDL video. The SVG bezel and dark gasket overpaint the hard GDI pixels.
 /// Do not clip more aggressively or return to the square SVG matte.
-fn apply_native_corner_clip(hwnd: HWND, screen: ScreenRect) -> Result<(), String> {
+/// Region coordinates are relative to the OUTER Win32 HWND, not the SDL
+/// client. Fullscreen/style changes can shift this inset even at the exact
+/// same phone-video dimensions.
+fn clip_window_rect(hwnd: HWND, screen: ScreenRect) -> Result<RECT, String> {
     let mut outer = RECT::default();
     unsafe { GetWindowRect(hwnd, &mut outer) }
         .map_err(|e| format!("Cannot read scrcpy window boundary: {e}"))?;
-
-    let (rx, ry) = native_clip_radius(screen.width, screen.height)
-        .ok_or("Invalid screen dimensions for native corner rounding")?;
     let left = screen.x - outer.left;
     let top = screen.y - outer.top;
-    let right = left + screen.width;
-    let bottom = top + screen.height;
+    Ok(RECT {
+        left, top,
+        right: left + screen.width,
+        bottom: top + screen.height,
+    })
+}
 
+fn apply_native_corner_clip(hwnd: HWND, screen: ScreenRect) -> Result<(), String> {
+    let bounds = clip_window_rect(hwnd, screen)?;
+    let (rx, ry) = native_clip_radius(screen.width, screen.height)
+        .ok_or("Invalid screen dimensions for native corner rounding")?;
     let region = unsafe {
         // +1 accounts for Win32's exclusive right/bottom clipping coordinates.
-        CreateRoundRectRgn(left, top, right + 1, bottom + 1, 2 * rx, 2 * ry)
+        CreateRoundRectRgn(bounds.left, bounds.top, bounds.right + 1, bounds.bottom + 1, 2 * rx, 2 * ry)
     };
     if region.0.is_null() {
         return Err("Could not create native rounded video mask".into());
@@ -372,6 +382,35 @@ fn apply_native_corner_clip(hwnd: HWND, screen: ScreenRect) -> Result<(), String
         return Err("Windows rejected the video mask".into());
     }
     Ok(())
+}
+
+/// SDL may REMOVE our HRGN during Alt+F fullscreen/restore without changing
+/// the restored client width/height. Verify the actual native region on a slow
+/// health tick; checking only a cached video size cannot detect this failure.
+fn native_corner_clip_intact(hwnd: HWND, screen: ScreenRect) -> bool {
+    let Ok(expected) = clip_window_rect(hwnd, screen) else { return false };
+    let probe = unsafe { CreateRectRgn(0, 0, 0, 0) };
+    if probe.0.is_null() { return false; }
+    let kind = unsafe { GetWindowRgn(hwnd, probe) };
+    let mut actual = RECT::default();
+    let valid = kind.0 != 0
+        && unsafe { GetRgnBox(probe, &mut actual) }.0 != 0
+        // Win32 region rasterization can adjust an exclusive edge by one
+        // physical pixel. The 4px underscan/gasket margin covers it.
+        && actual.left.abs_diff(expected.left) <= 1
+        && actual.top.abs_diff(expected.top) <= 1
+        && actual.right.abs_diff(expected.right + 1) <= 1
+        && actual.bottom.abs_diff(expected.bottom + 1) <= 1
+        // A rectangular region can have the correct bounding box yet still
+        // show all four turquoise phone-video corners outside the SVG bezel.
+        && !unsafe { PtInRegion(probe, expected.left, expected.top) }.as_bool()
+        && !unsafe { PtInRegion(probe, expected.right - 1, expected.top) }.as_bool()
+        && !unsafe { PtInRegion(probe, expected.left, expected.bottom - 1) }.as_bool()
+        && !unsafe { PtInRegion(probe, expected.right - 1, expected.bottom - 1) }.as_bool()
+        && unsafe { PtInRegion(probe,
+            expected.left + screen.width / 2, expected.top + screen.height / 2) }.as_bool();
+    let _ = unsafe { DeleteObject(HGDIOBJ(probe.0)) };
+    valid
 }
 
 fn reset_native_corner_clip(hwnd: HWND) {
@@ -416,6 +455,24 @@ fn monitor_work_area(video: HWND) -> ScreenRect {
         }
     }
     virtual_desktop()
+}
+
+/// Fullscreen detection uses the PHYSICAL monitor rcMonitor, not rcWork:
+/// taskbar height must not be mistaken for a black letterbox or normal phone.
+fn monitor_full_bounds(video: HWND) -> Option<ScreenRect> {
+    let monitor = unsafe { MonitorFromWindow(video, MONITOR_DEFAULTTONEAREST) };
+    if monitor.0.is_null() { return None; }
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() { return None; }
+    let rc = info.rcMonitor;
+    if rc.right <= rc.left || rc.bottom <= rc.top { return None; }
+    Some(ScreenRect {
+        x: rc.left, y: rc.top,
+        width: rc.right - rc.left, height: rc.bottom - rc.top,
+    })
 }
 
 fn inside(x: i32, y: i32, rect: ScreenRect, margin: i32) -> bool {
@@ -494,7 +551,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut previous_frame: Option<FrameRect> = None;
     let mut applied_orientation: Option<bool> = None;
     let mut clipped_pid: Option<u32> = None;
-    let mut last_client_size: Option<(u32, i32, i32)> = None;
+    let mut last_clip_signature: Option<(u32, usize, i32, i32, i32, i32)> = None;
+    let mut clip_checked_at: Option<Instant> = None;
     let mut controls_rect: Option<ScreenRect> = None;
     let mut shell_position_checked_at: Option<Instant> = None;
     let mut toolbar_position_checked_at: Option<Instant> = None;
@@ -537,7 +595,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 }
             }
             clipped_pid = None;
-            last_client_size = None;
+            last_clip_signature = None;
+            clip_checked_at = None;
             if shell_visible { let _ = overlay.hide(); shell_visible = false; }
             if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
             previous_frame = None;
@@ -603,23 +662,56 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             }
         }
 
-        // Avoid redundant SetWindowRgn calls while the phone is stationary.
-        // Re-create it after scrcpy rotation, resize, or codec-retry PID change.
-        if last_client_size != Some((pid, screen.width, screen.height)) {
-            if let Err(error) = apply_native_corner_clip(hwnd, screen) {
-                if !clip_retry_reported {
-                    let _ = app.emit("scrcpy-log",
-                        format!("[FRAME] Native screen corners unavailable; retrying: {error}"));
-                    clip_retry_reported = true;
-                }
-                // Immediately after taskbar restoration SDL can still be
-                // resizing its HWND. Losing one GDI region request must NOT
-                // permanently terminate the overlay + toolbar follow loop.
-                continue;
+        // Alt+F fullscreen may REMOVE SDL's GDI HRGN while preserving the
+        // same client size when restored. Width/height caches alone miss that:
+        // check the REAL rounded region every 550ms, and reapply when the
+        // window style insets, PID/HWND, dimensions or native mask change.
+        // Never mask a true full-monitor fullscreen video.
+        let fullscreen = monitor_full_bounds(hwnd)
+            .is_some_and(|monitor| is_fullscreen_client(screen, monitor));
+        let signature = if fullscreen { None } else {
+            clip_window_rect(hwnd, screen).ok().map(|insets| (
+                pid, hwnd.0 as usize,
+                screen.width, screen.height, insets.left, insets.top,
+            ))
+        };
+        let health_due = clip_checked_at
+            .is_none_or(|at| at.elapsed() >= Duration::from_millis(550));
+        let geometry_changed = signature.is_none() || last_clip_signature != signature;
+        let native_health = if !fullscreen && !geometry_changed && health_due {
+            Some(native_corner_clip_intact(hwnd, screen))
+        } else { None };
+        use crate::frame_layout::CornerClipAction;
+        match corner_clip_action(
+            fullscreen, clipped_pid == Some(pid), geometry_changed, native_health,
+        ) {
+            CornerClipAction::ResetForFullscreen => {
+                reset_native_corner_clip(hwnd);
+                clipped_pid = None;
+                last_clip_signature = None;
+                clip_checked_at = None;
+                clip_retry_reported = false;
             }
-            clip_retry_reported = false;
-            clipped_pid = Some(pid);
-            last_client_size = Some((pid, screen.width, screen.height));
+            CornerClipAction::ApplyRounded => {
+                if let Err(error) = apply_native_corner_clip(hwnd, screen) {
+                    if !clip_retry_reported {
+                        let _ = app.emit("scrcpy-log",
+                            format!("[FRAME] Native screen corners unavailable; retrying: {error}"));
+                        clip_retry_reported = true;
+                    }
+                    // A fullscreen transition can temporarily invalidate SDL
+                    // geometry. Retry on the next 50ms tick; do not stop the
+                    // overlay, toolbar, stream or USB/Wi-Fi connection.
+                    continue;
+                }
+                clip_retry_reported = false;
+                clipped_pid = Some(pid);
+                last_clip_signature = signature;
+                clip_checked_at = Some(Instant::now());
+            }
+            CornerClipAction::Keep => {
+                if health_due { clip_checked_at = Some(Instant::now()); }
+            }
         }
 
         let toolbar_hwnd = toolbar.hwnd().ok();

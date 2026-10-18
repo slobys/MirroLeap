@@ -89,6 +89,25 @@ assert "CreateRoundRectRgn" in backend and "SetWindowRgn" in backend
 assert "native_clip_radius" in backend and "reset_native_corner_clip" in backend
 assert "SCREEN_CORNER_RADIUS: f64 = 72.0" in rust
 assert "NATIVE_CORNER_OVERSCAN_PX: i32 = 4" in rust
+# SDL's Alt+F can drop or replace the actual Win32 HRGN while the window
+# returns to its PREVIOUS width/height. Stale size-only caches leave four
+# phone-content corners protruding beyond the antialiased metal bezel.
+assert "last_client_size" not in backend, "Never cache the clip by only PID and dimensions"
+assert "GetWindowRgn(hwnd, probe)" in backend and "PtInRegion(" in backend, (
+    "The native clip must be checked, not merely inferred from its cached size"
+)
+assert "last_clip_signature != signature" in backend
+assert "native_corner_clip_intact(hwnd, screen)" in backend
+assert "clip_window_rect(hwnd, screen)" in backend, (
+    "Recompute the window-relative client inset after SDL style changes"
+)
+assert "is_fullscreen_client(screen, monitor)" in backend
+assert "ResetForFullscreen" in backend and "ApplyRounded" in backend
+assert "corner_clip_action(" in rust
+assert "fn fullscreen_exit_recreates_native_rounded_clip_even_at_identical_size()" in rust
+assert "Duration::from_millis(550)" in backend
+assert "CreateRoundRectRgn" in backend and "SetWindowRgn" in backend
+
 assert "round_clip_radius" not in backend, (
     "Using exact SVG radius for native mask causes wallpaper-colored seams"
 )

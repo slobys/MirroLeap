@@ -169,6 +169,43 @@ pub fn companion_stack_choice(
     }
 }
 
+/// SDL's borderless fullscreen client occupies the *monitor* (rcMonitor),
+/// not the work area (rcWork, which excludes the taskbar). A normal portrait
+/// mirror that happens to be tall must keep the rounded phone clip.
+pub fn is_fullscreen_client(screen: ScreenRect, monitor: ScreenRect) -> bool {
+    monitor.width >= 80 && monitor.height >= 80
+        && screen.width >= 80 && screen.height >= 80
+        && screen.x.abs_diff(monitor.x) <= 2
+        && screen.y.abs_diff(monitor.y) <= 2
+        && screen.width.abs_diff(monitor.width) <= 2
+        && screen.height.abs_diff(monitor.height) <= 2
+}
+
+/// The fullscreen transition may destroy the native GDI region even when the
+/// restored SDL client dimensions equal the cached pre-fullscreen dimensions.
+/// A periodic real region check is therefore required in addition to geometry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CornerClipAction {
+    Keep,
+    ApplyRounded,
+    ResetForFullscreen,
+}
+pub fn corner_clip_action(
+    fullscreen: bool,
+    had_rounded_clip: bool,
+    geometry_changed: bool,
+    health_valid: Option<bool>,
+) -> CornerClipAction {
+    if fullscreen {
+        if had_rounded_clip { CornerClipAction::ResetForFullscreen }
+        else { CornerClipAction::Keep }
+    } else if !had_rounded_clip || geometry_changed || health_valid == Some(false) {
+        CornerClipAction::ApplyRounded
+    } else {
+        CornerClipAction::Keep
+    }
+}
+
 /// Native HWND companions do not need a SetWindowPos call every 50 ms.
 /// Only actual motion, visibility restoration, unexpected z-order or a
 /// low-frequency health check require the compositor to be repositioned.
@@ -387,6 +424,38 @@ mod tests {
         // without accidentally mixing tiers with a foreign desktop window.
         for desired in [true,false,true,false,true] {
             assert_eq!(companion_stack_choice(desired,false,Some(!desired)),TierFront);
+        }
+    }
+
+    #[test]
+    fn fullscreen_exit_recreates_native_rounded_clip_even_at_identical_size() {
+        use CornerClipAction::{ApplyRounded, Keep, ResetForFullscreen};
+        let monitor = ScreenRect { x: 0,y: 0,width: 1920,height: 1080 };
+        let portrait = ScreenRect { x: 350,y: 80,width: 540,height: 900 };
+        assert!(!is_fullscreen_client(portrait, monitor));
+        assert!(is_fullscreen_client(monitor, monitor));
+        assert!(is_fullscreen_client(ScreenRect { x:1,y:0,width:1919,height:1080 }, monitor));
+        assert!(!is_fullscreen_client(ScreenRect { x:0,y:0,width:1920,height:1040 }, monitor));
+        assert!(!is_fullscreen_client(ScreenRect { x:450,y:0,width:1080,height:1080 }, monitor));
+        assert_eq!(corner_clip_action(false, false, true, None), ApplyRounded);
+        assert_eq!(corner_clip_action(false, true, false, Some(true)), Keep);
+        assert_eq!(corner_clip_action(true, true, true, None), ResetForFullscreen);
+        assert_eq!(corner_clip_action(true, false, false, None), Keep);
+        // User exits fullscreen: the normal window is initially restored at
+        // the SAME client size as before, but SDL discarded the old HRGN.
+        assert_eq!(corner_clip_action(false, false, false, None), ApplyRounded);
+        assert_eq!(corner_clip_action(false, true, false, Some(false)), ApplyRounded);
+        assert_eq!(corner_clip_action(false, true, false, Some(true)), Keep);
+        assert_eq!(corner_clip_action(false, true, true, Some(true)), ApplyRounded);
+        // Repeated phone fullscreen toggles must not leave a stale, absent,
+        // or rectangular native clip after any return to the same portrait.
+        for _ in 0..8 {
+            assert_eq!(corner_clip_action(true, true, true, None), ResetForFullscreen);
+            assert_eq!(corner_clip_action(true, false, true, None), Keep);
+            assert_eq!(corner_clip_action(false, false, false, None), ApplyRounded);
+            assert_eq!(corner_clip_action(false, true, false, Some(true)), Keep);
+            // SDL might unexpectedly reset the HRGN AGAIN after its restore.
+            assert_eq!(corner_clip_action(false, true, false, Some(false)), ApplyRounded);
         }
     }
 
