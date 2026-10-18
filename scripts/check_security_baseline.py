@@ -35,7 +35,7 @@ for requirement in (
     "kill_on_drop(true)",
     "Duration::from_secs(20)",
     "capped_console_output(&o.stdout)",
-    "stop_scrcpy_impl(state, device).await",
+    "stop_scrcpy_impl(state, device, window.app_handle()).await",
     "require_main_window(&window)?",
 ):
     assert requirement in native, f"Missing native protection: {requirement}"

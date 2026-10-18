@@ -136,7 +136,7 @@ languages: {
         active: 'Aktif',
         ready: 'Siap',
         inputEnhancements: 'Input Tambahan',
-        inputEnhancementsDescription: 'Kontrol HP pakai Mouse & Keyboard komputer (mode OTG).',
+        inputEnhancementsDescription: 'Gunakan keyboard komputer sebagai keyboard HID ponsel tanpa mematikan mirroring layar.',
         hidKeyboard: 'Keyboard HID',
         hidKeyboardTooltip: 'Mensimulasikan keyboard fisik. Mengaktifkan dukungan untuk karakter khusus dan tata letak internasional (mis. Polandia).',
         hidMouse: 'Mouse HID',

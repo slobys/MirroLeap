@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, Square, Monitor, Camera, LayoutGrid, ChevronDown, Lock, Unlock, Settings2, Video, ExternalLink, Keyboard, Mouse } from 'lucide-react';
+import { Play, Square, Monitor, Camera, LayoutGrid, ChevronDown, Lock, Unlock, Settings2, Video, ExternalLink, Keyboard } from 'lucide-react';
 import { RenderDriverSupport, ScrcpyConfig } from '../../hooks/useScrcpy';
 import Tooltip from '../Tooltip';
 import { buildRendererOptions, mapRendererSelection } from './rendererOptions';
@@ -286,11 +286,6 @@ export default function ControlPanel({
                     <div className="flex items-center gap-3">
                         <h2 className="text-[11px] font-black uppercase text-zinc-400 tracking-widest">{t('controlPanel.engineConfiguration')}</h2>
                         <div className="flex gap-1.5">
-                            {config.sessionMode === 'mirror' && (config.hidKeyboard || config.hidMouse) && config.otgPure && (
-                                <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/10 text-red-500/80 border border-red-500/20">
-                                    {t('controlPanel.otgOnly')}
-                                </span>
-                            )}
                             <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${isRunning ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-zinc-800/30 text-zinc-600 border-zinc-700/30'}`}>
                                 {isRunning ? t('controlPanel.active') : t('controlPanel.ready')}
                             </span>
@@ -302,7 +297,7 @@ export default function ControlPanel({
                     {/* Screen Config */}
                     {config.sessionMode === 'mirror' && (
                         <>
-                            <div className={`space-y-2.5 pt-0.5 transition-all duration-300 ${config.otgPure ? 'opacity-30 pointer-events-none grayscale' : 'opacity-100'}`}>
+                            <div className="space-y-2.5 pt-0.5">
                                 <PerformanceGrid />
                                 <BitrateControl label={t('controlPanel.bitrate')} value={config.bitrate || 8} onChange={(v) => handleChange('bitrate', v)} />
                             </div>
@@ -332,34 +327,6 @@ export default function ControlPanel({
                                         </div>
                                     </Tooltip>
 
-                                    {/* HID Mouse */}
-                                    <Tooltip text={t('controlPanel.hidMouseTooltip')}>
-                                        <div className="flex items-start gap-3 cursor-pointer group" onClick={() => handleChange('hidMouse', !config.hidMouse)}>
-                                            <div className={`mt-0.5 w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${config.hidMouse ? 'bg-primary border-primary' : 'border-zinc-700 group-hover:border-primary'}`}>
-                                                {config.hidMouse && <div className="w-1.5 h-1.5 bg-black rounded-[1px]" />}
-                                            </div>
-                                            <div className="flex flex-col">
-                                                <div className="flex items-center gap-1.5">
-                                                    <Mouse size={10} className={config.hidMouse ? 'text-primary' : 'text-zinc-500'} />
-                                                    <span className="text-[10px] font-bold uppercase text-zinc-300 tracking-wide group-hover:text-primary">{t('controlPanel.hidMouse')}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </Tooltip>
-
-                                    {/* Advanced: Pure HID (Old OTG Pure) */}
-                                    {(config.hidKeyboard || config.hidMouse) && (
-                                        <Tooltip text={t('controlPanel.pureHidTooltip')}>
-                                            <div className="flex items-start gap-3 ml-0.5 cursor-pointer group animate-in slide-in-from-top-1 duration-200" onClick={() => handleChange('otgPure', !config.otgPure)}>
-                                                <div className={`mt-0.5 w-3 h-3 rounded border flex items-center justify-center transition-colors ${config.otgPure ? 'bg-red-500 border-red-500' : 'border-zinc-700 group-hover:border-red-500'}`}>
-                                                    {config.otgPure && <div className="w-1 h-1 bg-white rounded-[1px]" />}
-                                                </div>
-                                                <div className="flex flex-col">
-                                                    <span className={`text-[9px] font-bold uppercase tracking-wider transition-colors ${config.otgPure ? 'text-red-400' : 'text-zinc-500 group-hover:text-red-400'}`}>{t('controlPanel.pureHid')}</span>
-                                                </div>
-                                            </div>
-                                        </Tooltip>
-                                    )}
                                 </div>
                             </div>
 
@@ -641,7 +608,7 @@ export default function ControlPanel({
                         <span className="relative z-10 flex items-center justify-center gap-3 text-on-primary">
                             <Play fill="currentColor" size={18} className="group-hover:scale-110 transition-transform" />
                             {config.sessionMode === 'mirror'
-                                ? ((config.hidKeyboard || config.hidMouse) && config.otgPure ? t('controlPanel.initializeOtg') : t('controlPanel.startMission'))
+                                ? t('controlPanel.startMission')
                                 : config.sessionMode === 'camera' ? t('controlPanel.engageCamera') : t('controlPanel.ejectToDesktop')}
                         </span>
                     </button>

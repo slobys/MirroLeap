@@ -72,6 +72,24 @@ assert '<canvas id="presentation"' in read("public/frame.html")
 assert 'src="/present-overlay.js"' in read("public/frame.html")
 assert 'data:image/png;base64,' in read("public/present-overlay.js")
 assert "Run-MirroLeap.cmd" in read("README.md")
+control = read("src/components/ControlPanel/ControlPanel.tsx")
+behavior = read("src/components/SessionBehavior.tsx")
+commands = read("src-tauri/src/commands.rs")
+assert "handleChange('hidMouse'" not in control
+assert "handleChange('otgPure'" not in control
+assert "hidMouse: false, otgPure: false" in hooks, "Legacy HID settings must not disable video"
+assert "applyRecordingNow" in hooks and "onApplyRecordingNow" in behavior
+assert "recordingStatuses" in hooks and "recordingStatus" in behavior
+assert "scrcpy-recording" in commands and "scrcpy-recording" in hooks
+assert "prepare_recording_directory" in commands
+assert "PostMessageW" in commands and "WM_CLOSE" in commands, (
+    "Recording must ask scrcpy to finalize video before force-killing"
+)
+assert "timeout(Duration::from_secs(close_timeout), c.wait())" in commands
+assert "if recording.is_some() { 6 } else { 2 }" in commands
+assert "emit_recording_file_result" in commands
+assert "recording_paths" in native
+
 for expected in (
     f"MirroLeap_{version}_x64_Portable.zip",
     f"MirroLeap_{version}_x64-setup.exe",

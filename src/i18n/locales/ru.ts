@@ -142,7 +142,7 @@ export const ru: Translations = {
     active: 'Активно',
     ready: 'Готово',
     inputEnhancements: 'Улучшения ввода',
-    inputEnhancementsDescription: 'Управляйте телефоном с помощью мыши и клавиатуры компьютера (режим OTG).',
+    inputEnhancementsDescription: 'Используйте клавиатуру компьютера как HID-клавиатуру телефона без отключения трансляции.',
     hidKeyboard: 'HID-клавиатура',
     hidKeyboardTooltip: 'Имитирует физическую клавиатуру.\nДобавляет поддержку специальных символов и международных раскладок (например, польской).',
     hidMouse: 'HID-мышь',

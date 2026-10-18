@@ -48,4 +48,27 @@ describe('redesigned settings center keeps existing actions accessible', () => {
     fireEvent.click(screen.getByRole('switch', {name:'Record Feed'}));
     expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({record:true}));
   });
+
+  it('offers an explicit restart for recording changes during a mirror and reports the saved file', async () => {
+    const config: ScrcpyConfig = {
+      device:'device-1',sessionMode:'mirror',res:'0',record:true,recordPath:'C:\\Users\\tester\\Videos'
+    };
+    const onApplyRecordingNow=vi.fn().mockResolvedValue(true);
+    render(<SessionBehavior config={config} setConfig={vi.fn()}
+      isRunning activeRecording={{record:false,recordPath:'C:\\Users\\tester\\Videos'}}
+      onApplyRecordingNow={onApplyRecordingNow}
+      recordingStatus={{device:'device-1',phase:'saved',path:'C:\\Users\\tester\\Videos\\MirroLeap_record.mkv'}}/>);
+    const apply=screen.getByRole('button',{name:'Apply recording settings and restart mirroring'});
+    expect(apply).toBeEnabled();
+    fireEvent.click(apply);
+    expect(onApplyRecordingNow).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Recording file saved')).toBeInTheDocument();
+    expect(screen.getByText(/MirroLeap_record.mkv/)).toBeInTheDocument();
+  });
+
+  it('explains that a record checkbox applies when a new stream starts', () => {
+    const config:ScrcpyConfig={device:'device-1',sessionMode:'mirror',record:true};
+    render(<SessionBehavior config={config} setConfig={vi.fn()}/>);
+    expect(screen.getByText(/Start mirroring to record/)).toBeInTheDocument();
+  });
 });

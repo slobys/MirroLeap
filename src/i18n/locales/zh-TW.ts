@@ -136,7 +136,7 @@ export const zhTW: Translations = {
         active: '運作中',
         ready: '就緒',
         inputEnhancements: '輸入增強',
-        inputEnhancementsDescription: '使用電腦鍵鼠控制手機（OTG 模式）。',
+        inputEnhancementsDescription: '使用電腦鍵盤作為手機的 HID 輸入鍵盤，不影響正常投屏。',
         hidKeyboard: 'HID 鍵盤',
         hidKeyboardTooltip: '模擬實體鍵盤，支援特殊字元與多語系。',
         hidMouse: 'HID 滑鼠',

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { ScrcpyConfig } from '../hooks/useScrcpy';
+import type { ScrcpyConfig, RecordingEvent } from '../hooks/useScrcpy';
 import Tooltip from './Tooltip';
 import { Coffee, Volume2, Circle, Folder, ChevronDown, ActivitySquare } from 'lucide-react';
 import { useI18n } from '../i18n';
@@ -11,10 +11,23 @@ type AudioCodec = typeof AUDIO_CODEC_VALUES[number];
 interface SessionBehaviorProps {
     config: ScrcpyConfig;
     setConfig: (c: ScrcpyConfig) => void;
+    isRunning?: boolean;
+    activeRecording?: { record: boolean; recordPath: string };
+    recordingStatus?: RecordingEvent;
+    isApplyingRecording?: boolean;
+    onApplyRecordingNow?: () => Promise<boolean>;
 }
 
-export default function SessionBehavior({ config, setConfig }: SessionBehaviorProps) {
+export default function SessionBehavior({
+    config, setConfig, isRunning = false, activeRecording, recordingStatus,
+    isApplyingRecording = false, onApplyRecordingNow,
+}: SessionBehaviorProps) {
     const { t, locale } = useI18n();
+    const [folderError, setFolderError] = useState('');
+    const [recordingActionError, setRecordingActionError] = useState('');
+    const recordingSettingsPending = isRunning && (!activeRecording
+        || activeRecording.record !== Boolean(config.record)
+        || (Boolean(config.record) && activeRecording.recordPath !== (config.recordPath || '')));
 
     const handleChange = (field: keyof ScrcpyConfig, value: any) => {
         const newConfig = { ...config, [field]: value };
@@ -31,11 +44,15 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                 multiple: false,
                 title: t('sessionBehavior.selectRecordingFolderTitle')
             });
-            if (selected) {
+            if (selected && typeof selected === 'string') {
+                setFolderError('');
                 handleChange('recordPath', selected);
             }
         } catch (e) {
             console.error(e);
+            setFolderError(locale.startsWith('zh') ?
+                '无法打开文件夹选择窗口，请重试或检查系统权限：' + String(e) :
+                'Could not open the folder picker: ' + String(e));
         }
     };
 
@@ -197,21 +214,81 @@ export default function SessionBehavior({ config, setConfig }: SessionBehaviorPr
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                             <Folder size={12} className="text-zinc-500" />
-                            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-tight">{t('sessionBehavior.recordPath')}</span>
+                            <span className="text-xs font-semibold text-zinc-500">{t('sessionBehavior.recordPath')}</span>
                         </div>
                         <button
                             onClick={handlePickFolder}
-                            className="text-[8px] font-black uppercase text-primary hover:text-white transition-colors"
+                            disabled={isApplyingRecording}
+                            className="text-xs font-semibold text-primary hover:text-white transition-colors disabled:opacity-40"
                         >
                             {t('sessionBehavior.change')}
                         </button>
                     </div>
                     <div className="bg-black/40 border border-zinc-800/50 rounded-lg px-2.5 py-1.5">
-                        <p className="text-[9px] text-zinc-500 font-mono truncate leading-none">
+                        <p className="text-xs text-zinc-500 font-mono break-all leading-5">
                             {config.recordPath || t('sessionBehavior.defaultVideosFolder')}
                         </p>
                     </div>
                 </div>
+                {isRunning && recordingSettingsPending && onApplyRecordingNow && (
+                    <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/5 p-3 space-y-2" role="status">
+                        <p className="text-xs leading-5">
+                            {locale.startsWith('zh')
+                                ? '录制参数已更改，但 scrcpy 只能在启动时接收录制命令。点击下方按钮会短暂重启投屏；正在录制的文件会先结束并保存。'
+                                : 'Recording is configured at stream launch. Apply below to briefly restart mirroring and finalize any current recording first.'}
+                        </p>
+                        <button type="button"
+                            className="ml-secondary-action w-full py-2.5 text-xs font-semibold disabled:opacity-50"
+                            disabled={isApplyingRecording}
+                            onClick={async () => {
+                                setRecordingActionError('');
+                                const applied = await onApplyRecordingNow();
+                                if (!applied) setRecordingActionError(locale.startsWith('zh')
+                                    ? '无法应用录制设置，请查看工具与日志；原有投屏会尽量恢复。'
+                                    : 'Could not apply recording settings. Check Tools & Logs.');
+                            }}>
+                            {isApplyingRecording
+                                ? (locale.startsWith('zh') ? '正在保存并重启投屏…' : 'Finalizing and restarting…')
+                                : (locale.startsWith('zh') ? '立即应用录制设置并重新开始投屏' : 'Apply recording settings and restart mirroring')}
+                        </button>
+                    </div>
+                )}
+                {!isRunning && config.record && (
+                    <p className="ml-muted mt-3 text-xs" role="status">
+                        {locale.startsWith('zh')
+                            ? '已开启录制选项。下次点击“开始投屏”才会开始录制；停止投屏后保存 MKV 文件。'
+                            : 'Recording is ready. Start mirroring to record, then stop mirroring to finalize the MKV file.'}
+                    </p>
+                )}
+                {isRunning && !recordingSettingsPending && (
+                    <p className="ml-muted mt-3 text-xs" role="status">
+                        {activeRecording?.record
+                            ? (locale.startsWith('zh') ? '当前会话已启用录制；停止投屏后保存视频。' : 'Current session is recording. Stop mirroring to save.')
+                            : (locale.startsWith('zh') ? '当前会话为普通投屏，未启动录制。' : 'This session is not recording.')}
+                    </p>
+                )}
+                {recordingStatus && (
+                    <div className="mt-3 rounded-lg border border-zinc-700/60 bg-zinc-900/30 p-3" role="status">
+                        <p className="text-xs font-semibold">
+                            {recordingStatus.phase === 'preparing' ? (locale.startsWith('zh') ? '正在准备录制…' : 'Preparing recording…')
+                            : recordingStatus.phase === 'recording' ? (locale.startsWith('zh') ? '正在录制' : 'Recording')
+                            : recordingStatus.phase === 'finalizing' ? (locale.startsWith('zh') ? '正在保存录制…' : 'Saving recording…')
+                            : recordingStatus.phase === 'saved' ? (locale.startsWith('zh') ? '录制文件已保存' : 'Recording file saved')
+                            : (locale.startsWith('zh') ? '录制保存未确认成功' : 'Recording could not be confirmed')}
+                        </p>
+                        <p className="text-xs mt-1 break-all opacity-75" title={recordingStatus.path}>
+                            {recordingStatus.path}
+                        </p>
+                        {recordingStatus.phase === 'failed' && (
+                            <p className="mt-1 text-xs text-amber-500">{recordingStatus.message}</p>
+                        )}
+                    </div>
+                )}
+                {(folderError || recordingActionError) && (
+                    <p className="mt-2 text-xs text-red-500" role="alert">
+                        {folderError || recordingActionError}
+                    </p>
+                )}
             </section>
         </div>
     );

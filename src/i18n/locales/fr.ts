@@ -136,7 +136,7 @@ export const fr: Translations = {
         active: 'Actif',
         ready: 'Prêt',
         inputEnhancements: 'Améliorations d\'Entrée',
-        inputEnhancementsDescription: 'Contrôlez votre téléphone avec la souris et le clavier de votre ordinateur (mode OTG).',
+        inputEnhancementsDescription: "Utilisez le clavier de l'ordinateur comme clavier HID du téléphone, sans interrompre l'affichage.",
         hidKeyboard: 'Clavier HID',
         hidKeyboardTooltip: 'Simule un clavier physique. Permet de prendre en charge les caractères spéciaux et les dispositions internationales (par ex., polonais).',
         hidMouse: 'Souris HID',

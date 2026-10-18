@@ -119,6 +119,13 @@ export interface ScrcpyConfig {
  *  unrelated device's window mostly off-screen. */
 type WindowPositions = Record<string, { x: number; y: number }>;
 
+export type RecordingEvent = {
+    device: string;
+    phase: 'preparing' | 'recording' | 'finalizing' | 'saved' | 'failed';
+    path: string;
+    message?: string;
+};
+
 export function useScrcpy() {
     const { t } = useI18n();
     const [devices, setDevices] = useState<string[]>([]);
@@ -141,6 +148,11 @@ export function useScrcpy() {
     const [isInitialized, setIsInitialized] = useState(false);
     const [runningDevices, setRunningDevices] = useState<string[]>([]);
     const [isSwitchingResolution, setIsSwitchingResolution] = useState(false);
+    const [isApplyingRecording, setIsApplyingRecording] = useState(false);
+    const [recordingStatuses, setRecordingStatuses] = useState<Record<string, RecordingEvent>>({});
+    const [activeRecordingSessions, setActiveRecordingSessions] =
+        useState<Record<string, { record: boolean; recordPath: string }>>({});
+    const launchedSessionConfigRef = useRef<Record<string, ScrcpyConfig>>({});
     const resolutionSwitchLock = useRef(false);
     const [defaultRecordPath, setDefaultRecordPath] = useState<string>("");
     const [detectedCameras, setDetectedCameras] = useState<{ id: string, name: string }[]>([]);
@@ -238,6 +250,9 @@ export function useScrcpy() {
                 // after their settings switches have been removed.
                 setConfig(prev => ({
                     ...prev, ...parsed, fullscreen: false, turnOff: false, borderless: false,
+                    // Removed from the UI: old persisted HID mouse / no-video
+                    // modes must not silently disable the live phone stream.
+                    hidMouse: false, otgPure: false,
                 }));
                 // Initial check with saved path if it exists
                 if (parsed.scrcpyPath) {
@@ -356,10 +371,26 @@ export function useScrcpy() {
             }
         );
 
+        const unlistenRecording = listen<RecordingEvent>('scrcpy-recording', ({payload}) => {
+            if (!payload?.device ||
+                !['preparing','recording','finalizing','saved','failed'].includes(payload.phase)) return;
+            setRecordingStatuses(prev => ({...prev, [payload.device]:payload}));
+            if (payload.phase === 'saved' || payload.phase === 'failed') {
+                setLogs(prev => [...prev.slice(-100),
+                    '[RECORD] ' + (payload.message || payload.phase) + ' ' + payload.path]);
+            }
+        });
+
         const unlistenStatus = listen<any>('scrcpy-status', (event) => {
             const data = event.payload;
             if (data.device && typeof data.running === 'boolean') {
                 if (!data.running) {
+                    delete launchedSessionConfigRef.current[data.device];
+                    setActiveRecordingSessions(prev => {
+                        const next = {...prev};
+                        delete next[data.device];
+                        return next;
+                    });
                     setObservedDecoders(prev => {
                         const next = {...prev};
                         delete next[data.device];
@@ -425,6 +456,7 @@ export function useScrcpy() {
         return () => {
             unlistenLog.then(f => f());
             unlistenDecoder.then(f => f());
+            unlistenRecording.then(f => f());
             unlistenStatus.then(f => f());
             unlistenProgress.then(f => f());
             unlistenWindowPos.then(f => f());
@@ -719,7 +751,7 @@ export function useScrcpy() {
         };
     }, [historyDevices, config.scrcpyPath]);
 
-    const runScrcpy = async (config: ScrcpyConfig) => {
+    const runScrcpy = async (config: ScrcpyConfig): Promise<string | null> => {
         try {
             setLogs(prev => [...prev.slice(-100), t('logs.initializingScrcpy', { device: config.device })]);
             // Resolve the saved position for this specific device only, so
@@ -727,12 +759,23 @@ export function useScrcpy() {
             const savedPos = config.rememberWindowPosition !== false ? windowPositions[config.device] : undefined;
             const configWithPos: ScrcpyConfig = {
                 ...config,
+                hidMouse: false, otgPure: false,
                 windowX: savedPos?.x,
                 windowY: savedPos?.y
             };
             await invoke('run_scrcpy', { config: configWithPos });
+            launchedSessionConfigRef.current[config.device] = configWithPos;
+            setActiveRecordingSessions(prev => ({
+                ...prev, [config.device]: {
+                    record: Boolean(configWithPos.record),
+                    recordPath: configWithPos.recordPath || '',
+                }
+            }));
+            return null;
         } catch (e: any) {
-            setLogs(prev => [...prev.slice(-100), t('logs.failedToStartScrcpy', { error: String(e) })]);
+            const reason = String(e);
+            setLogs(prev => [...prev.slice(-100), t('logs.failedToStartScrcpy', { error: reason })]);
+            return reason;
         }
     };
 
@@ -810,6 +853,12 @@ export function useScrcpy() {
                     windowY: pos?.y
                 }
             });
+            launchedSessionConfigRef.current[device] = updated;
+            setActiveRecordingSessions(prev => ({
+                ...prev, [device]: {
+                    record: Boolean(updated.record), recordPath: updated.recordPath || ''
+                }
+            }));
             setLogs(prev => [...prev.slice(-100),
                 '[RESOLUTION] Switched to ' + (nextSize === '0' ? 'Original' : nextSize)]);
             return true;
@@ -840,6 +889,89 @@ export function useScrcpy() {
             if (detach) detach();
             resolutionSwitchLock.current = false;
             setIsSwitchingResolution(false);
+        }
+    };
+
+    /** scrcpy records from launch; opt-in to a short stream restart when
+     * changing the recording checkbox/folder during an existing mirror.
+     * Never restart merely because the user toggled a setting. */
+    const applyRecordingNow = async (
+        device: string, nextConfig: ScrcpyConfig
+    ): Promise<boolean> => {
+        if (resolutionSwitchLock.current ||
+            !liveRunningDevicesRef.current.includes(device)) return false;
+        const previous = launchedSessionConfigRef.current[device]
+            || {...nextConfig, device, record: false};
+        const updated = {...nextConfig, device, hidMouse: false, otgPure: false};
+        const prevRecording = {
+            record: Boolean(previous.record), recordPath: previous.recordPath || ''
+        };
+        if (prevRecording.record === Boolean(updated.record) &&
+            prevRecording.recordPath === (updated.recordPath || '')) return true;
+
+        resolutionSwitchLock.current = true;
+        setIsApplyingRecording(true);
+        setLogs(prev => [...prev.slice(-100),
+            '[RECORD] 应用录制设置：需要短暂重新打开投屏，保存原有录制后启动新流。']);
+        let detach: (() => void) | undefined;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let didStop = false;
+        try {
+            let confirmStop!: () => void;
+            let rejectTimeout!: (error: Error) => void;
+            const stopped = new Promise<void>((resolve,reject) => {
+                confirmStop = resolve; rejectTimeout = reject;
+            });
+            detach = await listen<{device: string; running: boolean}>(
+                'scrcpy-status', ({payload}) => {
+                    if (payload.device === device && payload.running === false) confirmStop();
+                });
+            timer = setTimeout(() => rejectTimeout(new Error(
+                'Previous stream did not report a stop within 10 seconds')), 10000);
+            await invoke('stop_scrcpy', {device}); // Waits for MKV finalization.
+            await stopped;
+            didStop = true;
+            const pos = updated.rememberWindowPosition !== false
+                ? livePositionsRef.current[device] : undefined;
+            const launched = {...updated,windowX:pos?.x,windowY:pos?.y};
+            await invoke('run_scrcpy', {config:launched});
+            launchedSessionConfigRef.current[device] = launched;
+            setActiveRecordingSessions(prev => ({
+                ...prev,[device]:{
+                    record:Boolean(updated.record),recordPath:updated.recordPath || ''
+                }
+            }));
+            setLogs(prev => [...prev.slice(-100),
+                updated.record ? '[RECORD] 已请求新的录制投屏，等待文件写入。'
+                    : '[RECORD] 已停止录制，普通投屏恢复。']);
+            return true;
+        } catch(error) {
+            setLogs(prev => [...prev.slice(-100),
+                '[RECORD] 应用录制设置失败：'+String(error)]);
+            if (didStop) {
+                try {
+                    const pos = previous.rememberWindowPosition !== false
+                        ? livePositionsRef.current[device] : undefined;
+                    await invoke('run_scrcpy', {config:{
+                        ...previous,device,windowX:pos?.x,windowY:pos?.y
+                    }});
+                    launchedSessionConfigRef.current[device] = previous;
+                    setActiveRecordingSessions(prev => ({
+                        ...prev,[device]:prevRecording
+                    }));
+                    setLogs(prev => [...prev.slice(-100),
+                        '[RECORD] 已恢复切换前的投屏设置。']);
+                } catch(restoreError) {
+                    setLogs(prev => [...prev.slice(-100),
+                        '[RECORD] 恢复投屏失败：'+String(restoreError)]);
+                }
+            }
+            return false;
+        } finally {
+            if (timer) clearTimeout(timer);
+            if (detach) detach();
+            resolutionSwitchLock.current = false;
+            setIsApplyingRecording(false);
         }
     };
 
@@ -1151,6 +1283,10 @@ export function useScrcpy() {
         runScrcpy,
         stopScrcpy,
         changeMirrorResolution,
+        applyRecordingNow,
+        isApplyingRecording,
+        recordingStatuses,
+        activeRecordingSessions,
         recenterMirrorWindow,
         downloadScrcpy,
         activeDevice,

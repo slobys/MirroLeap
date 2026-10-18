@@ -1609,7 +1609,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         }
         "close" => {
             quick_sessions().lock().map_err(|e| e.to_string())?.remove(&device);
-            crate::commands::stop_scrcpy_impl(app.state::<ScrcpyState>(), device).await?;
+            crate::commands::stop_scrcpy_impl(app.state::<ScrcpyState>(), device, app).await?;
             Ok(false)
         }
         "drag" => {

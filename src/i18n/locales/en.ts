@@ -160,7 +160,7 @@ export const en = {
         active: 'Active',
         ready: 'Ready',
         inputEnhancements: 'Input Enhancements',
-        inputEnhancementsDescription: "Control your phone using your computer's Mouse and Keyboard (OTG mode).",
+        inputEnhancementsDescription: 'Use your computer keyboard as a phone HID keyboard without disabling mirroring.',
         hidKeyboard: 'HID Keyboard',
         hidKeyboardTooltip: 'Simulates a physical keyboard. Enables support for special characters and international layouts (e.g., Polish).',
         hidMouse: 'HID Mouse',

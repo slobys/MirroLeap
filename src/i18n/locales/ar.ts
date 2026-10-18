@@ -139,7 +139,7 @@ export const ar: Translations = {
         active: 'نشط',
         ready: 'جاهز',
         inputEnhancements: 'تحسينات الإدخال',
-        inputEnhancementsDescription: 'تحكم في هاتفك باستخدام لوحة المفاتيح والفأرة عبر OTG.',
+        inputEnhancementsDescription: 'استخدم لوحة مفاتيح الكمبيوتر كلوحة مفاتيح HID للهاتف مع استمرار عرض الشاشة.',
         hidKeyboard: 'لوحة مفاتيح HID',
         hidKeyboardTooltip: 'تحاكي لوحة مفاتيح فعلية، مما يتيح دعم الأحرف الخاصة وتخطيطات اللغات المختلفة (مثل البولندية).',
         hidMouse: 'فأرة HID',

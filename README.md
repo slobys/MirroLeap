@@ -31,11 +31,13 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
-## 🔧 开发中 · 全屏退出后四角凸出修复（尚未发布）
+## ✨ v5.0.13 · 全屏圆角与录制体验修复（Windows 预发布测试版）
 
 - **问题**：在悬浮栏切换 scrcpy 全屏，再恢复普通手机窗口后，Windows 有时清除 SDL 的圆角剪裁，却没有改变原来的客户端宽高，导致四个角露出手机内容。
 - **修复**：进入真正全屏时撤销手机窗口的 GDI 裁剪，恢复后重新生成；窗口位置/样式边距变化时也重算窗口相对裁剪区域。普通模式每 550 毫秒复核一次真实 Win32 HRGN，缺失、矩形化或位置偏移时自动恢复，无需断开投屏。
-- **验证**：补充连续 8 次全屏往返、监视器尺寸与裁剪状态的 Rust 回归，以及真实 Windows GDI API 类型校验。此补丁仍需 Windows/Android 实机验收，**当前 v5.0.12 正式安装包尚不包含该修复**。
+- **验证**：补充连续 8 次全屏往返、监视器尺寸与裁剪状态的 Rust 回归，以及真实 Windows GDI API 类型校验。还需 Windows/Android 实机验收，**v5.0.12 正式安装包保持不变**。
+- **录制与保存**：录制文件夹启动前验证可写，路径不合法立即提示；停止时请求 scrcpy 正常关闭并等待 MKV 文件收尾，然后显示文件实际路径及保存结果。投屏进行中更改录制开关/文件夹，可由用户主动点击“应用并重新开始投屏”来生效，不会偷偷断线重启。
+- **输入增强精简**：移除“HID 鼠标”和“纯 HID（无画面）”两项低频选项，保留 HID 键盘；旧配置中相应参数自动归零，避免复用时意外关闭手机画面。
 
 ## ✅ v5.0.12 · Windows 正式稳定版
 
@@ -114,11 +116,11 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.0.12_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.0.12_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.0.12_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.13_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.13_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.13_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**正式版请到 [MirroLeap v5.0.12 Release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.12) 或 [Latest](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件。不要把 Tags 页面的源码 ZIP 当作安装包。
+**测试版请到 [MirroLeap v5.0.13 Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.13) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍保留 v5.0.12 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

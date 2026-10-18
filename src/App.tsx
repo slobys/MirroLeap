@@ -44,6 +44,10 @@ function App() {
     runScrcpy,
     stopScrcpy,
     changeMirrorResolution,
+    applyRecordingNow,
+    isApplyingRecording,
+    recordingStatuses,
+    activeRecordingSessions,
     downloadScrcpy,
     checkScrcpy,
     scrcpyStatus,
@@ -98,7 +102,7 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("5.0.12");
+  const [appVersion, setAppVersion] = useState("5.0.13");
   const [appVersionReady,setAppVersionReady] = useState(false);
   const {startupRelease, startupInstallKind, showStartupPrompt,
     checking: checkingUpdate, rememberUpdate, dismissStartupPrompt} =
@@ -248,7 +252,8 @@ function App() {
       showAlert(t('alerts.noDeviceSelectedTitle'), t('alerts.noDeviceSelectedMessage'), "warning");
       return;
     }
-    await runScrcpy(config);
+    const error = await runScrcpy(config);
+    if (error) showAlert(locale.startsWith('zh') ? '投屏启动失败' : 'Could not start mirroring', error, 'error');
   };
 
   const handleStartMirror = async () => {
@@ -260,7 +265,8 @@ function App() {
     // The everyday home button ALWAYS starts screen mirroring explicitly.
     const mirrorConfig = { ...config, device: activeDevice, sessionMode: 'mirror' };
     setConfig(mirrorConfig);
-    await runScrcpy(mirrorConfig);
+    const error = await runScrcpy(mirrorConfig);
+    if (error) showAlert(locale.startsWith('zh') ? '投屏启动失败' : 'Could not start mirroring', error, 'error');
   };
 
   const handleStop = async () => {
@@ -472,7 +478,12 @@ function App() {
                   )}
                   {settingsTab === 'behavior' && (
                     <div className="ml-behavior-layout">
-                      <SessionBehavior config={config} setConfig={setConfig}/>
+                      <SessionBehavior config={config} setConfig={setConfig}
+                        isRunning={sessionRunning}
+                        activeRecording={activeRecordingSessions[activeDevice]}
+                        recordingStatus={recordingStatuses[activeDevice]}
+                        isApplyingRecording={isApplyingRecording}
+                        onApplyRecordingNow={() => applyRecordingNow(activeDevice || config.device, config)}/>
                     </div>
                   )}
                   {settingsTab === 'appearance' && (

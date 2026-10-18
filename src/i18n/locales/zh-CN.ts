@@ -159,7 +159,7 @@ export const zhCN: Translations = {
         active: '运行中',
         ready: '就绪',
         inputEnhancements: '输入增强',
-        inputEnhancementsDescription: '使用电脑的键盘和鼠标来控制手机（OTG 模式）。',
+        inputEnhancementsDescription: '使用电脑键盘作为手机的 HID 输入键盘，不影响正常投屏。',
         hidKeyboard: 'HID 键盘',
         hidKeyboardTooltip: '模拟实体键盘，支持特殊字符和多语言布局。',
         hidMouse: 'HID 鼠标',

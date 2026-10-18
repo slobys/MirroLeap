@@ -136,7 +136,7 @@ export const ptBR: Translations = {
         active: 'Ativo',
         ready: 'Pronto',
         inputEnhancements: 'Aprimoramentos de Entrada',
-        inputEnhancementsDescription: 'Controle seu telefone usando o mouse e teclado do seu computador (modo OTG).',
+        inputEnhancementsDescription: 'Use o teclado do computador como teclado HID do celular, mantendo o espelhamento.',
         hidKeyboard: 'Teclado HID',
         hidKeyboardTooltip: 'Simula um teclado físico. Habilita suporte a caracteres especiais e layouts internacionais (ex.: polonês).',
         hidMouse: 'Mouse HID',

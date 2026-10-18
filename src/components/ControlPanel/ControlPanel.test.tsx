@@ -53,6 +53,18 @@ async function openRendererSelect(user: ReturnType<typeof userEvent.setup>) {
     await user.click(button);
 }
 
+describe('simplified HID settings', () => {
+    it('keeps the keyboard and bitrate while hiding mouse and no-video HID options', () => {
+        renderControlPanel(createConfig({
+            hidKeyboard:true, hidMouse:true, otgPure:true
+        }), supportedRenderers);
+        expect(screen.getByText('HID Keyboard')).toBeInTheDocument();
+        expect(screen.queryByText(/HID Mouse/i)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Pure HID/i)).not.toBeInTheDocument();
+        expect(screen.getByText('Bitrate')).toBeInTheDocument();
+    });
+});
+
 describe('one-click mirror resolution selector', () => {
     it('requests automatic stream restart when choosing a new size while mirroring', async () => {
         const user = userEvent.setup();

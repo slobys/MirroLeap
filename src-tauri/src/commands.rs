@@ -1,4 +1,4 @@
-use tauri::{State, Window, Emitter, Manager};
+use tauri::{AppHandle, State, Window, Emitter, Manager};
 use std::process::{Command as StdCommand, Stdio};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -2046,6 +2046,69 @@ fn restore_phone_frame_after_retry(
     }
 }
 
+/// Scrcpy's --record is a launch-time option. Validate the folder before
+/// starting the Android stream so a missing/readonly Videos directory never
+/// looks like an unexplained recording failure five minutes later.
+fn prepare_recording_directory(
+    config: &ScrcpyConfig,
+    video_dir_fallback: Option<&str>,
+) -> Result<Option<String>, String> {
+    if !config.record.unwrap_or(false) { return Ok(None); }
+    if config.otg_pure.unwrap_or(false) && (config.hid_keyboard.unwrap_or(false) || config.hid_mouse.unwrap_or(false)) {
+        return Err("纯 HID 模式没有视频流，无法录制。请关闭纯 HID 后重试。".into());
+    }
+    let custom = config.record_path.as_deref()
+        .map(str::trim).filter(|path| !path.is_empty());
+    let selected = custom.or(video_dir_fallback);
+    let raw = selected.ok_or("无法取得默认视频目录。请在行为设置中选择一个可写的录制文件夹。")?;
+    let directory = Path::new(raw);
+    if !directory.is_absolute() {
+        return Err("录制路径必须是完整文件夹路径。请在行为设置中重新选择。".into());
+    }
+    // The frontend stores the detected Videos directory as recordPath, so
+    // the same system path can appear as an explicit selection. Create it
+    // on first use, but never create a misspelled arbitrary custom directory.
+    let system_default = video_dir_fallback.is_some_and(|p| Path::new(p) == directory);
+    if !directory.exists() && (custom.is_none() || system_default) {
+        std::fs::create_dir_all(directory)
+            .map_err(|e| format!("无法创建系统视频目录：{e}。请选择其他录制文件夹。"))?;
+    }
+    if !directory.is_dir() {
+        return Err(format!("录制文件夹不存在或不是目录：{}。请重新选择。", directory.display()));
+    }
+    // Probe actual ACL permissions, not only readonly() (which misses Windows
+    // directory-specific DACLs and OneDrive redirection failures).
+    let probe = directory.join(format!(".mirroleap-recording-check-{}-{}",
+        std::process::id(), chrono::Local::now().timestamp_micros()));
+    let handle = std::fs::OpenOptions::new().write(true).create_new(true)
+        .open(&probe).map_err(|e| format!("录制文件夹不可写：{}（{e}）", directory.display()))?;
+    drop(handle);
+    let _ = std::fs::remove_file(probe);
+    Ok(Some(directory.to_string_lossy().to_string()))
+}
+
+fn recording_file_from_args(args: &[String]) -> Option<std::path::PathBuf> {
+    args.iter().find_map(|arg| arg.strip_prefix("--record=")
+        .map(std::path::PathBuf::from))
+}
+
+/// Check the FILE, not a cached checkbox, after scrcpy's recorder has had an
+/// opportunity to flush its container during a graceful shutdown.
+fn emit_recording_file_result(
+    app: &tauri::AppHandle, device: &str, path: &Path, closed_gracefully: bool,
+) {
+    let size = std::fs::metadata(path).ok().filter(|meta| meta.is_file())
+        .map(|meta| meta.len()).unwrap_or(0);
+    let valid = size > 1024 && closed_gracefully;
+    let _ = app.emit("scrcpy-recording", json!({
+        "device": device,
+        "phase": if valid { "saved" } else { "failed" },
+        "path": path.to_string_lossy(),
+        "message": if valid { "录制已结束，文件已写入磁盘。" }
+            else { "未确认视频文件完整保存。请检查该文件及工具日志。" },
+    }));
+}
+
 fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, audio_codec_override: Option<&str>) -> Vec<String> {
     let mut args = Vec::new();
     
@@ -2214,7 +2277,12 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
                     path = video_dir_fallback.unwrap_or_else(|| ".".to_string());
                  }
 
-                 let filename = format!("scrcpy_{}_{}.mkv", config.device.replace(":", "-"), chrono::Local::now().format("%Y%m%d_%H%M%S"));
+                 let safe_device: String = config.device.chars()
+                     .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                     .take(60).collect();
+                 let filename = format!("MirroLeap_{}_{}.mkv",
+                     if safe_device.is_empty() { "phone" } else { &safe_device },
+                     chrono::Local::now().format("%Y%m%d_%H%M%S_%6f"));
                  let full_path = std::path::Path::new(&path).join(filename);
                  args.push(format!("--record={}", full_path.to_string_lossy()));
              }
@@ -2380,7 +2448,7 @@ async fn spawn_scrcpy_streams(
 }
 
 enum AttemptOutcome {
-    Exited(String),
+    Exited(String, bool),
     WaitError(String),
     UserStopped,
 }
@@ -2389,7 +2457,11 @@ enum AttemptOutcome {
 pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: ScrcpyConfig, app_handle: tauri::AppHandle) -> Result<(), String> {
     require_main_window(&window)?;
 
-    let video_dir = app_handle.path().video_dir().ok().map(|p| p.to_string_lossy().to_string());
+    let fallback_dir = app_handle.path().video_dir().ok()
+        .or_else(|| app_handle.path().download_dir().ok())
+        .map(|p| p.to_string_lossy().to_string());
+    let video_dir = prepare_recording_directory(&config, fallback_dir.as_deref())?
+        .or(fallback_dir);
 
     let exe_path = get_binary_path("scrcpy", config.scrcpy_path.clone());
 
@@ -2463,6 +2535,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     // First attempt: honour the user's audio codec choice. In "auto" mode this
     // launches without --audio-codec, matching the previous default behaviour.
     let initial_args = build_scrcpy_args_with_decoder(&config, video_dir.clone(), None, &decoder_decision);
+    let initial_record_file = recording_file_from_args(&initial_args);
 
     let (child, audio_error_flag, decoder_error_flag) = spawn_scrcpy_streams(
         &window,
@@ -2477,6 +2550,13 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     let initial_scrcpy_pid = child.id();
     state.processes.lock().unwrap().insert(config.device.clone(), child);
     state.adb_paths.lock().unwrap().insert(config.device.clone(), adb_exe_path.clone());
+    if let Some(ref path) = initial_record_file {
+        state.recording_paths.lock().unwrap().insert(config.device.clone(), path.clone());
+        let _ = window.emit("scrcpy-recording", json!({
+            "device": config.device, "phase": "preparing",
+            "path": path.to_string_lossy(), "message": "正在启动 scrcpy 录制…",
+        }));
+    }
 
     // Render a *transparent shell* over the native SDL window; video rendering,
     // keyboard and pointer control remain scrcpy's own. Never launch the shell
@@ -2519,9 +2599,25 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
         let mut current_scrcpy_pid = initial_scrcpy_pid;
         let mut first_window_pos: Option<(i32, i32)> = None;
         let mut last_window_pos: Option<(i32, i32)> = None;
+        let mut recording_announced = false;
+        let mut final_recording_exit_success = false;
 
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
+
+            if !recording_announced {
+                let current = app_handle_mon.state::<ScrcpyState>().recording_paths
+                    .lock().ok().and_then(|entries| entries.get(&device_mon).cloned());
+                if let Some(path) = current {
+                    if std::fs::metadata(&path).is_ok_and(|file| file.len() > 1024) {
+                        let _ = window_mon.emit("scrcpy-recording", json!({
+                            "device": device_mon.as_str(), "phase": "recording",
+                            "path": path.to_string_lossy(), "message": "正在录制到文件。停止投屏后会完成保存。",
+                        }));
+                        recording_announced = true;
+                    }
+                }
+            }
 
             // Sample the live window position on every tick. This is the only
             // path that can catch a move made right before the user closes the
@@ -2550,7 +2646,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                     Some(child) => match child.try_wait() {
                         Ok(Some(status)) => {
                             processes.remove(&device_mon);
-                            Some(AttemptOutcome::Exited(status.to_string()))
+                            Some(AttemptOutcome::Exited(status.to_string(), status.success()))
                         }
                         Ok(None) => None,
                         Err(e) => {
@@ -2588,7 +2684,8 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                     emit_window_pos_and_stop(&window_mon, &device_mon, requested_pos, first_window_pos, pos_to_persist);
                     break;
                 }
-                AttemptOutcome::Exited(status) => {
+                AttemptOutcome::Exited(status, succeeded) => {
+                    final_recording_exit_success = succeeded;
                     let _ = window_mon.emit("scrcpy-log", format!("[SYSTEM] Scrcpy process exited with status: {}", status));
 
                     // Give stream reader tasks a moment to flush remaining stderr
@@ -2626,6 +2723,15 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                                 app_handle_mon.state::<ScrcpyState>()
                                     .processes.lock().unwrap()
                                     .insert(device_mon.clone(), new_child);
+                                if let Some(path) = recording_file_from_args(&retry_args) {
+                                    app_handle_mon.state::<ScrcpyState>().recording_paths
+                                        .lock().unwrap().insert(device_mon.clone(), path.clone());
+                                    let _ = window_mon.emit("scrcpy-recording", json!({
+                                        "device": device_mon.as_str(), "phase": "preparing",
+                                        "path": path.to_string_lossy(), "message": "正在重新建立录制流…",
+                                    }));
+                                }
+                                recording_announced = false;
                                 current_audio_flag = new_audio_flag;
                                 current_decoder_error_flag = new_decoder_flag;
                                 #[cfg(target_os = "windows")]
@@ -2672,6 +2778,15 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                                 last_window_pos = None;
                                 let state_mon = app_handle_mon.state::<ScrcpyState>();
                                 state_mon.processes.lock().unwrap().insert(device_mon.clone(), new_child);
+                                if let Some(path) = recording_file_from_args(&new_args) {
+                                    state_mon.recording_paths.lock().unwrap()
+                                        .insert(device_mon.clone(), path.clone());
+                                    let _ = window_mon.emit("scrcpy-recording", json!({
+                                        "device": device_mon.as_str(), "phase": "preparing",
+                                        "path": path.to_string_lossy(), "message": "正在重新建立录制流…",
+                                    }));
+                                }
+                                recording_announced = false;
                                 current_audio_flag = new_flag;
                                 current_decoder_error_flag = new_decoder_flag;
                                 current_audio_override = Some(next_codec.to_string());
@@ -2700,6 +2815,13 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                     }
                 }
             }
+        }
+        // Natural SDL close (or failed stream) finalizes without a main-UI
+        // stop request. User-triggered stop removes the path first and sends
+        // its own post-wait result, so there are never duplicate success events.
+        if let Some(path) = app_handle_mon.state::<ScrcpyState>().recording_paths
+            .lock().unwrap().remove(&device_mon) {
+            emit_recording_file_result(&app_handle_mon, &device_mon, &path, final_recording_exit_success);
         }
         // The whole scrcpy session (including GPU/audio retries) has ended.
         // Restore the phone's previous free/locked mode if the user explicitly
@@ -2765,6 +2887,54 @@ mod tests {
             window_y: None,
             ignore_video_encoder_constraints: None,
         }
+    }
+
+    #[test]
+    fn recording_requires_an_existing_writable_folder_and_safe_absolute_filename() {
+        let root = std::env::temp_dir().join(format!(
+            "mirroleap-recording-test-{}-{}",
+            std::process::id(), chrono::Local::now().timestamp_micros()
+        ));
+        let videos = root.join("Videos");
+        let videos_name = videos.to_string_lossy().into_owned();
+        let mut config = base_config("mirror");
+        config.record = Some(true);
+
+        // The default Videos directory is created when absent and verified
+        // using a temporary write probe; no temp probe may be left behind.
+        assert_eq!(
+            prepare_recording_directory(&config, Some(&videos_name)).unwrap(),
+            Some(videos_name.clone())
+        );
+        assert!(videos.is_dir());
+        assert_eq!(std::fs::read_dir(&videos).unwrap().count(), 0);
+
+        config.device = "192.168.1.20:5555".into();
+        config.record_path = Some(videos_name.clone());
+        let args = build_scrcpy_args(&config, None, None);
+        let output = recording_file_from_args(&args).unwrap();
+        assert_eq!(output.parent().unwrap(), videos);
+        assert!(output.file_name().unwrap().to_string_lossy()
+            .starts_with("MirroLeap_192_168_1_20_5555_"));
+        assert_eq!(output.extension().unwrap(), "mkv");
+        assert_eq!(args.iter().filter(|a| a.starts_with("--record=")).count(), 1);
+        assert_eq!(prepare_recording_directory(&config, Some(&videos_name)).unwrap(),
+            Some(videos_name.clone()));
+
+        config.record_path = Some("relative\\recordings".into());
+        assert!(prepare_recording_directory(&config, Some(&videos_name)).is_err());
+        config.record_path = Some(root.join("NotFound").to_string_lossy().into_owned());
+        assert!(prepare_recording_directory(&config, Some(&videos_name)).is_err());
+        config.record_path = None;
+        assert!(prepare_recording_directory(&config, None).is_err());
+        config.record = Some(false);
+        assert!(prepare_recording_directory(&config, None).unwrap().is_none());
+        config.record = Some(true);
+        config.otg_pure = Some(true);
+        config.hid_keyboard = Some(true);
+        assert!(prepare_recording_directory(&config, Some(&videos_name)).is_err());
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -3150,55 +3320,86 @@ mod tests {
 #[tauri::command]
 pub async fn stop_scrcpy(window: Window, state: State<'_, ScrcpyState>, device: String) -> Result<(), String> {
     require_main_window(&window)?;
-    stop_scrcpy_impl(state, device).await
+    stop_scrcpy_impl(state, device, window.app_handle()).await
 }
 
 /// Internal control is called only after device_frame::control has verified
 /// the current toolbar window belongs to this device. Expose no unguarded
 /// Tauri IPC entry point for arbitrary webviews to stop other sessions.
-pub async fn stop_scrcpy_impl(state: State<'_, ScrcpyState>, device: String) -> Result<(), String> {
-    // Best-effort restoration before closing this session. The monitor also
-    // retries on natural SDL closure, so a transient ADB outage is reported.
+pub async fn stop_scrcpy_impl(
+    state: State<'_, ScrcpyState>, device: String, app: &AppHandle,
+) -> Result<(), String> {
+    // Best-effort restoration before closing this session.
     if let Err(error) = crate::android_rotation::restore(&state, &device).await {
         eprintln!("[ROTATE] Could not restore device orientation on stop: {error}");
+    }
+    // Take ownership of the destination BEFORE removing the process. The
+    // monitor might see UserStopped while the MKV trailer is still flushing.
+    let recording = state.recording_paths.lock().unwrap().remove(&device);
+    if let Some(path) = &recording {
+        let _ = app.emit("scrcpy-recording", json!({
+            "device": device, "phase": "finalizing",
+            "path": path.to_string_lossy(), "message": "正在结束录制并写入文件…",
+        }));
     }
     let child = {
         let mut processes = state.processes.lock().unwrap();
         processes.remove(&device)
     };
 
+    let mut graceful = false;
     if let Some(mut c) = child {
         if let Some(pid) = c.id() {
-             // Grab the window's position now, one last time, before it's
-             // killed: this is the only moment it's guaranteed to still be
-             // exactly where the user left it. The run_scrcpy monitor loop
-             // only refreshes its own sample every ~3s, so stopping right
-             // after a move could otherwise persist a stale, pre-move spot.
              if let Some(pos) = try_capture_window_pos(pid) {
                  state.final_capture_hint.lock().unwrap().insert(device.clone(), pos);
              }
 
+             // SDL/Win32 WM_CLOSE asks scrcpy to finalize its Matroska trailer.
+             // taskkill alone may not reach SDL's normal shutdown handler.
              #[cfg(target_os = "windows")]
-             {
-                let _ = StdCommand::new("taskkill")
-                    .args(&["/PID", &pid.to_string()])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .output();
-             }
+             let signalled = crate::commands::find_window_by_pid(pid)
+                 .is_some_and(|hwnd| unsafe {
+                     windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                         Some(hwnd), windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                         windows::Win32::Foundation::WPARAM(0),
+                         windows::Win32::Foundation::LPARAM(0),
+                     ).is_ok()
+                 });
 
              #[cfg(not(target_os = "windows"))]
-             {
-                 // Try graceful termination first via SIGTERM
-                 let _ = StdCommand::new("kill")
+             let signalled = StdCommand::new("kill")
                     .arg(pid.to_string())
-                    .output();
-             }
+                    .output().is_ok_and(|result| result.status.success());
 
-            // Give it a moment to finalize, but don't block too long
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        } else {
+             if signalled {
+                 // Normal mirrors should still stop promptly; only active
+                 // recorders need the longer trailer-flush deadline.
+                 let close_timeout = if recording.is_some() { 6 } else { 2 };
+                 if let Ok(Ok(_)) = timeout(Duration::from_secs(close_timeout), c.wait()).await {
+                     graceful = true;
+                 }
+             }
+             // An already-closed video window can make WM_CLOSE unavailable.
+             // Try a normal Windows taskkill (no /F) once before forcing.
+             #[cfg(target_os = "windows")]
+             if !graceful {
+                 let signalled = StdCommand::new("taskkill")
+                     .args(&["/PID", &pid.to_string()])
+                     .creation_flags(CREATE_NO_WINDOW)
+                     .output().is_ok_and(|result| result.status.success());
+                 if signalled {
+                     if let Ok(Ok(_)) = timeout(Duration::from_secs(2), c.wait()).await {
+                         graceful = true;
+                     }
+                 }
+             }
+        }
+        if !graceful {
             let _ = c.kill().await;
         }
+    }
+    if let Some(path) = recording {
+        emit_recording_file_result(app, &device, &path, graceful);
     }
     Ok(())
 }

@@ -26,6 +26,9 @@ pub struct ScrcpyState {
     pub processes: Mutex<HashMap<String, Child>>,
     /// ADB binary resolved for each active mirror (supports custom core paths).
     pub adb_paths: Mutex<HashMap<String, String>>,
+    /// Current recording file per device; shared with user-stop and natural
+    /// scrcpy exits so we report saved files only after the process closes.
+    pub recording_paths: Mutex<HashMap<String, std::path::PathBuf>>,
     pub active_device: Mutex<Option<String>>,
     /// A raw window position captured by `stop_scrcpy` right before it kills
     /// the process (the window is still exactly where the user left it at
@@ -96,6 +99,7 @@ pub fn run() {
             app.manage(ScrcpyState {
                 processes: Mutex::new(HashMap::new()),
                 adb_paths: Mutex::new(HashMap::new()),
+                recording_paths: Mutex::new(HashMap::new()),
                 active_device: Mutex::new(None),
                 final_capture_hint: Mutex::new(HashMap::new()),
             });
