@@ -7,6 +7,7 @@ import { canApplyMirrorVideo, MIRROR_SIZES } from '../utils/resolutionSwitch';
 import { applyMirrorResolution, videoParams } from '../utils/mirrorPresets';
 import { restartMirrorVideoStream } from '../utils/streamRestart';
 import { MIRROR_PRESETS } from '../utils/mirrorPresets';
+import { DEVICE_PROFILES_KEY, applyDeviceProfile, profileFromConfig, readDeviceProfiles } from '../utils/deviceProfiles';
 
 export interface RenderDriverOption {
     id: string;
@@ -143,7 +144,22 @@ export function useScrcpy() {
     // cache that keeps this off the 5s background device poll.
     const [deviceFriendlyNames, setDeviceFriendlyNames] = useState<Record<string, string>>({});
     const [logs, setLogs] = useState<string[]>([]);
-    const [activeDevice, setActiveDevice] = useState<string>("");
+    const [activeDevice, setActiveDeviceState] = useState<string>("");
+    const profilesRef = useRef(readDeviceProfiles(
+        typeof localStorage !== 'undefined' ? localStorage.getItem(DEVICE_PROFILES_KEY) : null,
+    ));
+    const selectedDeviceRef = useRef('');
+    const setActiveDevice = (next: string) => {
+        if (selectedDeviceRef.current === next) return;
+        const previous = selectedDeviceRef.current;
+        selectedDeviceRef.current = next;
+        setConfig(current => {
+            if (previous) profilesRef.current[previous] = profileFromConfig(current);
+            if (previous) localStorage.setItem(DEVICE_PROFILES_KEY, JSON.stringify(profilesRef.current));
+            return next ? applyDeviceProfile(current, profilesRef.current[next], next) : current;
+        });
+        setActiveDeviceState(next);
+    };
     const [status, setStatus] = useState<string>("");
     const [downloadProgress, setDownloadProgress] = useState<number>(0);
     const [isDownloading, setIsDownloading] = useState(false);
@@ -319,6 +335,10 @@ export function useScrcpy() {
     useEffect(() => {
         if (!isInitialized) return;
         localStorage.setItem('scrcpy_config', JSON.stringify(config));
+        if (activeDevice && selectedDeviceRef.current === activeDevice) {
+            profilesRef.current[activeDevice] = profileFromConfig(config);
+            localStorage.setItem(DEVICE_PROFILES_KEY, JSON.stringify(profilesRef.current));
+        }
     }, [config, isInitialized]);
 
     // Kept in a ref (not read from `config` directly) so the window-position

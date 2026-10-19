@@ -241,12 +241,6 @@ function App() {
     })();
   }, [activeDevice, runningDevices]);
 
-  useEffect(() => {
-    if (activeDevice) {
-      setConfig(prev => ({ ...prev, device: activeDevice }));
-    }
-  }, [activeDevice]);
-
   const notifySwitchFailure = () => {
     showAlert(
       locale.startsWith('zh') ? '画质切换未完成' : 'Could not apply video quality',
