@@ -37,6 +37,14 @@ describe('conservative opt-in auto quality',()=>{
         // The observation window must be wide enough to recognize a sustained dip.
         expect(calc(sample(17,30,1000))).toEqual({res:'2560',bitrate:12,reason:'slow'});
     });
+    it('works when manual FPS display is disabled and ignores pre-restart samples',()=>{
+        const sustained = sample(17,30,1000);
+        expect(calc(sustained,{printFps:false})).toEqual({res:'2560',bitrate:12,reason:'slow'});
+        expect(calc(sustained,{}, {lastChangeAt:NOW-185_000})).toEqual({res:'2560',bitrate:12,reason:'slow'});
+        // Samples from before a recent stream handoff cannot justify another change.
+        expect(calc(sustained,{}, {lastChangeAt:NOW-181_000})).toEqual({res:'2560',bitrate:12,reason:'slow'});
+        expect(calc({...sustained,samples:sustained.samples.map(v=>({...v,skipped:NaN}))})).toBeNull();
+    });
     it('requires sustained high observed motion before upgrading, never to 4K',()=>{
         expect(calc(sample(59,70,1000),{res:'1920',bitrate:8})).toEqual({res:'2560',bitrate:16,reason:'stable'});
         expect(calc(sample(59,70,1000),{res:'2560',bitrate:16})).toBeNull();

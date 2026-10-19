@@ -20,13 +20,17 @@ export function chooseAutoQualityStep(input: {
     const {config, performance, now, lastChangeAt, running, recording, switching} = input;
     if (!config.autoQuality || !running || recording || switching ||
         config.sessionMode !== 'mirror' || !performance ||
-        config.printFps === false || now - lastChangeAt < COOLDOWN_MS ||
+        now - lastChangeAt < COOLDOWN_MS ||
         now - performance.observedAt > 8_000) return null;
 
     const index = SIZES.indexOf(config.res as typeof SIZES[number]);
     if (index < 0 || !Number.isInteger(config.bitrate) || (config.bitrate ?? 0) <= 0) return null;
+    // Auto mode requests its own FPS telemetry regardless of the optional
+    // manual print-FPS switch. Never use stale samples from before a restart.
     const samples = performance.samples.filter(v =>
-        v.at <= now && v.at >= now - 120_000 && v.fps >= 1 && v.fps <= 240);
+        Number.isFinite(v.at) && v.at <= now && v.at >= now - 120_000 &&
+        v.at >= lastChangeAt && Number.isFinite(v.fps) && v.fps >= 1 && v.fps <= 240 &&
+        Number.isFinite(v.skipped) && v.skipped >= 0);
     if (samples.length < 10) return null;
 
     const cap = config.fps || 60;
