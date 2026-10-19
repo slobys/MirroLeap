@@ -1342,9 +1342,42 @@ fn split_args(s: &str) -> Result<Vec<String>, String> {
     Ok(args)
 }
 
+fn checked_transfer_source(file_path: &str) -> Result<(), String> {
+    let source = Path::new(file_path);
+    if file_path.is_empty() || file_path.len() > 4096 || !source.is_absolute() ||
+        file_path.chars().any(char::is_control) {
+        return Err("Select a valid absolute local file.".into());
+    }
+    let meta = std::fs::symlink_metadata(source)
+        .map_err(|_| "The selected local file is unavailable.".to_string())?;
+    if !meta.file_type().is_file() || meta.file_type().is_symlink() {
+        return Err("Only regular local files can be transferred.".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod transfer_source_tests {
+    use super::*;
+    #[test]
+    fn transfers_require_a_real_regular_absolute_file() {
+        assert!(checked_transfer_source("../relative.txt").is_err());
+        assert!(checked_transfer_source("").is_err());
+        assert!(checked_transfer_source("/does-not-exist-mirroleap-test.bin").is_err());
+        let file = std::env::temp_dir().join(format!("mirroleap-transfer-{}-{}", std::process::id(),
+            chrono::Local::now().timestamp_micros()));
+        std::fs::write(&file, b"safe").unwrap();
+        assert!(checked_transfer_source(file.to_str().unwrap()).is_ok());
+        std::fs::remove_file(file).unwrap();
+    }
+}
+
 #[tauri::command]
 pub async fn push_file(window: Window, device: String, file_path: String, custom_path: Option<String>) -> serde_json::Value {
     if let Err(message) = require_main_window(&window) {
+        return json!({ "success": false, "message": message });
+    }
+    if let Err(message) = validate_capture_device(&device).and_then(|_| checked_transfer_source(&file_path)) {
         return json!({ "success": false, "message": message });
     }
     let adb_path = get_binary_path("adb", custom_path);
@@ -1648,6 +1681,8 @@ pub struct ScrcpyConfig {
     hardware_decoder: Option<String>,
     /// Ask the installed scrcpy core to print measured FPS to its log.
     print_fps: Option<bool>,
+    /// When false, do not synchronize device clipboard content with the host.
+    clipboard_sync: Option<bool>,
     // v4 features
     flex_display: Option<bool>,
     camera_torch: Option<bool>,
@@ -2123,6 +2158,11 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
         args.push("-s".to_string());
         args.push(config.device.clone());
     }
+    // Default scrcpy behavior is bidirectional clipboard synchronization.
+    // This opt-out requires no clipboard-read permission in MirroLeap.
+    if config.session_mode == "mirror" && config.clipboard_sync == Some(false) {
+        args.push("--no-clipboard-autosync".to_string());
+    }
 
     let codec = config.codec.as_deref().unwrap_or("h264");
     args.push(format!("--video-codec={}", codec));
@@ -2390,6 +2430,12 @@ async fn spawn_scrcpy_streams(
                                     "device": stdout_device.as_str(), "mode": actual,
                                 }));
                             }
+                            if let Some(fps) = video_decoder::parse_reported_fps(&line) {
+                                let _ = window_stdout.emit("scrcpy-performance", json!({
+                                    "device": stdout_device.as_str(), "fps": fps,
+                                    "skipped": video_decoder::parse_skipped_frames(&line).unwrap_or(0),
+                                }));
+                            }
                             buffer.push(line);
                         },
                         Ok(None) => break,
@@ -2434,6 +2480,12 @@ async fn spawn_scrcpy_streams(
                             if let Some(actual) = video_decoder::observed_decoder(&line) {
                                 let _ = window_stderr.emit("scrcpy-video-decoder", json!({
                                     "device": stderr_device.as_str(), "mode": actual,
+                                }));
+                            }
+                            if let Some(fps) = video_decoder::parse_reported_fps(&line) {
+                                let _ = window_stderr.emit("scrcpy-performance", json!({
+                                    "device": stderr_device.as_str(), "fps": fps,
+                                    "skipped": video_decoder::parse_skipped_frames(&line).unwrap_or(0),
                                 }));
                             }
                             buffer.push(line);
@@ -2889,6 +2941,7 @@ mod tests {
             render_driver: None,
             hardware_decoder: None,
             print_fps: None,
+            clipboard_sync: None,
             flex_display: None,
             camera_torch: None,
             camera_zoom: None,
@@ -3037,6 +3090,17 @@ mod tests {
         assert!(args.contains(&"--camera-facing=front".to_string()));
         assert!(args.contains(&"--camera-fps".to_string()));
         assert!(args.contains(&"30".to_string()));
+    }
+
+    #[test]
+    fn clipboard_sync_opt_out_changes_only_mirror_launch() {
+        let mut mirror = base_config("mirror");
+        assert!(!build_scrcpy_args(&mirror, None, None).contains(&"--no-clipboard-autosync".into()));
+        mirror.clipboard_sync = Some(false);
+        assert!(build_scrcpy_args(&mirror, None, None).contains(&"--no-clipboard-autosync".into()));
+        let mut camera = base_config("camera");
+        camera.clipboard_sync = Some(false);
+        assert!(!build_scrcpy_args(&camera, None, None).contains(&"--no-clipboard-autosync".into()));
     }
 
     #[test]

@@ -43,6 +43,7 @@ export interface SidebarProps {
     onDiagnose: (ip: string) => Promise<WirelessDiagnosis>;
     isRefreshing?: boolean;
     onFilePush: () => void;
+    onInstallApk?: () => void;
     // History props
     historyDevices?: string[];
     clearHistory?: () => void;
@@ -65,11 +66,12 @@ export default function Sidebar({
     onDiagnose,
     isRefreshing,
     onFilePush,
+    onInstallApk,
     historyDevices = [],
     clearHistory = () => { },
     mdnsDevices = []
 }: SidebarProps) {
-    const { t } = useI18n();
+    const { t, locale } = useI18n();
     const [activeTab, setActiveTab] = React.useState<'usb' | 'wireless'>('usb');
     const [connectIp, setConnectIp] = React.useState('');
     const [connectionFeedback, setConnectionFeedback] = React.useState<WirelessFeedback | null>(null);
@@ -629,6 +631,11 @@ export default function Sidebar({
                     <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-tighter mt-1 opacity-60">{t('sidebar.flashPushSubtitle')}</p>
                 </div>
             </div>
+            {onInstallApk && <button type="button" onClick={onInstallApk}
+                disabled={!selectedDevice}
+                className="mt-2 w-full rounded-lg border border-zinc-500/30 px-3 py-2 text-xs text-zinc-400 hover:text-primary disabled:opacity-40">
+                {locale.startsWith('zh') ? '选择 APK 并安装到手机' : 'Install APK on selected phone'}
+            </button>}
         </aside>
 
         {pairingTarget && (

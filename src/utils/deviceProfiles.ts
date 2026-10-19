@@ -1,9 +1,10 @@
 import type { ScrcpyConfig } from '../hooks/useScrcpy';
+import { MIRROR_PRESETS } from './mirrorPresets';
 
 /** Video and window preferences only; never copy identities, paths or recording state. */
 export const DEVICE_PROFILE_FIELDS = [
     'res', 'bitrate', 'fps', 'codec', 'hardwareDecoder', 'renderDriver',
-    'audioEnabled', 'deviceFrame', 'rememberWindowPosition',
+    'audioEnabled', 'deviceFrame', 'rememberWindowPosition', 'clipboardSync', 'autoQuality',
 ] as const satisfies readonly (keyof ScrcpyConfig)[];
 
 export type DeviceProfile = Partial<Pick<ScrcpyConfig, typeof DEVICE_PROFILE_FIELDS[number]>>;
@@ -33,9 +34,9 @@ export function readDeviceProfiles(raw: string | null): DeviceProfiles {
             if (typeof data.bitrate === 'number' && Number.isInteger(data.bitrate) && data.bitrate >= 1 && data.bitrate <= 50) value.bitrate = data.bitrate;
             if (typeof data.fps === 'number' && [30,60,90,120].includes(data.fps)) value.fps = data.fps;
             if (typeof data.codec === 'string' && ['h264','h265','av1','vp8','vp9'].includes(data.codec)) value.codec = data.codec;
-            if (typeof data.hardwareDecoder === 'string' && ['auto','d3d11va','dxva2','none'].includes(data.hardwareDecoder)) value.hardwareDecoder = data.hardwareDecoder as ScrcpyConfig['hardwareDecoder'];
+            if (typeof data.hardwareDecoder === 'string' && ['auto','disabled','d3d11va','vaapi','videotoolbox'].includes(data.hardwareDecoder)) value.hardwareDecoder = data.hardwareDecoder as ScrcpyConfig['hardwareDecoder'];
             if (typeof data.renderDriver === 'string' && ['auto','direct3d','opengl','software','metal'].includes(data.renderDriver)) value.renderDriver = data.renderDriver;
-            for (const key of ['audioEnabled','deviceFrame','rememberWindowPosition'] as const) {
+            for (const key of ['audioEnabled','deviceFrame','rememberWindowPosition','clipboardSync','autoQuality'] as const) {
                 if (typeof data[key] === 'boolean') value[key] = data[key] as boolean;
             }
             records[serial] = value;
@@ -46,4 +47,25 @@ export function readDeviceProfiles(raw: string | null): DeviceProfiles {
 
 export function applyDeviceProfile(config: ScrcpyConfig, profile: DeviceProfile | undefined, device: string): ScrcpyConfig {
     return { ...config, ...(profile || {}), device };
+}
+
+/** A never-before-seen phone starts from safe defaults, not the last phone's
+ * quality/decoder/clipboard policy. First selection on legacy installations
+ * retains the existing saved global config for backwards compatibility.
+ * Recording always needs explicit consent per newly selected device.
+ */
+export function selectDeviceConfig(
+    config: ScrcpyConfig, profile: DeviceProfile | undefined,
+    device: string, switchingFromAnotherPhone: boolean,
+): ScrcpyConfig {
+    const baseline = switchingFromAnotherPhone && !profile ? {
+        ...config,
+        ...MIRROR_PRESETS.balanced,
+        hardwareDecoder:'auto' as const,
+        renderDriver:'auto',
+        audioEnabled:true,
+        autoQuality:false,
+        clipboardSync:true,
+    } : config;
+    return {...applyDeviceProfile(baseline, profile, device), record:false};
 }

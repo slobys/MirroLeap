@@ -151,12 +151,74 @@ pub fn observed_decoder(line: &str) -> Option<&'static str> {
     else { Some("unknown") }
 }
 
+/// Only consume an actual scrcpy FPS report, never an --max-fps setting
+/// or an estimated frame cap. Values are observational (not latency).
+pub fn parse_reported_fps(line: &str) -> Option<f32> {
+    let lower = line.to_ascii_lowercase();
+    for (index, _) in lower.match_indices("fps") {
+        if index > 0 && matches!(lower.as_bytes()[index - 1], b'-' | b'_' | b'a'..=b'z' | b'0'..=b'9') {
+            continue;
+        }
+        let tail = lower[index + 3..].trim_start();
+        let Some(number) = tail.strip_prefix(':').or_else(|| tail.strip_prefix('=')) else {
+            continue;
+        };
+        let token: String = number.trim_start().chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .take(12).collect();
+        let Ok(value) = token.parse::<f32>() else { continue };
+        if value.is_finite() && (1.0..=240.0).contains(&value) {
+            return Some(value);
+        }
+    }
+    // scrcpy's actual fps_counter.c prints "%u fps" and
+    // "%u fps (+%u frames skipped)".
+    for (index, _) in lower.match_indices(" fps") {
+        let before = lower[..index].trim_end();
+        let digits: String = before.chars().rev()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect::<String>().chars().rev().collect();
+        if let Ok(value) = digits.parse::<f32>() {
+            if value.is_finite() && (0.0..=240.0).contains(&value) {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+/// Actual renderer skipped frames in the last FPS interval; NOT packet loss.
+pub fn parse_skipped_frames(line: &str) -> Option<u32> {
+    let (_, suffix) = line.split_once("(+")?;
+    let digits: String = suffix.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() || !suffix[digits.len()..].starts_with(" frames skipped)") {
+        return None;
+    }
+    digits.parse::<u32>().ok().filter(|count| *count <= 100_000)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const V5_HELP: &str = "    --hwdec=mode\n        Possible values are auto, disabled, vaapi, d3d11va and videotoolbox\n    --print-fps\n    --render-driver=name\n";
     const V4_HELP: &str = "    --render-driver=name\n    --print-fps\n";
+
+    #[test]
+    fn measured_fps_accepts_only_bounded_scrcpy_reports() {
+        assert_eq!(parse_reported_fps("[server] INFO: FPS: 59.5"), Some(59.5));
+        assert_eq!(parse_reported_fps("video fps = 30"), Some(30.0));
+        assert_eq!(parse_reported_fps("--max-fps=60"), None);
+        assert_eq!(parse_reported_fps("max-fps: 60"), None);
+        assert_eq!(parse_reported_fps("FPS: NaN"), None);
+        assert_eq!(parse_reported_fps("FPS: 999999"), None);
+        assert_eq!(parse_reported_fps("codec H264"), None);
+        assert_eq!(parse_reported_fps("[INFO] 59 fps (+2 frames skipped)"), Some(59.0));
+        assert_eq!(parse_reported_fps("[INFO] 0 fps"), Some(0.0));
+        assert_eq!(parse_skipped_frames("[INFO] 59 fps (+2 frames skipped)"), Some(2));
+        assert_eq!(parse_skipped_frames("[INFO] 59 fps"), None);
+        assert_eq!(parse_skipped_frames("FPS: 10 (+99999999 frames skipped)"), None);
+    }
 
     #[test]
     fn version_parser_ignores_ffmpeg_dependency_numbers_and_malformed_versions() {

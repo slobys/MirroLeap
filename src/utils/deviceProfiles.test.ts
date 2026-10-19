@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyDeviceProfile, profileFromConfig, readDeviceProfiles } from './deviceProfiles';
+import { applyDeviceProfile, selectDeviceConfig, profileFromConfig, readDeviceProfiles } from './deviceProfiles';
 import type { ScrcpyConfig } from '../hooks/useScrcpy';
 
 const base: ScrcpyConfig = {
@@ -22,6 +22,19 @@ describe('device-scoped mirroring preferences', () => {
         });
         expect(base.res).toBe('1920');
     });
+    it('gives newly seen phones safe 1080p defaults instead of carrying over 2K and recording', () => {
+        const phoneA = {...base, device:'phone-a',res:'2560',bitrate:16,codec:'h265',
+            record:true,autoQuality:true,clipboardSync:false,audioEnabled:false};
+        const first = selectDeviceConfig(phoneA,undefined,'phone-a',false);
+        expect(first).toMatchObject({res:'2560',bitrate:16,autoQuality:true,clipboardSync:false,record:false});
+        const other = selectDeviceConfig(phoneA,undefined,'phone-b',true);
+        expect(other).toMatchObject({device:'phone-b',res:'1920',bitrate:8,codec:'h264',fps:60,
+            hardwareDecoder:'auto',audioEnabled:true,autoQuality:false,clipboardSync:true,record:false});
+        const restored = selectDeviceConfig(other,profileFromConfig(phoneA),'phone-a',true);
+        expect(restored).toMatchObject({device:'phone-a',res:'2560',bitrate:16,codec:'h265',
+            autoQuality:true,clipboardSync:false,audioEnabled:false,record:false});
+    });
+
     it('rejects malformed and unsafe persisted values and legacy native resolution', () => {
         expect(readDeviceProfiles('{')).toEqual({});
         expect(readDeviceProfiles('[]')).toEqual({});
@@ -31,6 +44,8 @@ describe('device-scoped mirroring preferences', () => {
         }));
         expect(parsed.a).toEqual({audioEnabled:false,deviceFrame:true});
         expect(parsed.b).toEqual({res:'1280',bitrate:4,fps:60,codec:'h264',hardwareDecoder:'auto'});
+        const extra = readDeviceProfiles('{"phone":{"clipboardSync":false,"autoQuality":true,"printFps":false,"record":true}}');
+        expect(extra.phone).toEqual({clipboardSync:false,autoQuality:true});
         expect(parsed.b).not.toHaveProperty('recordPath');
     });
 });

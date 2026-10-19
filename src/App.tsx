@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import Sidebar from "./components/Sidebar";
@@ -9,6 +9,8 @@ import AppUpdateChecker from "./components/AppUpdateChecker";
 import StartupUpdateNotice from "./components/StartupUpdateNotice";
 import VersionUpdateBadge from "./components/VersionUpdateBadge";
 import DecoderPerformance from "./components/DecoderPerformance";
+import LivePerformance from "./components/LivePerformance";
+import {prepareTransferPaths,transferDisplayName} from "./utils/fileTransfer";
 import Header from "./components/Header";
 import SessionBehavior from "./components/SessionBehavior";
 import Footer from "./components/Footer";
@@ -69,6 +71,7 @@ function App() {
     renderDriverSupport,
     videoDecoderSupport,
     observedDecoders,
+    mirrorPerformance,
     mdnsDevices,
     config,
     setConfig,
@@ -84,6 +87,15 @@ function App() {
     setIsOnboardingOpen,
     completeOnboarding
   } = useScrcpy();
+  const [dragHover, setDragHover] = useState(false);
+  const [transferStatus, setTransferStatus] = useState<{
+    phase:'idle'|'sending'|'completed'|'failed';completed:number;total:number;
+    label:string;device?:string;
+  }>({phase:'idle',completed:0,total:0,label:''});
+  const transferBusyRef = useRef(false);
+  const selectedDeviceLiveRef = useRef(activeDevice);
+  const transferHandlerRef = useRef<(paths: unknown) => Promise<void>>(async () => {});
+
 
   const [alertState, setAlertState] = useState<{
     isOpen: boolean;
@@ -211,23 +223,25 @@ function App() {
   }, [scrcpyStatus.found, config.scrcpyPath, isDownloading, hasCheckedUpdate, lastCheckedPath, t]);
 
   useEffect(() => {
-    // Global Drag and Drop Listener (re-bind only if activeDevice changes)
-    const unlisten = getCurrentWindow().listen<{ paths: string[] }>("tauri://drag-drop", (event) => {
-      if (!activeDevice) {
-        setLogs(prev => [...prev.slice(-100), t('logs.noDeviceForDragDrop')]);
-        return;
-      }
-
-      const paths = event.payload.paths;
-      if (paths && paths.length > 0) {
-        paths.forEach(path => handleFileOperation(path));
-      }
+    // Tauri's OS file-drop events (not a web page's untrusted HTML drag).
+    // Keep one listener throughout app life; use the latest transfer handler.
+    let mounted = true;
+    const drop = getCurrentWindow().listen<{paths:string[]}>('tauri://drag-drop', event => {
+      if (!mounted) return;
+      setDragHover(false);
+      void transferHandlerRef.current(event.payload?.paths);
     });
-
+    const enter = getCurrentWindow().listen('tauri://drag-enter', () => {
+      if (mounted) setDragHover(true);
+    });
+    const leave = getCurrentWindow().listen('tauri://drag-leave', () => {
+      if (mounted) setDragHover(false);
+    });
     return () => {
-      unlisten.then(f => f());
+      mounted = false;
+      [drop,enter,leave].forEach(promise => { void promise.then(dispose => dispose()); });
     };
-  }, [activeDevice]);
+  }, []);
 
   useEffect(() => {
     // Keep the Rust side's notion of "the selected device" in sync, so the
@@ -251,6 +265,8 @@ function App() {
     );
   };
   const handleResolutionChange = (size: string) => {
+    // A manual quality selection always wins over the opt-in Auto policy.
+    if (config.autoQuality) setConfig(prev => ({...prev,autoQuality:false}));
     if (config.sessionMode !== 'mirror') {
       setConfig(prev => ({...prev, res:size}));
       return;
@@ -300,14 +316,60 @@ function App() {
     }
   };
 
-  const handleFileOperation = async (path: string) => {
-    if (!activeDevice) return;
+  const handleTransferFiles = async (rawPaths: unknown) => {
+    if (transferBusyRef.current) return;
+    const {files, error} = prepareTransferPaths(rawPaths);
+    if (error) {
+      setTransferStatus({phase:'failed',completed:0,total:0,label:error});
+      return;
+    }
+    const device = activeDevice;
+    if (!device) {
+      setTransferStatus({phase:'failed',completed:0,total:files.length,
+        label:locale.startsWith('zh') ? '请先连接并选择手机' : 'Connect and select a phone first'});
+      return;
+    }
+    transferBusyRef.current = true;
+    let completed = 0;
+    let failed = 0;
+    try {
+      for (let i = 0; i < files.length; i++) {
+        if (selectedDeviceLiveRef.current !== device) {
+          setTransferStatus({phase:'failed',completed,total:files.length,
+            label:locale.startsWith('zh') ? '切换手机后已停止余下传输' : 'Remaining transfers cancelled after changing phone'});
+          return;
+        }
+        const name = transferDisplayName(files[i]);
+        setTransferStatus({phase:'sending',completed,total:files.length,label:name,device});
+        const result = await pushFile(device, files[i]);
+        if (result?.success) completed++;
+        else failed++;
+      }
+      setTransferStatus({phase:failed ? 'failed' : 'completed',completed,
+        total:files.length,device,
+        label:failed
+          ? (locale.startsWith('zh') ? failed + ' 个文件传输失败，请查看日志' : failed + ' transfers failed; check logs')
+          : (locale.startsWith('zh') ? '已发送到手机 Download 文件夹' : 'Sent to the phone Downloads folder')});
+    } finally {
+      transferBusyRef.current = false;
+    }
+  };
+  selectedDeviceLiveRef.current = activeDevice;
+  transferHandlerRef.current = handleTransferFiles;
 
-    const isApk = path.toLowerCase().endsWith('.apk');
-    if (isApk) {
-      await installApk(activeDevice, path);
-    } else {
-      await pushFile(activeDevice, path);
+  const handleApkBrowse = async () => {
+    if (!activeDevice) return;
+    try {
+      const path = await open({multiple:false,filters:[{name:'Android APK',extensions:['apk']}]});
+      if (typeof path !== 'string') return;
+      const result = await installApk(activeDevice,path);
+      showAlert(
+        result?.success ? (locale.startsWith('zh') ? 'APK 安装成功' : 'APK installed') :
+          (locale.startsWith('zh') ? 'APK 安装失败' : 'APK installation failed'),
+        String(result?.message || (result?.success ? 'OK' : 'Unknown error')),
+        result?.success ? 'success' : 'error');
+    } catch (error) {
+      showAlert(locale.startsWith('zh') ? 'APK 安装失败' : 'APK installation failed',String(error),'error');
     }
   };
 
@@ -329,11 +391,9 @@ function App() {
       });
 
       if (selected) {
-        if (Array.isArray(selected)) {
-          selected.forEach(path => handleFileOperation(path));
-        } else {
-          handleFileOperation(selected);
-        }
+        // File picking and drag/drop both SEND files, including APKs.
+        // Installation must be an explicit separate user action.
+        void handleTransferFiles(Array.isArray(selected) ? selected : [selected]);
       }
     } catch (e) {
       console.error(e);
@@ -382,6 +442,23 @@ function App() {
         <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_75%_5%,var(--primary),transparent_64%)] opacity-[0.075] pointer-events-none z-0" />
 
         <div className="relative z-10 flex flex-col h-screen min-h-0">
+          {dragHover && <div className="fixed inset-3 z-[90] border-2 border-dashed border-primary rounded-2xl bg-zinc-950/80 flex justify-center items-center pointer-events-none"
+            role="status" aria-label={locale.startsWith('zh') ? '释放文件以传输到手机' : 'Drop files to transfer to phone'}>
+            <p className="font-semibold text-lg">{locale.startsWith('zh') ? '释放文件，传输到选中的手机' : 'Drop files to send to your phone'}</p>
+          </div>}
+          {transferStatus.phase !== 'idle' && <div className="fixed bottom-5 right-5 z-[95] max-w-xs w-[min(90vw,320px)] rounded-xl border border-zinc-500/30 bg-zinc-950/95 p-4 shadow-xl"
+            role="status" aria-live="polite" data-testid="transfer-progress">
+            <div className="flex items-center justify-between gap-2">
+              <strong className="text-sm">{locale.startsWith('zh') ? '文件传输' : 'File transfer'}</strong>
+              {transferStatus.phase !== 'sending' && <button aria-label={locale.startsWith('zh') ? '关闭传输提示' : 'Dismiss transfer status'}
+                type="button" onClick={() => setTransferStatus({phase:'idle',completed:0,total:0,label:''})}><X size={15}/></button>}
+            </div>
+            <p className="ml-muted text-xs mt-2 break-words">{transferStatus.label}</p>
+            {transferStatus.total > 0 && <p className="text-xs mt-1 tabular-nums">
+              {transferStatus.completed} / {transferStatus.total} {locale.startsWith('zh') ? '个文件已发送' : 'files sent'}
+            </p>}
+          </div>}
+
           {view === 'home' ? (
             <CompactDashboard
               locale={locale}
@@ -457,6 +534,11 @@ function App() {
                           support={videoDecoderSupport}
                           observedMode={observedDecoders[activeDevice]}
                           running={sessionRunning}/>
+                        <LivePerformance locale={locale} device={activeDevice}
+                          running={sessionRunning} config={config} setConfig={setConfig}
+                          performance={mirrorPerformance[activeDevice]}
+                          decoder={observedDecoders[activeDevice]}
+                          support={videoDecoderSupport}/>
                         <section className="ml-card ml-settings-summary">
                           <h2>{locale.startsWith('zh') ? '当前参数概览' : 'Configuration at a glance'}</h2>
                           <p className="ml-muted">{locale.startsWith('zh') ? '以下是已选择的参数，部分修改在下次投屏时生效。' : 'Selected values; some changes apply on the next session.'}</p>
@@ -479,6 +561,7 @@ function App() {
                       onPair={pairDevice} onConnect={connectDevice} onUsbToWireless={enableWirelessFromUsb}
                       onDiagnose={diagnoseConnection} isRefreshing={isRefreshing}
                       onFilePush={handleFileBrowse} historyDevices={historyDevices}
+                      onInstallApk={handleApkBrowse}
                       clearHistory={clearHistory} mdnsDevices={mdnsDevices}
                     />
                   )}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { ScrcpyConfig, RecordingEvent } from '../hooks/useScrcpy';
 import Tooltip from './Tooltip';
-import { Coffee, Volume2, Circle, Folder, ChevronDown, ActivitySquare } from 'lucide-react';
+import { Coffee, Volume2, Circle, Folder, ChevronDown, ActivitySquare, ClipboardCopy } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 const AUDIO_CODEC_VALUES = ['auto', 'opus', 'aac', 'flac', 'raw'] as const;
@@ -171,6 +171,7 @@ export default function SessionBehavior({
                         tooltip={t('sessionBehavior.stayAwakeTooltip')}
                     />
                     {/* v4: Keep Active */}
+                    {/* Clipboard is handled by scrcpy's existing control protocol. */}
                     <Toggle
                         checked={config.keepActive || false}
                         onChange={(v) => handleChange('keepActive', v)}
@@ -178,6 +179,21 @@ export default function SessionBehavior({
                         label={t('sessionBehavior.keepActive')}
                         tooltip={t('sessionBehavior.keepActiveTooltip')}
                     />
+                    <Toggle
+                        checked={config.clipboardSync !== false}
+                        disabled={config.sessionMode !== 'mirror'}
+                        onChange={v => handleChange('clipboardSync', v)}
+                        icon={ClipboardCopy}
+                        label={locale.startsWith('zh') ? '手机电脑双向剪贴板' : 'Phone ⇄ PC clipboard'}
+                        tooltip={locale.startsWith('zh')
+                            ? '使用 scrcpy 内置同步：手机复制文字后同步到电脑；在手机投屏窗口按 Ctrl+V 将电脑文字粘贴到手机。可关闭以保护敏感内容；更改在下次投屏时生效。'
+                            : 'Built-in scrcpy text sync: phone copies reach the PC; Ctrl+V in the mirror pastes PC text on Android. Disable for privacy; applies next session.'}
+                    />
+                    <p className="ml-setting-hint px-3" role="note">
+                        {locale.startsWith('zh')
+                            ? '剪贴板内容不由 MirroLeap 单独保存。向手机粘贴密码等敏感文字前请确认安全。'
+                            : 'MirroLeap does not separately store clipboard text. Avoid pasting secrets into untrusted Android apps.'}
+                    </p>
                     <div>
                         <Toggle
                             checked={config.audioEnabled || false}

@@ -7,7 +7,16 @@ import { canApplyMirrorVideo, MIRROR_SIZES } from '../utils/resolutionSwitch';
 import { applyMirrorResolution, videoParams } from '../utils/mirrorPresets';
 import { restartMirrorVideoStream } from '../utils/streamRestart';
 import { MIRROR_PRESETS } from '../utils/mirrorPresets';
-import { DEVICE_PROFILES_KEY, applyDeviceProfile, profileFromConfig, readDeviceProfiles } from '../utils/deviceProfiles';
+import { DEVICE_PROFILES_KEY, selectDeviceConfig, profileFromConfig, readDeviceProfiles } from '../utils/deviceProfiles';
+import { chooseAutoQualityStep } from '../utils/autoQuality';
+
+/** Measured from the running scrcpy process, never an FPS cap. */
+export type MirrorPerformance = {
+    fps: number;
+    skipped: number;
+    observedAt: number;
+    samples: { fps: number; skipped: number; at: number }[];
+};
 
 export interface RenderDriverOption {
     id: string;
@@ -95,6 +104,10 @@ export interface ScrcpyConfig {
     hardwareDecoder?: 'auto' | 'disabled' | 'd3d11va' | 'vaapi' | 'videotoolbox';
     /** Ask scrcpy to log actual FPS; never report the configured cap as measured. */
     printFps?: boolean;
+    /** Explicit toggle for scrcpy's bidirectional text clipboard bridge. */
+    clipboardSync?: boolean;
+    /** Conservative opt-in adaptive quality, never applied during recording. */
+    autoQuality?: boolean;
     // v4 features
     flexDisplay?: boolean;
     cameraTorch?: boolean;
@@ -156,7 +169,7 @@ export function useScrcpy() {
         setConfig(current => {
             if (previous) profilesRef.current[previous] = profileFromConfig(current);
             if (previous) localStorage.setItem(DEVICE_PROFILES_KEY, JSON.stringify(profilesRef.current));
-            return next ? applyDeviceProfile(current, profilesRef.current[next], next) : current;
+            return next ? selectDeviceConfig(current, profilesRef.current[next], next, Boolean(previous)) : current;
         });
         setActiveDeviceState(next);
     };
@@ -173,6 +186,7 @@ export function useScrcpy() {
         useState<Record<string, { record: boolean; recordPath: string }>>({});
     const launchedSessionConfigRef = useRef<Record<string, ScrcpyConfig>>({});
     const resolutionSwitchLock = useRef(false);
+    const autoLastChangeRef = useRef<Record<string, number>>({});
     const [defaultRecordPath, setDefaultRecordPath] = useState<string>("");
     const [detectedCameras, setDetectedCameras] = useState<{ id: string, name: string }[]>([]);
     const [renderDriverSupport, setRenderDriverSupport] = useState<RenderDriverSupport>({
@@ -182,6 +196,7 @@ export function useScrcpy() {
     });
     const [videoDecoderSupport, setVideoDecoderSupport] = useState<VideoDecoderSupport | null>(null);
     const [observedDecoders, setObservedDecoders] = useState<Record<string, string>>({});
+    const [mirrorPerformance, setMirrorPerformance] = useState<Record<string, MirrorPerformance>>({});
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
     const [mdnsDevices, setMdnsDevices] = useState<MdnsDevice[]>([]);
@@ -225,7 +240,10 @@ export function useScrcpy() {
         // v4.1 features
         ignoreVideoEncoderConstraints: false,
         hardwareDecoder: 'auto',
-        printFps: false,
+        // Enable real FPS telemetry on compatible cores for new installations.
+        printFps: true,
+        clipboardSync: true,
+        autoQuality: false,
     });
     const [windowPositions, setWindowPositions] = useState<WindowPositions>({});
     const prevDevicesRef = useRef<string[]>([]);
@@ -392,6 +410,24 @@ export function useScrcpy() {
             setLogs(prev => [...prev.slice(-(100 - newLines.length)), ...newLines]);
         });
 
+        const unlistenPerformance = listen<{device:string, fps:number, skipped?:number}>(
+            'scrcpy-performance', ({payload}) => {
+                if (!payload || typeof payload.device !== 'string' || !payload.device ||
+                    typeof payload.fps !== 'number' || !Number.isFinite(payload.fps) ||
+                    payload.fps < 0 || payload.fps > 240) return;
+                const at = Date.now();
+                setMirrorPerformance(prev => {
+                    const old = prev[payload.device];
+                    if (old && at - old.observedAt < 500) return prev;
+                    const skipped = Number.isInteger(payload.skipped) &&
+                        (payload.skipped ?? 0) >= 0 && (payload.skipped ?? 0) <= 100_000
+                        ? payload.skipped! : 0;
+                    const samples = [...(old?.samples || []), {fps:payload.fps,skipped,at}].slice(-100);
+                    return {...prev, [payload.device]:{fps:payload.fps,skipped,observedAt:at,samples}};
+                });
+            }
+        );
+
         const unlistenDecoder = listen<{device:string, mode:string}>(
             'scrcpy-video-decoder', ({payload}) => {
                 if (payload?.device && /^(starting|retrying|d3d11va|vaapi|videotoolbox|software|unknown)$/.test(payload.mode)) {
@@ -416,6 +452,11 @@ export function useScrcpy() {
                 if (!data.running) {
                     delete launchedSessionConfigRef.current[data.device];
                     setActiveRecordingSessions(prev => {
+                        const next = {...prev};
+                        delete next[data.device];
+                        return next;
+                    });
+                    setMirrorPerformance(prev => {
                         const next = {...prev};
                         delete next[data.device];
                         return next;
@@ -485,6 +526,7 @@ export function useScrcpy() {
         return () => {
             unlistenLog.then(f => f());
             unlistenDecoder.then(f => f());
+            unlistenPerformance.then(f => f());
             unlistenRecording.then(f => f());
             unlistenStatus.then(f => f());
             unlistenProgress.then(f => f());
@@ -790,10 +832,12 @@ export function useScrcpy() {
                 ...config,
                 hidMouse: false, otgPure: false,
                 windowX: savedPos?.x,
+                printFps: Boolean(config.autoQuality || config.printFps),
                 windowY: savedPos?.y
             };
             await invoke('run_scrcpy', { config: configWithPos });
             launchedSessionConfigRef.current[config.device] = configWithPos;
+            autoLastChangeRef.current[config.device] = Date.now();
             setActiveRecordingSessions(prev => ({
                 ...prev, [config.device]: {
                     record: Boolean(configWithPos.record),
@@ -920,6 +964,39 @@ export function useScrcpy() {
             device, applyMirrorResolution(liveConfigRef.current, nextSize)
         );
     };
+
+    // Only the selected running phone is eligible. FPS is a conservative
+    // heuristic for interactive motion, NOT a measure of latency or packet loss.
+    // A 3-minute cooldown and the existing recording/restart lock prevent churn.
+    useEffect(() => {
+        const device = activeDevice;
+        if (!device || !config.autoQuality || !videoDecoderSupport?.supportsPrintFps ||
+            !liveRunningDevicesRef.current.includes(device) ||
+            !launchedSessionConfigRef.current[device]) return;
+        const now = Date.now();
+        const next = chooseAutoQualityStep({
+            config: liveConfigRef.current,
+            performance: mirrorPerformance[device],
+            now,
+            lastChangeAt:autoLastChangeRef.current[device] || now,
+            running:true,
+            recording:Boolean(launchedSessionConfigRef.current[device]?.record),
+            switching:resolutionSwitchLock.current || isSwitchingResolution || isApplyingRecording,
+        });
+        if (!next) return;
+        // Reserve the cooldown *before* asynchronous stream handoff, so
+        // a burst of measurement events cannot queue repeated restarts.
+        autoLastChangeRef.current[device] = now;
+        const requested = {...liveConfigRef.current, res:next.res, bitrate:next.bitrate};
+        setLogs(prev => [...prev.slice(-100), '[AUTO] '
+            + (next.reason === 'slow' ? '连续实测低帧率，保守降低编码负载：' : '持续高帧率，谨慎提升画质：')
+            + next.res + ' / ' + next.bitrate + 'Mbps']);
+        void applyMirrorVideoConfig(device, requested).then(ok => {
+            if (!ok) setLogs(prev => [...prev.slice(-100),
+                '[AUTO] 本次调整未完成；已进入冷却时间，不会连续重试。']);
+        });
+    }, [mirrorPerformance, activeDevice, config.autoQuality, runningDevices,
+        isSwitchingResolution, isApplyingRecording, videoDecoderSupport?.supportsPrintFps]);
 
     /** scrcpy records from launch; opt-in to a short stream restart when
      * changing the recording checkbox/folder during an existing mirror.
@@ -1336,6 +1413,7 @@ export function useScrcpy() {
         renderDriverSupport,
         videoDecoderSupport,
         observedDecoders,
+        mirrorPerformance,
         isRefreshing,
         mdnsDevices,
         config,
