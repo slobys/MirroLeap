@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useI18n } from '../i18n';
-import { adbHistoryHost, reconnectDelayMs } from '../utils/reconnect';
+import { adbHistoryHost, reconnectDelayMs, reconnectCandidates } from '../utils/reconnect';
+import { createSingleFlightDiscovery } from '../utils/deviceDiscovery';
 import { canApplyMirrorVideo, MIRROR_SIZES } from '../utils/resolutionSwitch';
 import { applyMirrorResolution, videoParams } from '../utils/mirrorPresets';
 import { restartMirrorVideoStream } from '../utils/streamRestart';
@@ -10,13 +11,14 @@ import { MIRROR_PRESETS } from '../utils/mirrorPresets';
 import { DEVICE_PROFILES_KEY, selectDeviceConfig, profileFromConfig, readDeviceProfiles,
     rememberCompletedVideoForInactiveDevice } from '../utils/deviceProfiles';
 import { chooseAutoQualityStep } from '../utils/autoQuality';
+import { measuredSkippedFrames } from '../utils/performanceSamples';
 
 /** Measured from the running scrcpy process, never an FPS cap. */
 export type MirrorPerformance = {
     fps: number;
-    skipped: number;
+    skipped?: number;
     observedAt: number;
-    samples: { fps: number; skipped: number; at: number }[];
+    samples: { fps: number; skipped?: number; at: number }[];
 };
 
 export interface RenderDriverOption {
@@ -415,7 +417,7 @@ export function useScrcpy() {
             setLogs(prev => [...prev.slice(-(100 - newLines.length)), ...newLines]);
         });
 
-        const unlistenPerformance = listen<{device:string, fps:number, skipped?:number}>(
+        const unlistenPerformance = listen<{device:string, fps:number, skipped?:number | null}>(
             'scrcpy-performance', ({payload}) => {
                 if (!payload || typeof payload.device !== 'string' || !payload.device ||
                     typeof payload.fps !== 'number' || !Number.isFinite(payload.fps) ||
@@ -424,9 +426,7 @@ export function useScrcpy() {
                 setMirrorPerformance(prev => {
                     const old = prev[payload.device];
                     if (old && at - old.observedAt < 500) return prev;
-                    const skipped = Number.isInteger(payload.skipped) &&
-                        (payload.skipped ?? 0) >= 0 && (payload.skipped ?? 0) <= 100_000
-                        ? payload.skipped! : 0;
+                    const skipped = measuredSkippedFrames(payload.skipped);
                     const samples = [...(old?.samples || []), {fps:payload.fps,skipped,at}].slice(-100);
                     return {...prev, [payload.device]:{fps:payload.fps,skipped,observedAt:at,samples}};
                 });
@@ -582,7 +582,9 @@ export function useScrcpy() {
     // under one continuous "syncing" state, instead of the isRefreshing flag
     // (and the "Syncing..." label bound to it) flickering off and back on
     // between each poll.
-    const fetchDevicesOnce = async (customPath?: string, silent: boolean = false) => {
+    const [deviceDiscoveryGate] = useState(createSingleFlightDiscovery);
+    const fetchDevicesOnce = (customPath?: string, silent: boolean = false): Promise<void> =>
+        deviceDiscoveryGate(customPath || config.scrcpyPath || '', async () => {
         try {
             const res: any = await invoke('get_devices', { customPath: customPath || config.scrcpyPath });
             let newDevices: string[] = [];
@@ -652,7 +654,7 @@ export function useScrcpy() {
             console.error(e);
             setLogs(prev => [...prev.slice(-100), t('logs.errorRefreshingDevices', { error: String(e) })]);
         }
-    };
+    });
 
     const refreshDevices = async (customPath?: string, silent: boolean = false) => {
         if (isRefreshing) return;
@@ -791,12 +793,7 @@ export function useScrcpy() {
         const tryReconnectHistory = () => {
             if (document.visibilityState === 'hidden' || isRefreshingRef.current) return;
             const now = Date.now();
-            const seenHosts = new Set<string>();
-            for (const address of historyDevices) {
-                const host = adbHistoryHost(address);
-                if (!host || seenHosts.has(host)) continue;
-                seenHosts.add(host);
-                if (prevDevicesRef.current.includes(address)) continue;
+            for (const address of reconnectCandidates(historyDevices, prevDevicesRef.current)) {
 
                 let attempt = reconnectAttemptsRef.current.get(address);
                 if (!attempt) {
@@ -815,11 +812,12 @@ export function useScrcpy() {
                         if (disposed) return;
                         if (res.address && res.address !== address) addToHistory(res.address);
                         void fetchDevicesOnceRef.current(config.scrcpyPath, true);
-                    } else {
+                    } else if (!disposed) {
                         current.failures += 1;
                         current.retryAfter = Date.now() + reconnectDelayMs(current.failures);
                     }
                 }).catch(() => {
+                    if (disposed) return;
                     current.failures += 1;
                     current.retryAfter = Date.now() + reconnectDelayMs(current.failures);
                 }).finally(() => { current.pending = false; });

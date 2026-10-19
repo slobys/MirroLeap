@@ -13,3 +13,19 @@ export function adbHistoryHost(endpoint: string): string | null {
     if (octets.some(v => v > 255) || port < 1 || port > 65535) return null;
     return match[1];
 }
+
+/** Retry at most one approved endpoint per IP, and never reconnect a stale
+ * port when ADB already reports the same phone's IP on a new TLS port.
+ */
+export function reconnectCandidates(history:string[], connected:string[]):string[] {
+    const connectedHosts = new Set(connected.map(adbHistoryHost).filter(Boolean));
+    const seenHosts = new Set<string>();
+    const candidates:string[]=[];
+    for (const endpoint of history) {
+        const host=adbHistoryHost(endpoint);
+        if (!host || seenHosts.has(host) || connectedHosts.has(host)) continue;
+        seenHosts.add(host);
+        candidates.push(endpoint);
+    }
+    return candidates;
+}

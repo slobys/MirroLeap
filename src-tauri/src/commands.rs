@@ -300,14 +300,12 @@ fn extract_device_model(line: &str) -> Option<String> {
 pub async fn get_devices(custom_path: Option<String>) -> serde_json::Value {
     let adb_path = get_binary_path("adb", custom_path);
 
-    let output = create_command(&adb_path)
-        .arg("devices")
-        .arg("-l")
-        .output()
-        .await;
+    let mut command = create_command(&adb_path);
+    command.arg("devices").arg("-l").kill_on_drop(true);
+    let output = timeout(Duration::from_secs(8), command.output()).await;
 
     match output {
-        Ok(o) => {
+        Ok(Ok(o)) => {
              if o.status.success() {
                  let out_str = String::from_utf8_lossy(&o.stdout);
                  let mut devices: Vec<String> = Vec::new();
@@ -332,9 +330,10 @@ pub async fn get_devices(custom_path: Option<String>) -> serde_json::Value {
                  json!({ "error": true, "message": "ADB returned error" })
              }
         },
-        Err(e) => {
+        Ok(Err(e)) => {
              json!({ "error": true, "message": e.to_string() })
-         }
+         },
+        Err(_) => json!({ "error": true, "message": "ADB device discovery timed out after 8 seconds" }),
     }
 }
 
@@ -342,14 +341,12 @@ pub async fn get_devices(custom_path: Option<String>) -> serde_json::Value {
 pub async fn get_mdns_devices(custom_path: Option<String>) -> serde_json::Value {
     let adb_path = get_binary_path("adb", custom_path);
     
-    let output = create_command(&adb_path)
-        .arg("mdns")
-        .arg("services")
-        .output()
-        .await;
+    let mut command = create_command(&adb_path);
+    command.arg("mdns").arg("services").kill_on_drop(true);
+    let output = timeout(Duration::from_secs(5), command.output()).await;
 
     match output {
-        Ok(o) => {
+        Ok(Ok(o)) => {
             if o.status.success() {
                 let out_str = String::from_utf8_lossy(&o.stdout);
                 let mut services = Vec::new();
@@ -371,9 +368,10 @@ pub async fn get_mdns_devices(custom_path: Option<String>) -> serde_json::Value 
                 json!({ "error": true, "message": "ADB mdns returned error" })
             }
         },
-        Err(e) => {
+        Ok(Err(e)) => {
             json!({ "error": true, "message": e.to_string() })
-        }
+        },
+        Err(_) => json!({ "error": true, "message": "ADB mDNS discovery timed out after 5 seconds" }),
     }
 }
 
@@ -2459,7 +2457,7 @@ async fn spawn_scrcpy_streams(
                             if let Some(fps) = video_decoder::parse_reported_fps(&line) {
                                 let _ = window_stdout.emit("scrcpy-performance", json!({
                                     "device": stdout_device.as_str(), "fps": fps,
-                                    "skipped": video_decoder::parse_skipped_frames(&line).unwrap_or(0),
+                                    "skipped": video_decoder::parse_skipped_frames(&line),
                                 }));
                             }
                             buffer.push(line);
@@ -2511,7 +2509,7 @@ async fn spawn_scrcpy_streams(
                             if let Some(fps) = video_decoder::parse_reported_fps(&line) {
                                 let _ = window_stderr.emit("scrcpy-performance", json!({
                                     "device": stderr_device.as_str(), "fps": fps,
-                                    "skipped": video_decoder::parse_skipped_frames(&line).unwrap_or(0),
+                                    "skipped": video_decoder::parse_skipped_frames(&line),
                                 }));
                             }
                             buffer.push(line);

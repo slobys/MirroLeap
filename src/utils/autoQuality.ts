@@ -34,7 +34,8 @@ export function chooseAutoQualityStep(input: {
     const samples = performance.samples.filter(v =>
         Number.isFinite(v.at) && v.at <= now && v.at >= now - 120_000 &&
         v.at >= lastChangeAt && Number.isFinite(v.fps) && v.fps >= 1 && v.fps <= 240 &&
-        Number.isFinite(v.skipped) && v.skipped >= 0);
+        (v.skipped === undefined ||
+            (Number.isInteger(v.skipped) && v.skipped >= 0 && v.skipped <= 100_000)));
     if (samples.length < 10) return null;
 
     const cap = config.fps || 60;
@@ -44,7 +45,7 @@ export function chooseAutoQualityStep(input: {
     // should never be treated as congestion or trigger auto downscaling.
     if (low.length >= 10 && span >= 20_000 && Math.max(...low.map(x => x.fps)) >= 12 &&
         low.filter(x => x.fps < Math.min(23, cap * 0.45)).length >= Math.ceil(low.length * 0.85) &&
-        low.filter(x => x.skipped > 0).length >= Math.ceil(low.length * 0.5)) {
+        low.filter(x => typeof x.skipped === 'number' && x.skipped > 0).length >= Math.ceil(low.length * 0.5)) {
         const bitrate = config.bitrate!;
         // Try cheaper bitrate adjustment before changing the video dimensions.
         if (bitrate > BITRATES[index] * 0.8 + 2) {
@@ -60,7 +61,8 @@ export function chooseAutoQualityStep(input: {
     // near the selected 60fps cap over a long interval.
     const stable = samples.slice(-70);
     if (cap >= 60 && stable.length >= 45 && stable[stable.length - 1].at - stable[0].at >= 65_000 &&
-        stable.filter(s => s.fps >= cap * 0.92 && s.skipped <= 1).length >= stable.length * 0.90) {
+        stable.filter(s => s.fps >= cap * 0.92 &&
+            typeof s.skipped === 'number' && s.skipped <= 1).length >= stable.length * 0.90) {
         if (config.bitrate! < BITRATES[index]) {
             return {res:AUTO_QUALITY_SIZES[index],bitrate:Math.min(BITRATES[index],config.bitrate! + 2),reason:'stable'};
         }

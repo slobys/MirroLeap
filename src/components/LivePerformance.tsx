@@ -46,7 +46,7 @@ export default function LivePerformance({locale, device, running, config, setCon
             </div>
             <div className="rounded-lg border border-zinc-500/20 px-2 py-3">
                 <p className="ml-muted text-xs">{zh ? '本次跳帧' : 'Skipped frames'}</p>
-                <p className="text-lg font-semibold tabular-nums" data-testid="measured-skipped">{available ? performance.skipped : '—'}</p>
+                <p className="text-lg font-semibold tabular-nums" data-testid="measured-skipped">{available && performance.skipped !== undefined ? performance.skipped : '—'}</p>
             </div>
             <div className="rounded-lg border border-zinc-500/20 px-2 py-3">
                 <p className="ml-muted text-xs">{zh ? '实际解码方式' : 'Observed decoder'}</p>
@@ -64,6 +64,14 @@ export default function LivePerformance({locale, device, running, config, setCon
                     ? (zh ? '等待 scrcpy 输出实测帧率；静止画面可能不会持续产生新帧。' : 'Waiting for measured FPS. A static screen may not produce new frames.')
                     : (zh ? '启用「在运行日志输出实际帧率」并重新开始投屏以获取 FPS。' : 'Enable FPS logging and restart mirroring to collect measurements.')}
             </p>}
+        {available && performance.skipped === undefined && (
+            <p className="text-xs text-amber-600 dark:text-amber-400" role="note"
+                data-testid="skipped-not-reported">
+                {zh
+                    ? '当前 scrcpy 只提供帧率，没有提供跳帧数；“—”表示未知而不是 0。Auto 不会用缺失的跳帧数据判断是否升降画质。'
+                    : 'scrcpy reports FPS but not skipped-frame counts. “—” means unknown, not zero. Auto will not treat missing skip data as evidence to change quality.'}
+            </p>
+        )}
         <p className="ml-muted text-xs flex gap-1.5 items-start">
             <Gauge size={14} className="shrink-0 mt-0.5"/>
             {zh ? 'FPS 仅来自 scrcpy 实际日志。码率是所选编码上限，跳帧指 scrcpy 渲染时的实际跳过帧数，不代表网络丢包；不显示未经测量的延迟。'

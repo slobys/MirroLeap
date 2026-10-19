@@ -59,6 +59,21 @@ describe('conservative opt-in auto quality',()=>{
         expect(calc({...congested,observedAt:NOW+1000})).toBeNull();
         expect(calc({...congested,observedAt:Number.NaN})).toBeNull();
     });
+    it('does not infer zero skipped frames from FPS-only reports', () => {
+        const congested = sample(17,30,1000);
+        const missing = {...congested,
+            skipped: undefined,
+            samples: congested.samples.map(({fps,at})=>({fps,at}))};
+        expect(calc(missing)).toBeNull();
+        const stable = sample(59,70,1000);
+        const unknown = {...stable,skipped:undefined,
+            samples:stable.samples.map(({fps,at})=>({fps,at}))};
+        expect(calc(unknown,{res:'1920',bitrate:8})).toBeNull();
+        // Missing statistics reduce confidence: silence is not zero skipped.
+        expect(calc({...stable,samples:stable.samples.map((v,i)=>
+            i%3===0 ? {fps:v.fps,at:v.at} : v)}, {res:'1920',bitrate:8}))
+            .toBeNull();
+    });
     it('requires sustained high observed motion before upgrading, never to 4K',()=>{
         expect(calc(sample(59,70,1000),{res:'1920',bitrate:8})).toEqual({res:'2560',bitrate:16,reason:'stable'});
         expect(calc(sample(59,70,1000),{res:'2560',bitrate:16})).toBeNull();

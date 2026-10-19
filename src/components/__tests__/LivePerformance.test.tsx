@@ -25,6 +25,21 @@ describe('live quality monitor',()=>{
         expect(screen.getByText('d3d11va')).toBeInTheDocument();
         expect(screen.getByText(/设定码率/)).toBeInTheDocument();
     });
+    it('distinguishes unsupported skip telemetry from measured zero',()=>{
+        const withoutSkipped:MirrorPerformance={
+            fps:59, observedAt:Date.now(), samples:[{fps:59,at:Date.now()}],
+        };
+        const {rerender}=render(<LivePerformance locale="zh-CN" device="phone1" running
+            config={config} setConfig={vi.fn()} support={support} performance={withoutSkipped}/>);
+        expect(screen.getByTestId('measured-fps')).toHaveTextContent('59.0');
+        expect(screen.getByTestId('measured-skipped')).toHaveTextContent('—');
+        expect(screen.getByTestId('skipped-not-reported')).toHaveTextContent('未知而不是 0');
+        rerender(<LivePerformance locale="zh-CN" device="phone1" running
+            config={config} setConfig={vi.fn()} support={support}
+            performance={{...withoutSkipped,skipped:0}}/>);
+        expect(screen.getByTestId('measured-skipped')).toHaveTextContent('0');
+        expect(screen.queryByTestId('skipped-not-reported')).not.toBeInTheDocument();
+    });
     it('auto is explicit opt-in and enables measured FPS reporting',()=>{
         const setConfig=vi.fn();
         render(<LivePerformance locale="zh-CN" device="phone1" running={true}
