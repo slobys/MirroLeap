@@ -18,9 +18,9 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindo
 use tauri::webview::PageLoadEvent;
 use windows::Win32::Foundation::{HWND, POINT, RECT, LPARAM, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CreateRectRgn, CreateRoundRectRgn, DeleteObject,
+    ClientToScreen, CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject,
     GetMonitorInfoW, GetRgnBox, GetWindowRgn, PtInRegion,
-    MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, SetWindowRgn,
+    MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, RGN_AND, SetWindowRgn,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD,
@@ -368,12 +368,52 @@ fn apply_native_corner_clip(hwnd: HWND, screen: ScreenRect) -> Result<(), String
     let bounds = clip_window_rect(hwnd, screen)?;
     let (rx, ry) = native_clip_radius(screen.width, screen.height)
         .ok_or("Invalid screen dimensions for native corner rounding")?;
-    let region = unsafe {
+    let video_region = unsafe {
         // +1 accounts for Win32's exclusive right/bottom clipping coordinates.
         CreateRoundRectRgn(bounds.left, bounds.top, bounds.right + 1, bounds.bottom + 1, 2 * rx, 2 * ry)
     };
-    if region.0.is_null() {
+    if video_region.0.is_null() {
         return Err("Could not create native rounded video mask".into());
+    }
+    // A second independent constraint follows the PHYSICAL phone case. Even
+    // if SDL's inner rounded region becomes misaligned during Alt+F restore,
+    // it can never draw its black square corners outside the titanium body.
+    let Some(frame) = expand_screen(screen) else {
+        let _ = unsafe { DeleteObject(HGDIOBJ(video_region.0)) };
+        return Err("Could not derive outer phone silhouette geometry".into());
+    };
+    let Some((outer_rx, outer_ry)) =
+        crate::frame_layout::bezel_outer_clip_radii(frame.width,frame.height)
+    else {
+        let _ = unsafe { DeleteObject(HGDIOBJ(video_region.0)) };
+        return Err("Invalid outer handset rounding geometry".into());
+    };
+    let mut window_rect = RECT::default();
+    if let Err(error) = unsafe { GetWindowRect(hwnd,&mut window_rect) } {
+        let _ = unsafe { DeleteObject(HGDIOBJ(video_region.0)) };
+        return Err(format!("Cannot locate physical handset clipping bounds: {error}"));
+    }
+    let margin = crate::frame_layout::BEZEL_CLIP_INSET_PX;
+    let physical = unsafe { CreateRoundRectRgn(
+        frame.x-window_rect.left+margin, frame.y-window_rect.top+margin,
+        frame.x+frame.width-window_rect.left-margin+1,
+        frame.y+frame.height-window_rect.top-margin+1,
+        2*outer_rx,2*outer_ry,
+    ) };
+    if physical.0.is_null() {
+        let _ = unsafe { DeleteObject(HGDIOBJ(video_region.0)) };
+        return Err("Could not create physical handset silhouette constraint".into());
+    }
+    let region = unsafe { CreateRectRgn(0,0,0,0) };
+    let combine_ok = !region.0.is_null() &&
+        // NULLREGION (1) would blank the whole phone: never apply an empty
+        // intersection if SDL reports inconsistent geometry during restore.
+        unsafe { CombineRgn(Some(region),Some(video_region),Some(physical),RGN_AND) }.0 >= 2;
+    let _ = unsafe { DeleteObject(HGDIOBJ(video_region.0)) };
+    let _ = unsafe { DeleteObject(HGDIOBJ(physical.0)) };
+    if !combine_ok {
+        if !region.0.is_null() { let _ = unsafe { DeleteObject(HGDIOBJ(region.0)) }; }
+        return Err("Could not intersect SDL and physical handset rounded masks".into());
     }
     let result = unsafe { SetWindowRgn(hwnd, Some(region), true) };
     if result == 0 {
@@ -409,6 +449,20 @@ fn native_corner_clip_intact(hwnd: HWND, screen: ScreenRect) -> bool {
         && !unsafe { PtInRegion(probe, expected.right - 1, expected.bottom - 1) }.as_bool()
         && unsafe { PtInRegion(probe,
             expected.left + screen.width / 2, expected.top + screen.height / 2) }.as_bool();
+    if valid {
+        if let Some((rx,ry)) = native_clip_radius(screen.width, screen.height) {
+            // Validate the curved arc, not just the four exact corner pixels.
+            // Rectangular artifacts can still pass the old corner-only test.
+            for (x,y) in [
+                (expected.left+rx/6,expected.top+ry/6),
+                (expected.right-1-rx/6,expected.top+ry/6),
+                (expected.left+rx/6,expected.bottom-1-ry/6),
+                (expected.right-1-rx/6,expected.bottom-1-ry/6),
+            ] {
+                valid &= !unsafe { PtInRegion(probe,x,y) }.as_bool();
+            }
+        }
+    }
     let _ = unsafe { DeleteObject(HGDIOBJ(probe.0)) };
     valid
 }
@@ -416,6 +470,75 @@ fn native_corner_clip_intact(hwnd: HWND, screen: ScreenRect) -> bool {
 fn reset_native_corner_clip(hwnd: HWND) {
     // Restore a full rectangular SDL window for landscape/maximized sessions.
     let _ = unsafe { SetWindowRgn(hwnd, None, true) };
+}
+
+/// Clip the TRANSPARENT WebView2 shell itself to the phone's outer titanium
+/// silhouette, separate from the SDL video aperture. On Windows, fullscreen
+/// transitions sometimes turn its "transparent" corners into black rectangular
+/// pixels even though GetWindowRgn(video) reports an intact inner ellipse.
+/// A real HWND region prevents either a black WebView corner or a stale SVG
+/// compositor surface from painting outside the physical phone outline.
+fn native_outer_bezel_region(hwnd: HWND) -> Option<(RECT, i32, i32)> {
+    let mut window = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut window) }.ok()?;
+    let width = window.right - window.left;
+    let height = window.bottom - window.top;
+    let (rx,ry) = crate::frame_layout::bezel_outer_clip_radii(width,height)?;
+    let margin = crate::frame_layout::BEZEL_CLIP_INSET_PX;
+    Some((RECT {
+        left: margin, top: margin,
+        right: width - margin + 1, bottom: height - margin + 1,
+    },rx,ry))
+}
+
+fn apply_native_outer_bezel_clip(hwnd: HWND) -> Result<(), String> {
+    let (bounds,rx,ry) = native_outer_bezel_region(hwnd)
+        .ok_or("Phone frame HWND geometry is not ready for rounded clipping")?;
+    let region = unsafe { CreateRoundRectRgn(
+        bounds.left, bounds.top, bounds.right, bounds.bottom, 2*rx, 2*ry,
+    ) };
+    if region.0.is_null() { return Err("Could not allocate outer handset mask".into()); }
+    if unsafe { SetWindowRgn(hwnd, Some(region), true) } == 0 {
+        let _ = unsafe { DeleteObject(HGDIOBJ(region.0)) };
+        return Err("Windows refused the physical phone bezel shape".into());
+    }
+    Ok(())
+}
+
+fn native_outer_bezel_clip_intact(hwnd: HWND) -> bool {
+    let Some((bounds,rx,ry)) = native_outer_bezel_region(hwnd) else { return false };
+    let region = unsafe { CreateRectRgn(0,0,0,0) };
+    if region.0.is_null() { return false; }
+    let state = unsafe { GetWindowRgn(hwnd,region) };
+    let mut actual = RECT::default();
+    let mut valid = state.0 != 0
+        && unsafe { GetRgnBox(region,&mut actual) }.0 != 0
+        && actual.left.abs_diff(bounds.left) <= 1
+        && actual.top.abs_diff(bounds.top) <= 1
+        && actual.right.abs_diff(bounds.right) <= 1
+        && actual.bottom.abs_diff(bounds.bottom) <= 1;
+    if valid {
+        valid = !unsafe { PtInRegion(region,bounds.left,bounds.top) }.as_bool()
+            && !unsafe { PtInRegion(region,bounds.right-2,bounds.top) }.as_bool()
+            && !unsafe { PtInRegion(region,bounds.left,bounds.bottom-2) }.as_bool()
+            && !unsafe { PtInRegion(region,bounds.right-2,bounds.bottom-2) }.as_bool()
+            && unsafe { PtInRegion(region,
+                (bounds.right+bounds.left)/2,(bounds.bottom+bounds.top)/2) }.as_bool();
+        // Four distant samples *along* the quarter-ellipse, not only the
+        // absolute corners: catch partial rectangular black protrusions.
+        // At radius/6 from both sides, a true rounded corner is still
+        // outside, while a wrong tiny-radius or rectangular region is inside.
+        for (x,y) in [
+            (bounds.left+rx/6, bounds.top+ry/6),
+            (bounds.right-1-rx/6, bounds.top+ry/6),
+            (bounds.left+rx/6, bounds.bottom-1-ry/6),
+            (bounds.right-1-rx/6,bounds.bottom-1-ry/6),
+        ] {
+            valid &= !unsafe { PtInRegion(region,x,y) }.as_bool();
+        }
+    }
+    let _ = unsafe { DeleteObject(HGDIOBJ(region.0)) };
+    valid
 }
 
 fn pointer() -> Option<(i32, i32)> {
@@ -553,6 +676,12 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut clipped_pid: Option<u32> = None;
     let mut last_clip_signature: Option<(u32, usize, i32, i32, i32, i32)> = None;
     let mut clip_checked_at: Option<Instant> = None;
+    let mut previous_fullscreen: Option<bool> = None;
+    let mut clip_recovery_until: Option<Instant> = None;
+    let mut last_outer_mask_geometry: Option<(usize,i32,i32)> = None;
+    let mut outer_mask_checked_at: Option<Instant> = None;
+    let mut outer_mask_warned = false;
+
     let mut controls_rect: Option<ScreenRect> = None;
     let mut shell_position_checked_at: Option<Instant> = None;
     let mut toolbar_position_checked_at: Option<Instant> = None;
@@ -597,6 +726,14 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             clipped_pid = None;
             last_clip_signature = None;
             clip_checked_at = None;
+            if last_outer_mask_geometry.take().is_some() {
+                // Discard a stale translucent case mask after minimizing or
+                // SDL recreating its native HWND for fullscreen.
+                if let Ok(shell) = overlay.hwnd() {
+                    let _ = unsafe { SetWindowRgn(shell,None,true) };
+                }
+            }
+            outer_mask_checked_at = None;
             if shell_visible { let _ = overlay.hide(); shell_visible = false; }
             if controls_visible { let _ = toolbar.hide(); controls_visible = false; }
             previous_frame = None;
@@ -669,14 +806,24 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // Never mask a true full-monitor fullscreen video.
         let fullscreen = monitor_full_bounds(hwnd)
             .is_some_and(|monitor| is_fullscreen_client(screen, monitor));
+        if previous_fullscreen != Some(fullscreen) {
+            previous_fullscreen = Some(fullscreen);
+            clip_recovery_until = Some(Instant::now() + Duration::from_secs(3));
+            clip_checked_at = None;
+            // Do not clear the OUTER WebView mask here: the fullscreen branch
+            // below must still see its presence and reset that GDI region.
+            // On return to windowed, it is rebuilt at the restored frame size.
+        }
         let signature = if fullscreen { None } else {
             clip_window_rect(hwnd, screen).ok().map(|insets| (
                 pid, hwnd.0 as usize,
                 screen.width, screen.height, insets.left, insets.top,
             ))
         };
+        let recovering = clip_recovery_until.is_some_and(|until| Instant::now() < until);
+        let health_interval = if recovering { 130 } else { 550 };
         let health_due = clip_checked_at
-            .is_none_or(|at| at.elapsed() >= Duration::from_millis(550));
+            .is_none_or(|at| at.elapsed() >= Duration::from_millis(health_interval));
         let geometry_changed = signature.is_none() || last_clip_signature != signature;
         let native_health = if !fullscreen && !geometry_changed && health_due {
             Some(native_corner_clip_intact(hwnd, screen))
@@ -703,6 +850,10 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                     // geometry. Retry on the next 50ms tick; do not stop the
                     // overlay, toolbar, stream or USB/Wi-Fi connection.
                     continue;
+                }
+                if native_health == Some(false) {
+                    let _ = app.emit("scrcpy-log",
+                        "[FRAME] Restored SDL rounded video mask after a native region mismatch".to_string());
                 }
                 clip_retry_reported = false;
                 clipped_pid = Some(pid);
@@ -781,6 +932,52 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                     let _ = app.emit("scrcpy-log", format!("[FRAME] Position will retry: {error}"));
                     previous_frame = None;
                     shell_position_checked_at = None;
+                }
+            }
+        }
+
+        // The screenshot's small BLACK SQUARES lie *outside* the rounded
+        // titanium body. Checking only the SDL video region cannot detect a
+        // WebView2 transparency/compositor defect. Apply a second native mask
+        // to the visible phone-shell HWND itself, and verify it periodically.
+        let shell_hwnd = overlay.hwnd().ok();
+        if fullscreen {
+            if last_outer_mask_geometry.take().is_some() {
+                if let Some(shell) = shell_hwnd {
+                    let _ = unsafe { SetWindowRgn(shell, None, true) };
+                }
+            }
+            outer_mask_checked_at = None;
+        } else if shell_visible {
+            if let Some(shell) = shell_hwnd {
+                let geometry = native_outer_bezel_region(shell)
+                    .map(|(r,_,_)| (shell.0 as usize, r.right-r.left, r.bottom-r.top));
+                let check_due = outer_mask_checked_at.is_none_or(|time|
+                    time.elapsed() >= Duration::from_millis(350));
+                let mask_lost = geometry == last_outer_mask_geometry
+                    && check_due && !native_outer_bezel_clip_intact(shell);
+                if geometry.is_some() && (geometry != last_outer_mask_geometry || mask_lost) {
+                    match apply_native_outer_bezel_clip(shell) {
+                        Ok(()) => {
+                            if mask_lost {
+                                let _ = app.emit("scrcpy-log",
+                                    "[FRAME] Restored phone body HWND silhouette after fullscreen".to_string());
+                            }
+                            last_outer_mask_geometry = geometry;
+                            outer_mask_checked_at = Some(Instant::now());
+                            outer_mask_warned = false;
+                        }
+                        Err(error) => {
+                            if !outer_mask_warned {
+                                let _ = app.emit("scrcpy-log",
+                                    format!("[FRAME] Outer phone corners will retry: {error}"));
+                                outer_mask_warned = true;
+                            }
+                            last_outer_mask_geometry = None;
+                        }
+                    }
+                } else if check_due {
+                    outer_mask_checked_at = Some(Instant::now());
                 }
             }
         }

@@ -105,8 +105,22 @@ assert "is_fullscreen_client(screen, monitor)" in backend
 assert "ResetForFullscreen" in backend and "ApplyRounded" in backend
 assert "corner_clip_action(" in rust
 assert "fn fullscreen_exit_recreates_native_rounded_clip_even_at_identical_size()" in rust
-assert "Duration::from_millis(550)" in backend
+assert "if recovering { 130 } else { 550 }" in backend
+assert "clip_recovery_until = Some(Instant::now() + Duration::from_secs(3))" in backend
 assert "CreateRoundRectRgn" in backend and "SetWindowRgn" in backend
+
+# A native video HRGN alone DID NOT stop the black rectangular corner
+# fragments after fullscreen. Clip the transparent WebView2 case HWND too,
+# and constrain the SDL video HRGN to the physical phone silhouette.
+assert "BEZEL_OUTER_RADIUS: f64 = 76.0" in rust
+assert "BEZEL_CLIP_INSET_PX: i32 = 2" in rust
+assert "bezel_outer_clip_radii(" in rust and "native_outer_bezel_clip_intact(" in backend
+assert "apply_native_outer_bezel_clip(shell)" in backend
+assert "last_outer_mask_geometry" in backend
+assert "GetWindowRgn(hwnd,region)" in backend
+assert "CombineRgn(Some(region),Some(video_region),Some(physical),RGN_AND)" in backend
+assert "Restored phone body HWND silhouette after fullscreen" in backend
+assert "fn bezel_outer_region_rejects_square_window_corners_after_fullscreen()" in rust
 
 assert "round_clip_radius" not in backend, (
     "Using exact SVG radius for native mask causes wallpaper-colored seams"

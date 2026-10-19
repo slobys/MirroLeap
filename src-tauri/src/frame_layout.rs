@@ -206,6 +206,29 @@ pub fn corner_clip_action(
     }
 }
 
+/// The phone SVG's *outer* physical body is x=1/y=1 with rx=76 on its
+/// 1000 x 2150 artboard. Clipping the transparent WebView's own HWND to this
+/// silhouette prevents Windows/WebView2's opaque black rectangular corners
+/// from leaking past the titanium case after a fullscreen/restore transition.
+/// This is independent of the inner SDL video clip.
+pub const BEZEL_OUTER_RADIUS: f64 = 76.0;
+pub const BEZEL_CLIP_INSET_PX: i32 = 2;
+pub fn bezel_outer_clip_radii(width: i32, height: i32) -> Option<(i32, i32)> {
+    if width < 80 || height < 80 || width > 15000 || height > 15000 {
+        return None;
+    }
+    let (art_w, art_h) = if is_landscape(width, height) {
+        (LANDSCAPE_ARTBOARD_WIDTH, LANDSCAPE_ARTBOARD_HEIGHT)
+    } else {
+        (ARTBOARD_WIDTH, ARTBOARD_HEIGHT)
+    };
+    let radius_x = ((width as f64 * BEZEL_OUTER_RADIUS / art_w).ceil() as i32 + 2)
+        .clamp(3, width / 3);
+    let radius_y = ((height as f64 * BEZEL_OUTER_RADIUS / art_h).ceil() as i32 + 2)
+        .clamp(3, height / 3);
+    Some((radius_x, radius_y))
+}
+
 /// Native HWND companions do not need a SetWindowPos call every 50 ms.
 /// Only actual motion, visibility restoration, unexpected z-order or a
 /// low-frequency health check require the compositor to be repositioned.
@@ -424,6 +447,33 @@ mod tests {
         // without accidentally mixing tiers with a foreign desktop window.
         for desired in [true,false,true,false,true] {
             assert_eq!(companion_stack_choice(desired,false,Some(!desired)),TierFront);
+        }
+    }
+
+    #[test]
+    fn bezel_outer_region_rejects_square_window_corners_after_fullscreen() {
+        assert!(bezel_outer_clip_radii(0,900).is_none());
+        assert!(bezel_outer_clip_radii(500,0).is_none());
+        for (width,height) in [(500,1050),(540,1140),(720,1440),(1020,475),
+            (1920,900)] {
+            let (rx,ry) = bezel_outer_clip_radii(width,height).unwrap();
+            assert!(rx > 5 && ry > 5);
+            assert!(rx < width / 3 && ry < height / 3);
+            let (ax,ay)= if is_landscape(width,height) {
+                (LANDSCAPE_ARTBOARD_WIDTH,LANDSCAPE_ARTBOARD_HEIGHT)
+            } else { (ARTBOARD_WIDTH,ARTBOARD_HEIGHT) };
+            let expected_x = width as f64 * BEZEL_OUTER_RADIUS / ax;
+            let expected_y = height as f64 * BEZEL_OUTER_RADIUS / ay;
+            assert!((rx as f64) > expected_x);
+            assert!((ry as f64) > expected_y);
+        }
+        // The outer contour is applied both before and after fullscreen:
+        // restoring the previous W/H does NOT make the old WebView2 region
+        // trustworthy. Rectangular corner leakage must be detected again.
+        for _ in 0..8 {
+            assert!(bezel_outer_clip_radii(560,1180).is_some());
+            assert!(bezel_outer_clip_radii(1920,1080).is_some());
+            assert!(bezel_outer_clip_radii(560,1180).is_some());
         }
     }
 

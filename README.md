@@ -31,6 +31,13 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.0.14 · 双层圆角边界和 Android 主屏幕录制修复（Windows 预发布测试版）
+
+- **全屏退出仍见四角黑色方块**：v5.0.13 虽恢复了 SDL 窗口的原生 GDI 裁剪，用户 Windows 实机反馈仍有方角漏出。新方案同时裁剪底层 SDL 视频和上层透明 WebView2 手机外框。外框独立使用实体手机轮廓的原生 HWND 圆角，SDL 视频区域另与实体外框范围相交，避免黑色矩形越过机身。
+- **全屏恢复追踪**：全屏切换后的 3 秒内更高频检查裁剪区域及圆角弧线，其后低频健康检查，发现丢失时自动恢复，日志中标注 SDL 视频裁剪和外框裁剪两种修复来源。不中断 USB/Wi-Fi 投屏。
+- **只录 Android 手机主屏幕**：录屏明确启用 `--video-source=display --display-id=0 --record=...`，直接保存 Android 主显示器编码的视频流，不进行 Windows 桌面/窗口抓取。摄像头及虚拟显示器模式不可误启“录制手机屏幕”，切换模式会清除旧录制开关，设置页也显示录制源与排除内容。
+- **实机验收**：本版是修复候选测试包，**不能仅凭自动化测试证明**所有 Windows GPU/WebView2 环境不再出现黑方角。若 MKV 仍显示电脑桌面，请提供实际录制文件或截图以继续定位。原 v5.0.12 正式版和 v5.0.13 测试版均保留。
+
 ## ✨ v5.0.13 · 全屏圆角与录制体验修复（Windows 预发布测试版）
 
 - **问题**：在悬浮栏切换 scrcpy 全屏，再恢复普通手机窗口后，Windows 有时清除 SDL 的圆角剪裁，却没有改变原来的客户端宽高，导致四个角露出手机内容。
@@ -116,11 +123,11 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.0.13_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.0.13_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.0.13_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.14_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.14_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.14_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**测试版请到 [MirroLeap v5.0.13 Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.13) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍保留 v5.0.12 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**测试版请到 [MirroLeap v5.0.14 Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.14) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍保留 v5.0.12 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

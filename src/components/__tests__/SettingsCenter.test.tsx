@@ -41,12 +41,24 @@ describe('redesigned settings center keeps existing actions accessible', () => {
     expect(screen.getByText('Device & connection')).toBeInTheDocument();
     expect(screen.queryByText('Window & display')).not.toBeInTheDocument();
     expect(screen.getByText('Recording & saving')).toBeInTheDocument();
+    expect(screen.getByText(/Never captures the Windows desktop/)).toBeInTheDocument();
     const toggle = screen.getByRole('switch', {name:'Stay Awake'});
     expect(toggle).toHaveAttribute('aria-checked','false');
     fireEvent.keyDown(toggle, {key:'Enter'});
     expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({stayAwake:true}));
-    fireEvent.click(screen.getByRole('switch', {name:'Record Feed'}));
+    fireEvent.click(screen.getByRole('switch', {name:'Record Phone Screen'}));
     expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({record:true}));
+  });
+
+  it('prevents recording the virtual Android desktop or phone camera as the screen', () => {
+    const setConfig = vi.fn();
+    render(<SessionBehavior config={{device:'phone',sessionMode:'desktop',record:true}}
+        setConfig={setConfig}/>);
+    const record = screen.getByRole('switch',{name:'Record Phone Screen'});
+    expect(record).toHaveAttribute('aria-disabled','true');
+    fireEvent.click(record);
+    expect(setConfig).not.toHaveBeenCalled();
+    expect(screen.getByText(/Choose the Screen source/)).toBeInTheDocument();
   });
 
   it('offers an explicit restart for recording changes during a mirror and reports the saved file', async () => {

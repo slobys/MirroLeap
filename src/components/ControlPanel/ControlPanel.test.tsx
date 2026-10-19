@@ -65,6 +65,22 @@ describe('simplified HID settings', () => {
     });
 });
 
+describe('Android phone screen recording mode boundaries', () => {
+    it('clears device screen recording when switching to camera or virtual desktop', async () => {
+        const user = userEvent.setup();
+        const setConfig = vi.fn();
+        renderControlPanel(createConfig({record:true}), supportedRenderers, setConfig);
+        await user.click(screen.getByText('Camera'));
+        expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({
+            sessionMode:'camera',record:false
+        }));
+        await user.click(screen.getByText('Desktop'));
+        expect(setConfig).toHaveBeenLastCalledWith(expect.objectContaining({
+            sessionMode:'desktop',record:false
+        }));
+    });
+});
+
 describe('one-click mirror resolution selector', () => {
     it('requests automatic stream restart when choosing a new size while mirroring', async () => {
         const user = userEvent.setup();

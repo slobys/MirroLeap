@@ -117,20 +117,22 @@ export default function SessionBehavior({
         );
     };
 
-    const Toggle = ({ checked, onChange, icon: Icon, label, tooltip, danger = false }: { checked: boolean, onChange: (v: boolean) => void, icon: any, label: string, tooltip: string, danger?: boolean }) => (
+    const Toggle = ({ checked, onChange, icon: Icon, label, tooltip, danger = false, disabled = false }: { checked: boolean, onChange: (v: boolean) => void, icon: any, label: string, tooltip: string, danger?: boolean, disabled?: boolean }) => (
         <div
             role="switch"
             aria-label={label}
             aria-checked={checked}
-            tabIndex={0}
-            onClick={() => onChange(!checked)}
+            aria-disabled={disabled}
+            tabIndex={disabled ? -1 : 0}
+            onClick={() => { if (!disabled) onChange(!checked); }}
             onKeyDown={(event) => {
-                if (event.key === ' ' || event.key === 'Enter') {
+                if (!disabled && (event.key === ' ' || event.key === 'Enter')) {
                     event.preventDefault();
                     onChange(!checked);
                 }
             }}
-            className="ml-settings-switch flex items-center justify-between gap-3 group cursor-pointer rounded-xl px-3 border border-transparent hover:border-zinc-800 transition-all"
+            className={"ml-settings-switch flex items-center justify-between gap-3 group rounded-xl px-3 border border-transparent " +
+                (disabled ? "opacity-45 cursor-not-allowed" : "cursor-pointer hover:border-zinc-800")}
         >
             <div className="flex items-center gap-2 min-w-0">
                 <div className={`p-2 rounded-lg shrink-0 transition-colors ${checked ? (danger ? 'bg-red-500/10 text-red-500' : 'bg-primary/10 text-primary') : 'bg-zinc-800/50 text-zinc-500 group-hover:text-zinc-300'}`}>
@@ -201,13 +203,26 @@ export default function SessionBehavior({
                 </div>
                 <div className="flex flex-col gap-1">
                     <Toggle
-                        checked={config.record || false}
+                        checked={config.sessionMode === 'mirror' && Boolean(config.record)}
+                        disabled={config.sessionMode !== 'mirror'}
                         onChange={(v) => handleChange('record', v)}
                         icon={Circle}
                         label={t('sessionBehavior.recordFeed')}
                         tooltip={t('sessionBehavior.recordFeedTooltip')}
                         danger={true}
                     />
+                    <p className="text-xs text-zinc-500 leading-5" role="note">
+                        {locale.startsWith('zh')
+                            ? '录制来源：Android 手机主屏幕（显示器 0）。不采集 Windows 桌面、手机外框或悬浮工具栏。'
+                            : 'Source: Android phone primary screen (display 0). Never captures the Windows desktop, phone bezel or floating toolbar.'}
+                    </p>
+                    {config.sessionMode !== 'mirror' && (
+                        <p className="text-xs text-amber-500" role="status">
+                            {locale.startsWith('zh')
+                                ? '请先在“投屏参数”切换到“屏幕”模式，才能录制手机自身的屏幕。'
+                                : 'Choose the Screen source under Capture before recording the physical phone display.'}
+                        </p>
+                    )}
                 </div>
 
                 <div className="pt-3 border-t border-zinc-800/50 space-y-2">

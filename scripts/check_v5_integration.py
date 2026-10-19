@@ -89,6 +89,14 @@ assert "timeout(Duration::from_secs(close_timeout), c.wait())" in commands
 assert "if recording.is_some() { 6 } else { 2 }" in commands
 assert "emit_recording_file_result" in commands
 assert "recording_paths" in native
+assert 'config.session_mode != "mirror"' in commands
+assert '"--video-source=display"' in commands
+assert '"--display-id=0"' in commands
+assert '"--new-display"' in commands, "Virtual display mode must stay distinguishable"
+assert 'recordFeed: \'录制手机屏幕\'' in read("src/i18n/locales/zh-CN.ts")
+assert "Android 手机主屏幕" in behavior, "Show clear Android-only recording source"
+assert "config.sessionMode !== 'mirror'" in behavior, "Disable record switch in camera/desktop"
+
 
 for expected in (
     f"MirroLeap_{version}_x64_Portable.zip",

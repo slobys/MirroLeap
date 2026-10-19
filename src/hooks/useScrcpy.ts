@@ -253,6 +253,9 @@ export function useScrcpy() {
                     // Removed from the UI: old persisted HID mouse / no-video
                     // modes must not silently disable the live phone stream.
                     hidMouse: false, otgPure: false,
+                    // The v5.0.14 "record phone screen" source must never
+                    // inherit a legacy camera/virtual-desktop record flag.
+                    record: (parsed.sessionMode ?? prev.sessionMode) === 'mirror' && parsed.record === true,
                 }));
                 // Initial check with saved path if it exists
                 if (parsed.scrcpyPath) {

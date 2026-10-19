@@ -84,7 +84,12 @@ export default function ControlPanel({
     const { t, locale } = useI18n();
 
     const handleChange = (field: keyof ScrcpyConfig, value: any) => {
-        setConfig({ ...config, [field]: value });
+        // "Record phone screen" is strictly tied to Android's physical
+        // screen-mirroring mode, not the camera or a newly created virtual
+        // Android desktop. Do not preserve a stale recording flag across modes.
+        setConfig(field === 'sessionMode' && value !== 'mirror'
+            ? {...config, sessionMode: value, record: false}
+            : { ...config, [field]: value });
     };
 
     const rendererOptions = buildRendererOptions(renderDriverSupport, t('controlPanel.rendererAuto'));

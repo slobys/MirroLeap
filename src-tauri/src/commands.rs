@@ -2054,6 +2054,12 @@ fn prepare_recording_directory(
     video_dir_fallback: Option<&str>,
 ) -> Result<Option<String>, String> {
     if !config.record.unwrap_or(false) { return Ok(None); }
+    // The user-facing "Record phone screen" option must never record a
+    // virtual Android desktop, Android camera or the Windows host. Fail
+    // visibly rather than silently record a different video source.
+    if config.session_mode != "mirror" {
+        return Err("录制手机屏幕只支持「屏幕投屏」模式；摄像头或虚拟显示器不是手机主屏幕。请切换模式后重试。".into());
+    }
     if config.otg_pure.unwrap_or(false) && (config.hid_keyboard.unwrap_or(false) || config.hid_mouse.unwrap_or(false)) {
         return Err("纯 HID 模式没有视频流，无法录制。请关闭纯 HID 后重试。".into());
     }
@@ -2269,7 +2275,13 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
         }
         
         if let Some(rec) = config.record {
-             if rec {
+             if rec && config.session_mode == "mirror" {
+                 // Explicitly capture Android's own PRIMARY display, not the
+                 // host desktop, a camera feed, a new virtual Android display,
+                 // or any phone-shaped Windows overlay. --record muxes the
+                 // device's encoded stream directly (no screen-grab).
+                 args.push("--video-source=display".to_string());
+                 args.push("--display-id=0".to_string());
                  let mut path = config.record_path.clone().unwrap_or_default();
                  
                  // If path is empty, try to get Video dir fallback
@@ -2918,6 +2930,11 @@ mod tests {
             .starts_with("MirroLeap_192_168_1_20_5555_"));
         assert_eq!(output.extension().unwrap(), "mkv");
         assert_eq!(args.iter().filter(|a| a.starts_with("--record=")).count(), 1);
+        assert!(args.contains(&"--video-source=display".to_string()));
+        assert!(args.contains(&"--display-id=0".to_string()));
+        assert!(!args.iter().any(|arg| arg.starts_with("--new-display")));
+        assert!(!args.contains(&"--video-source=camera".to_string()));
+        assert!(!args.contains(&"--no-window".to_string()));
         assert_eq!(prepare_recording_directory(&config, Some(&videos_name)).unwrap(),
             Some(videos_name.clone()));
 
@@ -2927,6 +2944,14 @@ mod tests {
         assert!(prepare_recording_directory(&config, Some(&videos_name)).is_err());
         config.record_path = None;
         assert!(prepare_recording_directory(&config, None).is_err());
+        config.record_path = Some(videos_name.clone());
+        for bad_mode in ["camera","desktop"] {
+            config.session_mode = bad_mode.to_string();
+            assert!(prepare_recording_directory(&config, Some(&videos_name)).is_err());
+            let bad_args = build_scrcpy_args(&config, Some(videos_name.clone()), None);
+            assert!(!bad_args.iter().any(|arg| arg.starts_with("--record=")));
+        }
+        config.session_mode = "mirror".to_string();
         config.record = Some(false);
         assert!(prepare_recording_directory(&config, None).unwrap().is_none());
         config.record = Some(true);
