@@ -207,11 +207,10 @@ export default function ControlPanel({
                 <div className="space-y-2">
                 <CustomSelect
                     label={t('controlPanel.resolution')}
-                    value={config.res || "0"}
+                    value={!config.res || config.res === '0' ? '2560' : config.res}
                     onChange={(val) => onResolutionChange ? onResolutionChange(val) : handleChange('res', val)}
                     disabled={isSwitchingResolution}
                     options={[
-                        { value: "0", label: t('controlPanel.resolutionOriginal') },
                         { value: "3840", label: "4K" },
                         { value: "2560", label: "2K" },
                         { value: "1920", label: "1080p" },

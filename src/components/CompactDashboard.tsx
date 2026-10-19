@@ -37,7 +37,6 @@ type Props = {
 };
 
 const resolutions = [
-    { value: '0', zh: '原始分辨率 · 可能延迟', en: 'Native size · Higher latency risk' },
     { value: '800', zh: '480p · 省流量', en: '480p · Low bandwidth' },
     { value: '1280', zh: '720p · 流畅', en: '720p · Smooth' },
     { value: '1920', zh: '1080P · 流畅推荐', en: '1080p · Recommended' },
@@ -218,7 +217,7 @@ export default function CompactDashboard({
 
                         <div className="ml-field mt-3">
                             <label htmlFor="ml-resolution" className="ml-field-title">{copy('分辨率', 'Resolution')}</label>
-                            <select id="ml-resolution" value={config.res || '0'}
+                            <select id="ml-resolution" value={!config.res || config.res === '0' ? '2560' : config.res}
                                 disabled={isSwitchingResolution}
                                 onChange={(event) => onResolutionChange(event.target.value)}
                                 className="ml-select">

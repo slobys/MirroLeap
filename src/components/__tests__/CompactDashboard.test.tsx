@@ -116,6 +116,7 @@ describe('MirroLeap daily workspace', () => {
         expect(screen.getAllByRole('combobox')).toHaveLength(1);
         const selector = screen.getByRole('combobox',{name:'分辨率'});
         expect(selector).toHaveValue('800');
+        expect(screen.queryByRole('option',{name:/原始分辨率/})).not.toBeInTheDocument();
         expect(screen.getByTestId('home-video-summary')).toHaveTextContent(
             '当前参数：480p · 3Mbps · 最高 60 帧 · H264'
         );

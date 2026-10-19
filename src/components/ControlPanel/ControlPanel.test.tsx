@@ -92,6 +92,7 @@ describe('single resolution control with dynamic video parameter summary', () =>
         expect(screen.queryByRole('combobox',{name:/Profiles|Scenario profile/})).not.toBeInTheDocument();
         expect(screen.queryByText(/场景预设/)).not.toBeInTheDocument();
         expect(screen.getAllByText('Resolution')).toHaveLength(1);
+        expect(screen.queryByText('Original')).not.toBeInTheDocument();
         expect(screen.getByTestId('settings-video-summary')).toHaveTextContent(
             'Current settings: 2K · 16Mbps · up to 30 fps · H265'
         );

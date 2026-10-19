@@ -253,6 +253,9 @@ export function useScrcpy() {
                 // after their settings switches have been removed.
                 setConfig(prev => ({
                     ...prev, ...parsed, fullscreen: false, turnOff: false, borderless: false,
+                    // The removed native-size option maps to 2K on upgrade;
+                    // preserve any manually tuned bitrate, FPS and codec.
+                    res: !parsed.res || parsed.res === '0' ? '2560' : parsed.res,
                     // Removed from the UI: old persisted HID mouse / no-video
                     // modes must not silently disable the live phone stream.
                     hidMouse: false, otgPure: false,
