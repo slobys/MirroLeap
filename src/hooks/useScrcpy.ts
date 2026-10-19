@@ -1322,10 +1322,12 @@ export function useScrcpy() {
         }
     };
 
-    const pushFile = async (device: string, filePath: string, customPath?: string) => {
+    const pushFile = async (device: string, filePath: string, customPath?: string, transferId?: string) => {
         try {
             setLogs(prev => [...prev.slice(-100), t('logs.pushingFile', { device, filePath })]);
-            const res: any = await invoke('push_file', { device, filePath, customPath: customPath || config.scrcpyPath });
+            const res: any = await invoke('push_file', {
+                device, filePath, customPath: customPath || config.scrcpyPath, transferId,
+            });
             setLogs(prev => [...prev.slice(-100), t('logs.adbPrefix', { message: String(res.message) })]);
             return res;
         } catch (e: any) {

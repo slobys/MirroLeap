@@ -1373,33 +1373,59 @@ mod transfer_source_tests {
 }
 
 #[tauri::command]
-pub async fn push_file(window: Window, device: String, file_path: String, custom_path: Option<String>) -> serde_json::Value {
+pub async fn push_file(
+    window: Window, device: String, file_path: String,
+    custom_path: Option<String>, transfer_id: Option<String>,
+) -> serde_json::Value {
     if let Err(message) = require_main_window(&window) {
         return json!({ "success": false, "message": message });
     }
     if let Err(message) = validate_capture_device(&device).and_then(|_| checked_transfer_source(&file_path)) {
         return json!({ "success": false, "message": message });
     }
+    // Transfer IDs are ephemeral correlation tokens, not filenames or paths.
+    // Legacy callers without an ID remain supported and receive no events.
+    if transfer_id.as_deref().is_some_and(|id| id.is_empty() || id.len() > 80 ||
+        !id.bytes().all(|ch| ch.is_ascii_alphanumeric() || ch == b'-' || ch == b'_')) {
+        return json!({ "success": false, "message": "Invalid transfer identifier" });
+    }
     let adb_path = get_binary_path("adb", custom_path);
-    
-    let output = create_command(&adb_path)
-        .arg("-s")
-        .arg(&device)
-        .arg("push")
-        .arg(&file_path)
-        .arg("/sdcard/Download/")
-        .output()
-        .await;
+    let mut child = match create_command(&adb_path)
+        .arg("-s").arg(&device).arg("push").arg("-p")
+        .arg(&file_path).arg("/sdcard/Download/")
+        .stdout(Stdio::piped()).stderr(Stdio::piped())
+        .kill_on_drop(true).spawn() {
+            Ok(child) => child,
+            Err(error) => return json!({ "success": false, "message": error.to_string() }),
+        };
 
-    match output {
-         Ok(o) => {
-             if o.status.success() {
-                 json!({ "success": true, "message": "File pushed to Downloads" })
-             } else {
-                 json!({ "success": false, "message": "Transfer failed" })
-             }
-         },
-         Err(e) => json!({ "success": false, "message": e.to_string() })
+    // Read both pipes concurrently: adb implementations differ in which one
+    // carries carriage-return progress. Never treat an estimated byte count as
+    // actual progress. The frontend ignores events from other transfer IDs.
+    let stdout_task = child.stdout.take().map(|pipe| tokio::spawn(
+        crate::transfer_progress::watch_adb_push_output(
+            pipe, window.clone(), device.clone(), transfer_id.clone())));
+    let stderr_task = child.stderr.take().map(|pipe| tokio::spawn(
+        crate::transfer_progress::watch_adb_push_output(
+            pipe, window.clone(), device.clone(), transfer_id.clone())));
+    let result = match timeout(Duration::from_secs(600), child.wait()).await {
+        Ok(Ok(status)) if status.success() => Ok(()),
+        Ok(Ok(_)) => Err("ADB transfer failed; check connection and phone storage.".to_string()),
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(_) => {
+            let _ = child.start_kill();
+            let _ = timeout(Duration::from_secs(3), child.wait()).await;
+            Err("ADB transfer timed out after 10 minutes.".into())
+        },
+    };
+    for mut task in [stdout_task, stderr_task].into_iter().flatten() {
+        if timeout(Duration::from_secs(2), &mut task).await.is_err() {
+            task.abort();
+        }
+    }
+    match result {
+        Ok(()) => json!({ "success": true, "message": "File pushed to Downloads" }),
+        Err(message) => json!({ "success": false, "message": message }),
     }
 }
 

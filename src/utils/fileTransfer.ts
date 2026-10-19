@@ -19,3 +19,18 @@ export function transferDisplayName(path: string): string {
     const value=path.replace(/\\/g,'/').split('/').pop() || 'file';
     return value.length > 60 ? value.slice(0,57) + '…' : value;
 }
+
+/** Accept only ADB-reported progress for this exact active device/file.
+ * Unknown/unsupported ADB versions simply leave percentage unavailable.
+ */
+export function acceptedTransferProgress(
+    payload: unknown, transferId: string, device: string, previous?: number,
+): number | null {
+    if (!payload || typeof payload !== 'object' || !transferId || !device) return null;
+    const event = payload as Record<string, unknown>;
+    if (event.transferId !== transferId || event.device !== device ||
+        typeof event.percent !== 'number' || !Number.isInteger(event.percent) ||
+        event.percent < 0 || event.percent > 100 ||
+        (previous !== undefined && event.percent <= previous)) return null;
+    return event.percent;
+}

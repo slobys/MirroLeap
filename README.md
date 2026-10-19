@@ -31,6 +31,13 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.1.1 · 真实文件传输进度与安全恢复（Windows 预发布测试版）
+
+- **传输进度不再猜测**：ADB 支持 `push -p` 时，逐文件展示 ADB 实际返回的百分比；不支持时保持文件级进度，不伪造百分比或传输速度。
+- **跨设备与异步安全**：每次发送分配临时 ID，只有对应手机及对应文件的原生事件才能更新当前提示；切换设备或任务结束后不再读取旧进度。
+- **异常防护**：单文件错误继续处理剩余队列，单文件传输设置超时，避免 ADB 异常使界面永久显示“发送中”。
+- **保持正式版稳定**：v5.0.20 正式版不覆盖；仅在 Windows CI、Rust 测试、WebView2 启动与更新签名全部通过后发布安装包。
+
 ## 🧪 v5.1.0 · 五项体验优化（Windows 预发布测试版）
 
 本版基于 v5.0.20 正式稳定版开发，**不覆盖 GitHub Latest 正式版**。建议先用 Portable ZIP 与旧版对比，Windows/Android 实机验证后再决定升级。
@@ -198,11 +205,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.1.0_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.1.0_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.1.0_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.1.1_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.1.1_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.1.1_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.1.0 测试版请到 [GitHub Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.1.0) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 保持 v5.0.20 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**v5.1.1 测试版请到 [GitHub Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.1.1) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 保持 v5.0.20 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

@@ -1,4 +1,5 @@
 mod commands;
+mod transfer_progress;
 mod app_update;
 mod android_rotation;
 mod capture_compositor;

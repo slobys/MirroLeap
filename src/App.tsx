@@ -10,7 +10,7 @@ import StartupUpdateNotice from "./components/StartupUpdateNotice";
 import VersionUpdateBadge from "./components/VersionUpdateBadge";
 import DecoderPerformance from "./components/DecoderPerformance";
 import LivePerformance from "./components/LivePerformance";
-import {prepareTransferPaths,transferDisplayName} from "./utils/fileTransfer";
+import {prepareTransferPaths,transferDisplayName,acceptedTransferProgress} from "./utils/fileTransfer";
 import Header from "./components/Header";
 import SessionBehavior from "./components/SessionBehavior";
 import Footer from "./components/Footer";
@@ -90,9 +90,11 @@ function App() {
   const [dragHover, setDragHover] = useState(false);
   const [transferStatus, setTransferStatus] = useState<{
     phase:'idle'|'sending'|'completed'|'failed';completed:number;total:number;
-    label:string;device?:string;
+    label:string;device?:string;percent?:number;
   }>({phase:'idle',completed:0,total:0,label:''});
   const transferBusyRef = useRef(false);
+  const activeTransferIdRef = useRef('');
+  const transferSequenceRef = useRef(0);
   const selectedDeviceLiveRef = useRef(activeDevice);
   const transferHandlerRef = useRef<(paths: unknown) => Promise<void>>(async () => {});
 
@@ -244,6 +246,25 @@ function App() {
   }, []);
 
   useEffect(() => {
+    // Accept progress only for the current ADB push. Events emitted after a
+    // phone switch or a finished transfer cannot update the visible queue.
+    let mounted = true;
+    const unlisten = getCurrentWindow().listen<unknown>('mirroleap-transfer-progress', event => {
+      if (!mounted) return;
+      setTransferStatus(previous => {
+        if (previous.phase !== 'sending') return previous;
+        const percent = acceptedTransferProgress(
+          event.payload, activeTransferIdRef.current, previous.device || '', previous.percent);
+        return percent === null ? previous : {...previous, percent};
+      });
+    });
+    return () => {
+      mounted = false;
+      void unlisten.then(dispose => dispose());
+    };
+  }, []);
+
+  useEffect(() => {
     // Keep the Rust side's notion of "the selected device" in sync, so the
     // Ctrl+Alt+Shift+C global shortcut (a real OS-level hotkey registered in
     // shortcuts.rs, not a webview keydown listener) knows which mirror window
@@ -340,11 +361,13 @@ function App() {
           return;
         }
         const name = transferDisplayName(files[i]);
+        const transferId = `${Date.now().toString(36)}_${++transferSequenceRef.current}`;
+        activeTransferIdRef.current = transferId;
         setTransferStatus({phase:'sending',completed,total:files.length,label:name,device});
         // A single rejected transfer must not strand the progress overlay
         // in its sending state or prevent remaining files from being tried.
         try {
-          const result = await pushFile(device, files[i]);
+          const result = await pushFile(device, files[i], undefined, transferId);
           if (result?.success) completed++;
           else failed++;
         } catch (error) {
@@ -362,6 +385,7 @@ function App() {
       setTransferStatus({phase:'failed',completed,total:files.length,device,
         label:locale.startsWith('zh') ? '传输队列发生错误，请查看日志' : 'Transfer queue failed; check logs'});
     } finally {
+      activeTransferIdRef.current = '';
       transferBusyRef.current = false;
     }
   };
@@ -468,6 +492,12 @@ function App() {
             {transferStatus.total > 0 && <p className="text-xs mt-1 tabular-nums">
               {transferStatus.completed} / {transferStatus.total} {locale.startsWith('zh') ? '个文件已发送' : 'files sent'}
             </p>}
+            {transferStatus.phase === 'sending' && typeof transferStatus.percent === 'number' &&
+              <div className="mt-2 flex items-center gap-2">
+                <progress max={100} value={transferStatus.percent} className="w-full h-2 accent-primary"
+                  aria-label={locale.startsWith('zh') ? '当前文件的真实传输进度' : 'ADB-reported file transfer progress'}/>
+                <span className="text-xs tabular-nums">{transferStatus.percent}%</span>
+              </div>}
           </div>}
 
           {view === 'home' ? (
