@@ -117,12 +117,21 @@ async function verify(page, viewport, scale) {
   });
   assert(hitBottom, desc + ': last control is obscured');
 
+  // Mirror settings now have two distinct collapsible expert sections:
+  // encoder/renderer/orientation and compatibility/sync. Both must be
+  // independently reachable at narrow widths and every DPI scale.
   const details = page.locator('.ml-settings-details');
-  const summary = details.locator('summary');
-  await summary.click({timeout:5000});
-  assert(await details.evaluate(el => el.open), desc + ': advanced section cannot expand');
-  await summary.click();
-  assert(!(await details.evaluate(el => el.open)), desc + ': advanced section cannot collapse');
+  assert.equal(await details.count(),2,desc+': missing one of two expert sections');
+  for (let i=0;i<2;i++) {
+    const entry=details.nth(i);
+    const summary=entry.locator('summary');
+    await summary.click({timeout:5000});
+    assert(await entry.evaluate(el => el.open),
+      desc+`: expert section ${i} cannot expand`);
+    await summary.click();
+    assert(!(await entry.evaluate(el => el.open)),
+      desc+`: expert section ${i} cannot collapse`);
+  }
 
   // The sticky page-level navigation is horizontally scrollable; every
   // category remains reachable in a 740px window without shrinking text.
