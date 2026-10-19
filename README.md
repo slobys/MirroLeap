@@ -31,7 +31,7 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
-## 🧪 v5.0.19 · 一个分辨率选择、一行真实画质参数（Windows 预发布测试版）
+## 🧪 v5.0.20 · 一个分辨率选择、一行真实画质参数（Windows 预发布测试版）
 
 用户在 v5.0.18 测试中反馈：「场景预设」与下方「分辨率」功能重复，两处都能设定 720P／1080P／2K／4K。为提高操作便利性，v5.0.19 **从首页和“设置 → 投屏参数”中移除场景预设下拉框**，只保留唯一的「分辨率」入口。
 
@@ -184,11 +184,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.0.19_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.0.19_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.0.19_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.20_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.20_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.20_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**测试版请到 [MirroLeap v5.0.19 Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.19) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍保留 v5.0.12 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**测试版请到 [MirroLeap v5.0.20 Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.20) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍保留 v5.0.12 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 
