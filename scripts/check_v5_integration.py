@@ -98,21 +98,21 @@ assert "Android 手机主屏幕" in behavior, "Show clear Android-only recording
 assert "config.sessionMode !== 'mirror'" in behavior, "Disable record switch in camera/desktop"
 
 
-# Mirroring scene profiles must favor the user's measured smoother 1080p
-# Wi-Fi path, never silently reapply uncapped 2K/4K on new installations.
-# They map to real scrcpy launch flags; the native Rust tests validate argv.
+# All four video resolutions must have distinct, real scrcpy launch flags;
+# existing preferences survive upgrades and selection auto-applies via the
+# guarded stream-restart transaction without manually stopping Wi-Fi ADB.
 presets = read("src/utils/mirrorPresets.ts")
 panel = read("src/components/ControlPanel/ControlPanel.tsx")
 home = read("src/components/CompactDashboard.tsx")
 preset_table = presets.split("export const MIRROR_PRESETS:",1)[1].split("};",1)[0]
 for profile, size, bitrate, fps in [
-    ("balanced","1920",8,60),
-    ("presentation","1920",6,30),
     ("'low-latency'","1280",4,60),
-    ("quality","1920",12,60),
+    ("balanced","1920",8,60),
+    ("quality","2560",16,60),
+    ("ultra","3840",20,30),
 ]:
     assert re.search(rf"{re.escape(profile)}\s*:\s*\{{\s*res:\s*'{size}',\s*bitrate:\s*{bitrate},\s*fps:\s*{fps},\s*codec:\s*'h264'", preset_table)
-assert "2560" not in preset_table and "3840" not in preset_table
+assert all(size in preset_table for size in ("1280","1920","2560","3840"))
 assert "...MIRROR_PRESETS.balanced" in hooks, "New install defaults must use canonical profile"
 assert "balanced" in preset_table, "Canonical default must be defined"
 assert "...prev, ...parsed" in hooks, "Do not erase old manual configuration"
@@ -120,8 +120,21 @@ assert "MIRROR_PRESET_ORDER.map" in home and "MIRROR_PRESET_ORDER.map" in panel
 assert "activeMirrorPreset(config)" in home and "activeMirrorPreset(config)" in panel
 assert "Advanced encoding & display" in panel
 assert "videoLoadWarning(config, locale)" in panel and "videoLoadWarning(config, locale)" in home
-assert "only an explicit user action" in presets.lower() or "Only an explicit user action" in presets
+assert "applyMirrorPreset(config:" in presets and "applyMirrorResolution(config:" in presets
+assert "onPresetChange(event.target.value as MirrorPreset)" in home
 assert "mirror_scene_profile_settings_generate_expected_scrcpy_video_flags" in commands
+assert "restartMirrorVideoStream" in hooks
+assert "applyMirrorVideoConfig" in hooks
+assert "onPresetChange={handlePresetChange}" in app
+assert "onResolutionChange={handleResolutionChange}" in app
+assert "onPresetChange" in home and "onPresetChange" in panel
+assert "canApplyMirrorVideo" in hooks
+assert "applyMirrorResolution" in hooks
+assert "restartMirrorVideoStream(previous, launch" in hooks
+assert "stop_scrcpy" in hooks and "run_scrcpy" in hooks
+assert "src/utils/streamRestart.test.ts" in [str(p.relative_to(root)) for p in (root / "src/utils").glob("*.test.ts")]
+assert "recording in progress" in read("src/utils/resolutionSwitch.ts").lower()
+assert "isSwitchingResolution" in home and "isSwitchingResolution" in panel
 
 for expected in (
     f"MirroLeap_{version}_x64_Portable.zip",

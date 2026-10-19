@@ -79,20 +79,19 @@ assert all(command in native for command in (
     "ink_size_3", "ink_size_5", "ink_size_9", "ink_clear", "ink_undo"
 ))
 
-assert "changeMirrorResolution" in hook
-assert "canQuickSwitchResolution" in hook
-assert "listen<{ device: string; running: boolean }>" in hook
-quick_restart = hook.split("const changeMirrorResolution =", 1)[1].split(
-    "const stopScrcpy =", 1
-)[0]
-assert quick_restart.index("detach = await listen<") < quick_restart.index(
-    "await invoke('stop_scrcpy', { device });"
-)
-assert quick_restart.index("await stopped;") < quick_restart.index(
-    "await invoke('run_scrcpy', {"
-)
-assert "new Error(" in hook and "within 8 seconds" in hook
-assert "config: {" in hook
+# v5.0.18 shares the same guarded automatic restart for scene preset
+# and manual resolution selection; never launch a new scrcpy process before
+# the old process monitor confirms its stopped status.
+handoff = (root / "src/utils/streamRestart.ts").read_text(encoding="utf-8")
+assert "changeMirrorResolution" in hook and "applyMirrorVideoConfig" in hook
+assert "canApplyMirrorVideo" in hook and "restartMirrorVideoStream" in hook
+assert "resolutionSwitchLock.current = true" in hook
+assert "unsubscribe = await actions.listenForStop" in handoff
+assert handoff.index("unsubscribe = await actions.listenForStop") < handoff.index("await actions.stop();")
+assert handoff.index("await stopped;") < handoff.index("await actions.start(activeConfig);")
+assert "getWindowPosition" in handoff and "recording" in hook.lower()
+assert "timeoutMs: 10000" in hook and "error" in handoff
+assert "launch" in hook and "config" in handoff
 assert "adb shell wm size" not in control, "Do not change Android's global system resolution"
 assert "onResolutionChange" in control and "isSwitchingResolution" in control
 

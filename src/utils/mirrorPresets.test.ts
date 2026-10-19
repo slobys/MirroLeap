@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyMirrorPreset, activeMirrorPreset, MIRROR_PRESETS,
-    mirrorVideoSummary, videoLoadWarning } from './mirrorPresets';
+import { applyMirrorPreset, applyMirrorResolution, activeMirrorPreset, MIRROR_PRESETS,
+    MIRROR_PRESET_ORDER, mirrorVideoSummary, videoLoadWarning } from './mirrorPresets';
 import type { ScrcpyConfig } from '../hooks/useScrcpy';
 
 const base: ScrcpyConfig = {
@@ -35,36 +35,44 @@ describe('MirroLeap scenario profiles', () => {
         expect(changed.fps).toBe(60);
         expect(activeMirrorPreset({...changed, bitrate: 5})).toBe('custom');
     });
-    it('uses 1080p-first performance profiles with distinct bandwidth and FPS tradeoffs', () => {
+    it('has four unique 720p/1080p/2K/4K video presets with safe load-aware caps', () => {
         expect(MIRROR_PRESETS).toEqual({
-            balanced:{res:'1920',bitrate:8,fps:60,codec:'h264'},
-            presentation:{res:'1920',bitrate:6,fps:30,codec:'h264'},
             'low-latency':{res:'1280',bitrate:4,fps:60,codec:'h264'},
-            quality:{res:'1920',bitrate:12,fps:60,codec:'h264'},
+            balanced:{res:'1920',bitrate:8,fps:60,codec:'h264'},
+            quality:{res:'2560',bitrate:16,fps:60,codec:'h264'},
+            ultra:{res:'3840',bitrate:20,fps:30,codec:'h264'},
         });
-        const unique = new Set(Object.values(MIRROR_PRESETS).map(s => `${s.res}/${s.bitrate}/${s.fps}/${s.codec}`));
-        expect(unique.size).toBe(4);
+        expect(MIRROR_PRESET_ORDER.map(x=>MIRROR_PRESETS[x].res))
+            .toEqual(['1280','1920','2560','3840']);
+        for(const name of MIRROR_PRESET_ORDER){
+            const setting = applyMirrorPreset(base,name);
+            expect(activeMirrorPreset(setting)).toBe(name);
+            expect(applyMirrorResolution(base,MIRROR_PRESETS[name].res))
+                .toEqual(setting);
+        }
         expect(mirrorVideoSummary(applyMirrorPreset(base,'balanced'),'zh-CN'))
             .toContain('1080p · 8Mbps · 最高 60 帧 · H264');
-        expect(videoLoadWarning(applyMirrorPreset(base,'balanced'),'zh-CN')).toBeNull();
     });
 
-    it('never silently upgrades a custom or saved 2K/4K profile, and clearly warns about load', () => {
+    it('preserves custom saved choices and offers 2K without wrongly calling it laggy', () => {
         expect(activeMirrorPreset(base)).toBe('custom');
-        const old2K = {...base, res:'2560',bitrate:16,fps:60};
-        const old4K = {...base, res:'3840'};
+        const old2K = {...base, res:'2560',bitrate:12,fps:60};
         expect(activeMirrorPreset(old2K)).toBe('custom');
-        expect(videoLoadWarning(old2K,'zh-CN')).toMatch(/延迟/);
-        expect(videoLoadWarning(old4K,'en')).toContain('latency');
-        expect(videoLoadWarning({...base, res:'0'},'zh-CN')).toMatch(/原始分辨率/);
-        expect(videoLoadWarning({...base, res:undefined},'zh-CN')).toMatch(/原始分辨率/);
-        const manualCodec = {...MIRROR_PRESETS.balanced, sessionMode:'mirror', codec:'h265'};
+        expect(videoLoadWarning(old2K,'zh-CN')).toContain('2K 已可流畅');
+        expect(videoLoadWarning({...base, res:'3840'},'en')).toContain('latency');
+        expect(videoLoadWarning({...base, res:'0'},'zh-CN')).toContain('原始分辨率');
+        const manualCodec = {...MIRROR_PRESETS.balanced, sessionMode:'mirror',codec:'h265'};
         expect(activeMirrorPreset({...base,...manualCodec})).toBe('custom');
     });
 
-    it('presets return mirror mode even after camera advanced-mode selection', () => {
-        const result = applyMirrorPreset({...base, sessionMode:'camera'}, 'presentation');
-        expect(result.sessionMode).toBe('mirror');
-        expect(result.fps).toBe(30);
+    it('pairs uncommon manual sizes with useful video parameters without upscaling Android', () => {
+        expect(applyMirrorResolution(base,'1600')).toMatchObject(
+            {res:'1600',bitrate:6,fps:60,codec:'h264'});
+        expect(applyMirrorResolution(base,'800')).toMatchObject(
+            {res:'800',bitrate:3,fps:60});
+        expect(applyMirrorResolution(base,'0')).toMatchObject(
+            {res:'0',bitrate:8,codec:'h265'});
+        expect(applyMirrorPreset({...base,sessionMode:'camera'},'ultra')).toMatchObject(
+            {sessionMode:'mirror',res:'3840',bitrate:20,fps:30});
     });
 });

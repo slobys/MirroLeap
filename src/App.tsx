@@ -17,6 +17,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import OnboardingModal from "./components/OnboardingModal";
 import ThemedModal from "./components/ThemedModal";
 import { useScrcpy } from "./hooks/useScrcpy";
+import { applyMirrorPreset, type MirrorPreset } from './utils/mirrorPresets';
 import { getVersion } from '@tauri-apps/api/app';
 import { useI18n } from "./i18n";
 import {useStartupUpdateCheck} from "./hooks/useStartupUpdateCheck";
@@ -44,6 +45,7 @@ function App() {
     runScrcpy,
     stopScrcpy,
     changeMirrorResolution,
+    applyMirrorVideoConfig,
     applyRecordingNow,
     isApplyingRecording,
     recordingStatuses,
@@ -102,7 +104,7 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("5.0.17");
+  const [appVersion, setAppVersion] = useState("5.0.18");
   const [appVersionReady,setAppVersionReady] = useState(false);
   const {startupRelease, startupInstallKind, showStartupPrompt,
     checking: checkingUpdate, rememberUpdate, dismissStartupPrompt} =
@@ -247,6 +249,29 @@ function App() {
     }
   }, [activeDevice]);
 
+  const notifySwitchFailure = () => {
+    showAlert(
+      locale.startsWith('zh') ? '画质切换未完成' : 'Could not apply video quality',
+      locale.startsWith('zh')
+        ? '请检查“工具与日志”中的 [VIDEO] 提示。录制进行中会保护视频文件，不自动断开录制；请先结束录制后再试。'
+        : 'Check the [VIDEO] entry under Tools & logs. Active recordings are protected from unexpected interruption.',
+      'warning',
+    );
+  };
+  const handlePresetChange = (preset: MirrorPreset) => {
+    const requested = applyMirrorPreset(config, preset);
+    void applyMirrorVideoConfig(activeDevice || config.device, requested)
+      .then(ok => { if (!ok) notifySwitchFailure(); });
+  };
+  const handleResolutionChange = (size: string) => {
+    if (config.sessionMode !== 'mirror') {
+      setConfig(prev => ({...prev, res:size}));
+      return;
+    }
+    void changeMirrorResolution(activeDevice || config.device, size)
+      .then(ok => { if (!ok) notifySwitchFailure(); });
+  };
+
   const handleStart = async () => {
     if (!activeDevice) {
       showAlert(t('alerts.noDeviceSelectedTitle'), t('alerts.noDeviceSelectedMessage'), "warning");
@@ -388,13 +413,8 @@ function App() {
               isRefreshing={isRefreshing}
               config={config}
               onConfigChange={setConfig}
-              onResolutionChange={(size) => {
-                if (config.sessionMode === 'mirror') {
-                  void changeMirrorResolution(activeDevice || config.device, size);
-                } else {
-                  setConfig(prev => ({ ...prev, res: size }));
-                }
-              }}
+              onPresetChange={handlePresetChange}
+              onResolutionChange={handleResolutionChange}
               isSwitchingResolution={isSwitchingResolution}
               onStart={handleStartMirror}
               onStop={handleStop}
@@ -440,8 +460,9 @@ function App() {
                     <div className="ml-settings-columns ml-mirror-layout">
                       <ControlPanel
                         config={config} setConfig={setConfig} onStart={handleStart}
-                        onStop={handleStop} isRunning={sessionRunning}
-                        onResolutionChange={(size) => void changeMirrorResolution(activeDevice || config.device, size)}
+                        onStop={handleStop} isRunning={sessionRunning || isSwitchingResolution}
+                        onPresetChange={handlePresetChange}
+                        onResolutionChange={handleResolutionChange}
                         isSwitchingResolution={isSwitchingResolution} detectedCameras={detectedCameras}
                         renderDriverSupport={renderDriverSupport}
                         onListOptions={(arg) => { if (activeDevice) listScrcpyOptions(activeDevice, arg); }}

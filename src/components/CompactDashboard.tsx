@@ -6,7 +6,7 @@ import type { PendingAdbDevice, ScrcpyConfig } from '../hooks/useScrcpy';
 import {invoke} from '@tauri-apps/api/core';
 import {useState, type MouseEvent} from 'react';
 import VersionUpdateBadge from './VersionUpdateBadge';
-import { applyMirrorPreset, activeMirrorPreset, MIRROR_PRESET_ORDER,
+import { activeMirrorPreset, MIRROR_PRESET_ORDER,
     MIRROR_PRESET_COPY, mirrorVideoSummary, videoLoadWarning, type MirrorPreset } from '../utils/mirrorPresets';
 
 type Props = {
@@ -26,6 +26,7 @@ type Props = {
     isRefreshing: boolean;
     config: ScrcpyConfig;
     onConfigChange: (config: ScrcpyConfig) => void;
+    onPresetChange: (preset: MirrorPreset) => void;
     onResolutionChange: (size: string) => void;
     isSwitchingResolution: boolean;
     onStart: () => void;
@@ -42,15 +43,15 @@ const resolutions = [
     { value: '800', zh: '480p · 省流量', en: '480p · Low bandwidth' },
     { value: '1280', zh: '720p · 流畅', en: '720p · Smooth' },
     { value: '1920', zh: '1080P · 流畅推荐', en: '1080p · Recommended' },
-    { value: '2560', zh: '2K · 高负载', en: '2K · High load' },
-    { value: '3840', zh: '4K · 极高负载', en: '4K · Very high load' },
+    { value: '2560', zh: '2K · 高清', en: '2K · High definition' },
+    { value: '3840', zh: '4K · 极致画质', en: '4K · Maximum detail' },
 ];
 
 export default function CompactDashboard({
     locale, version, hasUpdate, checkingUpdate, onOpenUpdate,
     devices, pendingDevices, deviceModels, deviceFriendlyNames,
     runningDevices, activeDevice, onSelectDevice, onRefresh, isRefreshing,
-    config, onConfigChange, onResolutionChange, isSwitchingResolution,
+    config, onConfigChange, onPresetChange, onResolutionChange, isSwitchingResolution,
     onStart, onStop, onOpenSettings, coreReady, onDownloadCore,
     isDownloading, downloadProgress,
 }: Props) {
@@ -66,6 +67,9 @@ export default function CompactDashboard({
     const selected = devices.includes(activeDevice);
     const deviceLabel = (serial: string) =>
         deviceFriendlyNames[serial] || deviceModels[serial] || serial;
+    // Keep the old Stop button in place while the automatic stream handoff
+    // briefly closes/reopens scrcpy; never display a misleading Start button.
+    const visibleRunning = running || isSwitchingResolution;
     const [communityError,setCommunityError] = useState<string|null>(null);
     const openCommunity = async(event:MouseEvent<HTMLAnchorElement>, destination:'youtube'|'telegram')=>{
         // Ordinary web previews may use the external link directly. The
@@ -228,7 +232,7 @@ export default function CompactDashboard({
                                 disabled={isSwitchingResolution}
                                 onChange={(event) => {
                                     if (event.target.value !== 'custom') {
-                                        onConfigChange(applyMirrorPreset(config, event.target.value as MirrorPreset));
+                                        onPresetChange(event.target.value as MirrorPreset);
                                     }
                                 }}>
                                 <option value="custom" disabled>{copy('自定义参数', 'Custom settings')}</option>
@@ -241,8 +245,11 @@ export default function CompactDashboard({
                             <p className="ml-muted mt-1 text-[11px] leading-5" role="note">
                                 {presetHint} · {mirrorVideoSummary(config, locale)}
                             </p>
-                            {running && <p className="ml-muted mt-1 text-[11px]">
-                                {copy('场景配置下次启动投屏时生效，不会打断当前画面。', 'Profile settings apply on the next session without interrupting this mirror.')}
+                            {visibleRunning && <p className="ml-muted mt-1 text-[11px]" role="note">
+                                {isSwitchingResolution
+                                    ? copy('正在自动切换视频流，请稍候…', 'Applying new video stream automatically…')
+                                    : copy('选择场景立即自动应用，无需手动停止投屏（视频会短暂重启）。',
+                                        'Choose a profile to apply automatically (brief video restart).')}
                             </p>}
                         </div>
                         <div className="ml-field mt-2">
@@ -287,10 +294,13 @@ export default function CompactDashboard({
                                 {isDownloading ? copy(`正在安装 ${downloadProgress}%`, `Installing ${downloadProgress}%`)
                                     : copy('安装投屏引擎', 'Install mirroring engine')}
                             </button>
-                        ) : running ? (
-                            <button type="button" onClick={onStop} className="ml-stop-action flex items-center justify-center gap-2 mt-5">
+                        ) : visibleRunning ? (
+                            <button type="button" onClick={onStop} disabled={isSwitchingResolution}
+                                className="ml-stop-action flex items-center justify-center gap-2 mt-5 disabled:opacity-60">
                                 <span className="w-3 h-3 bg-current rounded-[3px]" aria-hidden="true"/>
-                                {copy('停止投屏', 'Stop mirroring')}
+                                {isSwitchingResolution
+                                    ? copy('正在切换画质…', 'Applying video quality…')
+                                    : copy('停止投屏', 'Stop mirroring')}
                             </button>
                         ) : (
                             <button type="button" onClick={onStart} disabled={!selected || isSwitchingResolution}
@@ -302,7 +312,8 @@ export default function CompactDashboard({
                         )}
                         {isSwitchingResolution && (
                             <p className="ml-muted text-xs mt-2 text-center" role="status">
-                                {copy('正在切换分辨率，请稍候…', 'Applying resolution…')}
+                                {copy('正在自动应用画质，Wi-Fi 配对保留，请稍候…',
+                                    'Applying video settings; Wi-Fi pairing stays connected…')}
                             </p>
                         )}
                     </section>

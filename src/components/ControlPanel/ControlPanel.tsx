@@ -14,6 +14,7 @@ interface ControlPanelProps {
     onStop: () => void;
     isRunning: boolean;
     onResolutionChange?: (size: string) => void;
+    onPresetChange?: (preset: MirrorPreset) => void;
     isSwitchingResolution?: boolean;
     onListOptions: (arg: string) => void;
     detectedCameras?: { id: string, name: string }[];
@@ -93,6 +94,7 @@ export default function ControlPanel({
     onStop,
     isRunning,
     onResolutionChange,
+    onPresetChange,
     isSwitchingResolution = false,
     onListOptions,
     detectedCameras = [],
@@ -359,14 +361,16 @@ export default function ControlPanel({
                             <div className="space-y-3 pt-0.5">
                                 <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
                                     <label htmlFor="ml-engine-preset" className="block text-xs font-bold text-zinc-600 dark:text-zinc-300">
-                                        {locale.startsWith('zh') ? '场景预设 · 1080P 优先' : 'Scenario profile · 1080p first'}
+                                        {locale.startsWith('zh') ? '场景预设 · 一键切换画质' : 'Profiles · Instant selection'}
                                     </label>
                                     <select id="ml-engine-preset" className="ml-select"
                                         value={activeMirrorPreset(config)}
                                         disabled={isSwitchingResolution}
                                         onChange={(event) => {
                                             if (event.target.value !== 'custom') {
-                                                setConfig(applyMirrorPreset(config, event.target.value as MirrorPreset));
+                                                const preset = event.target.value as MirrorPreset;
+                                                if (onPresetChange) onPresetChange(preset);
+                                                else setConfig(applyMirrorPreset(config, preset));
                                             }
                                         }}>
                                         <option value="custom" disabled>
@@ -382,9 +386,11 @@ export default function ControlPanel({
                                     </select>
                                     <p className="text-xs text-zinc-500 leading-5" role="note">
                                         {mirrorVideoSummary(config, locale)}
-                                        {isRunning && (locale.startsWith('zh')
-                                            ? ' · 场景与码率帧率调整下次启动生效'
-                                            : ' · Profile and bitrate/FPS changes apply next session')}
+                                        {isSwitchingResolution
+                                            ? (locale.startsWith('zh') ? ' · 正在自动切换画质…' : ' · Applying new video stream…')
+                                            : isRunning && (locale.startsWith('zh')
+                                                ? ' · 选中即自动切换，无需手动停止；视频短暂重启'
+                                                : ' · Applies automatically (brief video restart)')}
                                     </p>
                                 </div>
                                 <PerformanceGrid />
@@ -709,14 +715,17 @@ export default function ControlPanel({
                 ) : (
                     <button
                         onClick={onStop}
-                        className="w-full py-3.5 rounded-2xl text-base font-black uppercase tracking-[0.2em] transition-all relative overflow-hidden group active:scale-[0.98] border border-red-500/50"
+                        disabled={isSwitchingResolution}
+                        className="w-full py-3.5 rounded-2xl text-base font-black uppercase tracking-[0.2em] transition-all relative overflow-hidden group active:scale-[0.98] border border-red-500/50 disabled:opacity-60"
                     >
                         {/* Dark Red Gradient Background */}
                         <div className="absolute inset-0 bg-gradient-to-r from-red-600 to-red-900 group-hover:from-red-500 group-hover:to-red-800 transition-all" />
 
                         <span className="relative z-10 flex items-center justify-center gap-3 text-white">
                             <Square fill="white" size={18} className="group-hover:rotate-90 transition-transform duration-500" />
-                            {t('controlPanel.stopSession')}
+                            {isSwitchingResolution
+                                ? (locale.startsWith('zh') ? '正在自动切换画质…' : 'Applying video settings…')
+                                : t('controlPanel.stopSession')}
                         </span>
                     </button>
                 )}

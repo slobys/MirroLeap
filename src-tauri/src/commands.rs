@@ -3058,10 +3058,10 @@ mod tests {
         // number is the encoded PHONE SCREEN'S LONG EDGE, not a request to
         // change Android's own display resolution.
         for (name, size, bit_rate, fps) in [
-            ("balanced", "1920", 8, 60),
-            ("presentation", "1920", 6, 30),
             ("low-latency", "1280", 4, 60),
-            ("quality", "1920", 12, 60),
+            ("balanced", "1920", 8, 60),
+            ("quality", "2560", 16, 60),
+            ("ultra", "3840", 20, 30),
         ] {
             let mut config = base_config("mirror");
             config.device = "192.168.50.23:5555".into(); // Wi-Fi transport
@@ -3089,7 +3089,9 @@ mod tests {
                 "{name} leaves host renderer in scrcpy's auto mode");
             assert!(args.contains(&"--no-audio".to_string()),
                 "{name} must preserve the user's separate audio choice");
-            assert_ne!(size,"2560", "2K is user-opt-in only, never a default scene");
+            // --max-size is an encoding cap; this never calls Android's wm size.
+            assert!(!args.iter().any(|arg| arg == "wm" || arg == "size"));
+            if name == "ultra" { assert_eq!(fps,30, "4K defaults to lower FPS load"); }
         }
     }
 

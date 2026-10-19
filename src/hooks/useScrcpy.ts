@@ -3,7 +3,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useI18n } from '../i18n';
 import { adbHistoryHost, reconnectDelayMs } from '../utils/reconnect';
-import { canQuickSwitchResolution } from '../utils/resolutionSwitch';
+import { canApplyMirrorVideo, MIRROR_SIZES } from '../utils/resolutionSwitch';
+import { applyMirrorResolution, videoParams } from '../utils/mirrorPresets';
+import { restartMirrorVideoStream } from '../utils/streamRestart';
 import { MIRROR_PRESETS } from '../utils/mirrorPresets';
 
 export interface RenderDriverOption {
@@ -784,116 +786,116 @@ export function useScrcpy() {
     };
 
 
-    /** Apply a resolution preset immediately from the user's perspective.
-     * scrcpy's --max-size is a launch-only option, so an active mirror must
-     * briefly restart its video stream. Wait for the prior monitor's stopped
-     * notification BEFORE launching the replacement; launching earlier would
-     * race with its old process monitor and may remove the new session.
+    /**
+     * Immediately apply a quality profile from either the home screen or
+     * advanced settings. scrcpy exposes resolution/bitrate/FPS/codec only as
+     * start-time flags, so an active stream is automatically restarted ONCE.
+     * ADB pairing stays connected; the user never needs Stop -> Start.
      *
-     * This never calls 'adb shell wm size': it does not change Android's own
-     * display resolution, DPI, or accessibility settings.
+     * Share one transaction lock with the opt-in recording restart. Use the
+     * ACTUALLY launched config for rollback, not saved but unapplied edits.
+     * Never split a live MKV recorder without explicit user consent.
      */
-    const changeMirrorResolution = async (device: string, nextSize: string): Promise<boolean> => {
+    const applyMirrorVideoConfig = async (
+        device: string, requested: ScrcpyConfig
+    ): Promise<boolean> => {
         if (resolutionSwitchLock.current) return false;
-        const oldConfig = liveConfigRef.current;
-        const wasRunning = liveRunningDevicesRef.current.includes(device);
-        const decision = canQuickSwitchResolution(
-            nextSize, oldConfig.res || '0', oldConfig.sessionMode,
-            wasRunning, Boolean(oldConfig.record)
+
+        const selected = liveConfigRef.current;
+        const previous = launchedSessionConfigRef.current[device]
+            || { ...selected, device };
+        const running = liveRunningDevicesRef.current.includes(device);
+        const targetVideo = videoParams(requested);
+        const launch: ScrcpyConfig = {
+            ...previous, ...targetVideo, device,
+            sessionMode: 'mirror', hidMouse: false, otgPure: false,
+        };
+        const decision = canApplyMirrorVideo(
+            previous, launch, running, Boolean(previous.record)
         );
         if (!decision.allowed) {
             setLogs(prev => [...prev.slice(-100),
-                '[RESOLUTION] ' + (decision.reason || 'Unsupported resolution')]);
+                '[VIDEO] ' + (decision.reason || 'Video settings unavailable')]);
             return false;
         }
+        const commitVideo = () => {
+            liveConfigRef.current = {
+                ...liveConfigRef.current, ...targetVideo, sessionMode:'mirror',
+            };
+            setConfig(prev => ({
+                ...prev, ...targetVideo, sessionMode:'mirror',
+            }));
+        };
         if (!decision.needsRestart) {
-            const updated = { ...oldConfig, res: nextSize };
-            liveConfigRef.current = updated;
-            setConfig(prev => ({ ...prev, res: nextSize }));
+            commitVideo();
             return true;
         }
 
         resolutionSwitchLock.current = true;
         setIsSwitchingResolution(true);
-        const updated = { ...oldConfig, res: nextSize, device };
-        liveConfigRef.current = updated;
-        setConfig(prev => ({ ...prev, res: nextSize }));
         setLogs(prev => [...prev.slice(-100),
-            '[RESOLUTION] Applying ' + (nextSize === '0' ? 'Original' : nextSize)
-            + ' (automatic stream restart; Android screen settings unchanged).']);
-
-        let detach: (() => void) | undefined;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let didStop = false;
+            '[VIDEO] 自动应用画质：等待旧视频流退出，再恢复原位置与手机边框。ADB 无线配对不会断开。']);
         try {
-            let notifyStopped!: () => void;
-            let timeoutStop!: (error: Error) => void;
-            const stopped = new Promise<void>((resolve, reject) => {
-                notifyStopped = resolve;
-                timeoutStop = reject;
+            const result = await restartMirrorVideoStream(previous, launch, {
+                listenForStop: async notify => listen<{device:string,running:boolean}>(
+                    'scrcpy-status',
+                    ({payload}) => {
+                        if (payload.device === device && payload.running === false) notify();
+                    },
+                ),
+                stop: async () => { await invoke('stop_scrcpy', { device }); },
+                start: async config => { await invoke('run_scrcpy', { config }); },
+                // Rust sends scrcpy-window-pos BEFORE scrcpy-status(false).
+                getWindowPosition: () => livePositionsRef.current[device],
+                timeoutMs: 10000,
             });
-            // Register first; an event can otherwise arrive while stop_scrcpy
-            // is still waiting for the previous Windows process to finish.
-            detach = await listen<{ device: string; running: boolean }>(
-                'scrcpy-status', event => {
-                    if (event.payload.device === device && event.payload.running === false) {
-                        notifyStopped();
-                    }
-                }
-            );
-            timer = setTimeout(() => timeoutStop(new Error(
-                'Previous mirroring process did not confirm shutdown within 8 seconds'
-            )), 8000);
-            await invoke('stop_scrcpy', { device });
-            await stopped;
-            didStop = true;
-
-            const pos = oldConfig.rememberWindowPosition !== false
-                ? livePositionsRef.current[device] : undefined;
-            await invoke('run_scrcpy', {
-                config: {
-                    ...updated,
-                    windowX: pos?.x,
-                    windowY: pos?.y
-                }
-            });
-            launchedSessionConfigRef.current[device] = updated;
-            setActiveRecordingSessions(prev => ({
-                ...prev, [device]: {
-                    record: Boolean(updated.record), recordPath: updated.recordPath || ''
-                }
-            }));
-            setLogs(prev => [...prev.slice(-100),
-                '[RESOLUTION] Switched to ' + (nextSize === '0' ? 'Original' : nextSize)]);
-            return true;
-        } catch (error) {
-            liveConfigRef.current = oldConfig;
-            setConfig(prev => ({ ...prev, res: oldConfig.res }));
-            setLogs(prev => [...prev.slice(-100),
-                '[RESOLUTION] Could not apply requested size: ' + String(error)]);
-            // If the old stream was definitely stopped, attempt to restore
-            // the prior preset to avoid leaving the user with a blank screen.
-            if (didStop) {
-                try {
-                    const pos = oldConfig.rememberWindowPosition !== false
-                        ? livePositionsRef.current[device] : undefined;
-                    await invoke('run_scrcpy', { config: {
-                        ...oldConfig, device, windowX: pos?.x, windowY: pos?.y
-                    } });
-                    setLogs(prev => [...prev.slice(-100),
-                        '[RESOLUTION] Previous resolution restored.']);
-                } catch (restoreError) {
-                    setLogs(prev => [...prev.slice(-100),
-                        '[RESOLUTION] Recovery failed: ' + String(restoreError)]);
-                }
+            if (result.applied && result.activeConfig) {
+                launchedSessionConfigRef.current[device] = result.activeConfig;
+                setActiveRecordingSessions(prev => ({
+                    ...prev,
+                    [device]: {
+                        record:Boolean(result.activeConfig?.record),
+                        recordPath:result.activeConfig?.recordPath || '',
+                    },
+                }));
+                commitVideo();
+                setLogs(prev => [...prev.slice(-100),
+                    '[VIDEO] 已自动切换为 ' + (targetVideo.res || '0') + ' 长边上限 / '
+                    + targetVideo.bitrate + 'Mbps / 最高 '
+                    + (targetVideo.fps || '自动') + 'fps。']);
+                return true;
             }
+
+            // The UI kept its old values while the native handoff ran.
+            // If launch failed, the helper attempts one previous-session
+            // recovery without introducing any hidden configuration changes.
+            if (result.restored && result.activeConfig) {
+                launchedSessionConfigRef.current[device] = result.activeConfig;
+                setActiveRecordingSessions(prev => ({
+                    ...prev, [device]: {
+                        record:Boolean(result.activeConfig?.record),
+                        recordPath:result.activeConfig?.recordPath || '',
+                    },
+                }));
+            }
+            setLogs(prev => [...prev.slice(-100),
+                '[VIDEO] 自动切换失败：' + (result.error || 'Unknown error')
+                    + (result.restored ? '；已恢复原来的投屏参数。' : '；请检查连接。')]);
             return false;
         } finally {
-            if (timer) clearTimeout(timer);
-            if (detach) detach();
             resolutionSwitchLock.current = false;
             setIsSwitchingResolution(false);
         }
+    };
+
+    const changeMirrorResolution = async (device: string, nextSize: string): Promise<boolean> => {
+        if (!(MIRROR_SIZES as readonly string[]).includes(nextSize)) {
+            setLogs(prev => [...prev.slice(-100), '[VIDEO] Unsupported resolution']);
+            return false;
+        }
+        return applyMirrorVideoConfig(
+            device, applyMirrorResolution(liveConfigRef.current, nextSize)
+        );
     };
 
     /** scrcpy records from launch; opt-in to a short stream restart when
@@ -1287,6 +1289,7 @@ export function useScrcpy() {
         runScrcpy,
         stopScrcpy,
         changeMirrorResolution,
+        applyMirrorVideoConfig,
         applyRecordingNow,
         isApplyingRecording,
         recordingStatuses,

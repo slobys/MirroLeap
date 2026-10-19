@@ -83,21 +83,35 @@ describe('Android phone screen recording mode boundaries', () => {
     });
 });
 
-describe('1080p-first engine configuration', () => {
+describe('four-resolution live engine configuration', () => {
     it('matches the homepage preset and keeps scene-specific bitrate/FPS while defaulting to H.264', async () => {
         const user = userEvent.setup();
         const setConfig = renderControlPanel(createConfig({
             res:'2560',bitrate:16,codec:'h265',fps:30,audioEnabled:false,
             renderDriver:'opengl',rotation:'90'
         }), supportedRenderers);
-        const select = screen.getByRole('combobox',{name:'Scenario profile · 1080p first'});
+        const select = screen.getByRole('combobox',{name:'Profiles · Instant selection'});
         expect(select).toHaveValue('custom');
-        expect(screen.getByText(/Native, 2K and 4K sizes can add/)).toBeInTheDocument();
+        expect(screen.getByText(/Use 2K when it runs smoothly/)).toBeInTheDocument();
         await user.selectOptions(select,'balanced');
         expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({
             res:'1920',bitrate:8,fps:60,codec:'h264',
             audioEnabled:false,renderDriver:'opengl',rotation:'90'
         }));
+    });
+
+    it('dispatches a running-session scene change through its live preset callback', async () => {
+        const user=userEvent.setup();
+        const onPresetChange=vi.fn();
+        const setConfig=vi.fn();
+        render(<ControlPanel config={createConfig({res:'1920',bitrate:8,codec:'h264'})}
+            setConfig={setConfig} onPresetChange={onPresetChange}
+            onStart={vi.fn()} onStop={vi.fn()} isRunning
+            onListOptions={vi.fn()} detectedCameras={[]}
+            renderDriverSupport={supportedRenderers}/>);
+        await user.selectOptions(screen.getByRole('combobox',{name:'Profiles · Instant selection'}),'ultra');
+        expect(onPresetChange).toHaveBeenCalledExactlyOnceWith('ultra');
+        expect(setConfig).not.toHaveBeenCalled();
     });
 
     it('keeps advanced codec, rotation and renderer available but collapsed by default', async () => {
@@ -137,8 +151,8 @@ describe('1080p-first engine configuration', () => {
 
     it('preserves legacy custom high-resolution settings, and warns about lag', () => {
         renderControlPanel(createConfig({res:'2560',bitrate:16,codec:'h265',fps:undefined}), supportedRenderers);
-        expect(screen.getByRole('combobox',{name:'Scenario profile · 1080p first'})).toHaveValue('custom');
-        expect(screen.getByText(/Native, 2K and 4K sizes can add/)).toBeInTheDocument();
+        expect(screen.getByRole('combobox',{name:'Profiles · Instant selection'})).toHaveValue('custom');
+        expect(screen.getByText(/Use 2K when it runs smoothly/)).toBeInTheDocument();
     });
 });
 
@@ -169,6 +183,14 @@ describe('one-click mirror resolution selector', () => {
         const label = screen.getByText('Resolution');
         expect(label.parentElement?.querySelector('button')).toBeDisabled();
         expect(screen.getByRole('status')).toHaveTextContent('Applying resolution');
+    });
+
+    it('locks native session Stop while automatic video switching is underway', () => {
+        render(<ControlPanel config={createConfig({res:'2560',fps:60,bitrate:16,codec:'h264'})}
+            setConfig={vi.fn()} onStart={vi.fn()} onStop={vi.fn()} isRunning
+            isSwitchingResolution onListOptions={vi.fn()}
+            detectedCameras={[]} renderDriverSupport={supportedRenderers}/>);
+        expect(screen.getByText('Applying video settings…').closest('button')).toBeDisabled();
     });
 
     it('warns that recording must stop before switching video resolution', () => {
