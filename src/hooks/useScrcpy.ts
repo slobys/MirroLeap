@@ -7,7 +7,8 @@ import { canApplyMirrorVideo, MIRROR_SIZES } from '../utils/resolutionSwitch';
 import { applyMirrorResolution, videoParams } from '../utils/mirrorPresets';
 import { restartMirrorVideoStream } from '../utils/streamRestart';
 import { MIRROR_PRESETS } from '../utils/mirrorPresets';
-import { DEVICE_PROFILES_KEY, selectDeviceConfig, profileFromConfig, readDeviceProfiles } from '../utils/deviceProfiles';
+import { DEVICE_PROFILES_KEY, selectDeviceConfig, profileFromConfig, readDeviceProfiles,
+    rememberCompletedVideoForInactiveDevice } from '../utils/deviceProfiles';
 import { chooseAutoQualityStep } from '../utils/autoQuality';
 
 /** Measured from the running scrcpy process, never an FPS cap. */
@@ -158,9 +159,11 @@ export function useScrcpy() {
     const [deviceFriendlyNames, setDeviceFriendlyNames] = useState<Record<string, string>>({});
     const [logs, setLogs] = useState<string[]>([]);
     const [activeDevice, setActiveDeviceState] = useState<string>("");
-    const profilesRef = useRef(readDeviceProfiles(
+    // Parse saved device profiles once, not on every one-second FPS update.
+    const [initialProfiles] = useState(() => readDeviceProfiles(
         typeof localStorage !== 'undefined' ? localStorage.getItem(DEVICE_PROFILES_KEY) : null,
     ));
+    const profilesRef = useRef(initialProfiles);
     const selectedDeviceRef = useRef('');
     const setActiveDevice = (next: string) => {
         if (selectedDeviceRef.current === next) return;
@@ -184,6 +187,8 @@ export function useScrcpy() {
     const [recordingStatuses, setRecordingStatuses] = useState<Record<string, RecordingEvent>>({});
     const [activeRecordingSessions, setActiveRecordingSessions] =
         useState<Record<string, { record: boolean; recordPath: string }>>({});
+    // The clipboard policy is fixed at launch, unlike its saved checkbox.
+    const [sessionClipboardSync, setSessionClipboardSync] = useState<Record<string, boolean>>({});
     const launchedSessionConfigRef = useRef<Record<string, ScrcpyConfig>>({});
     const resolutionSwitchLock = useRef(false);
     const autoLastChangeRef = useRef<Record<string, number>>({});
@@ -457,6 +462,12 @@ export function useScrcpy() {
                         return next;
                     });
                     setMirrorPerformance(prev => {
+                        const next = {...prev};
+                        delete next[data.device];
+                        return next;
+                    });
+                    setSessionClipboardSync(prev => {
+                        if (!Object.prototype.hasOwnProperty.call(prev, data.device)) return prev;
                         const next = {...prev};
                         delete next[data.device];
                         return next;
@@ -837,6 +848,9 @@ export function useScrcpy() {
             };
             await invoke('run_scrcpy', { config: configWithPos });
             launchedSessionConfigRef.current[config.device] = configWithPos;
+            setSessionClipboardSync(prev => ({
+                ...prev, [config.device]: configWithPos.clipboardSync !== false,
+            }));
             autoLastChangeRef.current[config.device] = Date.now();
             setActiveRecordingSessions(prev => ({
                 ...prev, [config.device]: {
@@ -886,12 +900,28 @@ export function useScrcpy() {
             return false;
         }
         const commitVideo = () => {
+            // A restart can resolve after the user changes phones. Persist
+            // only the original phone's profile when its saved settings still
+            // match the video stream we started from.
+            if (selectedDeviceRef.current !== device ||
+                liveConfigRef.current.device !== device) {
+                const updated = rememberCompletedVideoForInactiveDevice(
+                    profilesRef.current, device, previous, targetVideo);
+                if (updated !== profilesRef.current) {
+                    profilesRef.current = updated;
+                    try {
+                        localStorage.setItem(DEVICE_PROFILES_KEY, JSON.stringify(updated));
+                    } catch (error) {
+                        console.warn('[MirroLeap] Could not save inactive device video profile:', error);
+                    }
+                }
+                return;
+            }
             liveConfigRef.current = {
                 ...liveConfigRef.current, ...targetVideo, sessionMode:'mirror',
             };
-            setConfig(prev => ({
-                ...prev, ...targetVideo, sessionMode:'mirror',
-            }));
+            setConfig(prev => prev.device === device
+                ? {...prev, ...targetVideo, sessionMode:'mirror'} : prev);
         };
         if (!decision.needsRestart) {
             commitVideo();
@@ -918,6 +948,9 @@ export function useScrcpy() {
             });
             if (result.applied && result.activeConfig) {
                 launchedSessionConfigRef.current[device] = result.activeConfig;
+                setSessionClipboardSync(prev => ({
+                    ...prev, [device]: result.activeConfig!.clipboardSync !== false,
+                }));
                 setActiveRecordingSessions(prev => ({
                     ...prev,
                     [device]: {
@@ -938,6 +971,9 @@ export function useScrcpy() {
             // recovery without introducing any hidden configuration changes.
             if (result.restored && result.activeConfig) {
                 launchedSessionConfigRef.current[device] = result.activeConfig;
+                setSessionClipboardSync(prev => ({
+                    ...prev, [device]: result.activeConfig!.clipboardSync !== false,
+                }));
                 setActiveRecordingSessions(prev => ({
                     ...prev, [device]: {
                         record:Boolean(result.activeConfig?.record),
@@ -1045,6 +1081,9 @@ export function useScrcpy() {
             const launched = {...updated,windowX:pos?.x,windowY:pos?.y};
             await invoke('run_scrcpy', {config:launched});
             launchedSessionConfigRef.current[device] = launched;
+            setSessionClipboardSync(prev => ({
+                ...prev, [device]: launched.clipboardSync !== false,
+            }));
             setActiveRecordingSessions(prev => ({
                 ...prev,[device]:{
                     record:Boolean(updated.record),recordPath:updated.recordPath || ''
@@ -1065,6 +1104,9 @@ export function useScrcpy() {
                         ...previous,device,windowX:pos?.x,windowY:pos?.y
                     }});
                     launchedSessionConfigRef.current[device] = previous;
+                    setSessionClipboardSync(prev => ({
+                        ...prev, [device]: previous.clipboardSync !== false,
+                    }));
                     setActiveRecordingSessions(prev => ({
                         ...prev,[device]:prevRecording
                     }));
@@ -1399,6 +1441,7 @@ export function useScrcpy() {
         isApplyingRecording,
         recordingStatuses,
         activeRecordingSessions,
+        sessionClipboardSync,
         recenterMirrorWindow,
         downloadScrcpy,
         activeDevice,

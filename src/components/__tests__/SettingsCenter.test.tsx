@@ -78,6 +78,27 @@ describe('redesigned settings center keeps existing actions accessible', () => {
     expect(screen.getByText(/MirroLeap_record.mkv/)).toBeInTheDocument();
   });
 
+  it('does not claim clipboard privacy changes applied during an active session', () => {
+    const base:ScrcpyConfig={device:'phone-a',sessionMode:'mirror',res:'1920',clipboardSync:true};
+    const setConfig=vi.fn();
+    const {rerender}=render(<SessionBehavior config={{...base,clipboardSync:false}}
+      setConfig={setConfig} isRunning activeClipboardSync={true}/>);
+    expect(screen.getByRole('alert')).toHaveTextContent('remains ENABLED');
+    expect(screen.getByRole('alert')).toHaveTextContent('Stop and restart');
+    rerender(<SessionBehavior config={base} setConfig={setConfig}
+      isRunning activeClipboardSync={false}/>);
+    expect(screen.getByRole('alert')).toHaveTextContent('remains DISABLED');
+    rerender(<SessionBehavior config={{...base,clipboardSync:false}} setConfig={setConfig}
+      isRunning activeClipboardSync={false}/>);
+    expect(screen.queryByTestId('clipboard-session-pending')).not.toBeInTheDocument();
+    expect(screen.getByTestId('clipboard-session-state')).toHaveTextContent('disabled');
+    rerender(<SessionBehavior config={base} setConfig={setConfig}
+      isRunning activeClipboardSync={undefined}/>);
+    expect(screen.getByTestId('clipboard-session-state')).toHaveTextContent('not yet confirmed');
+    rerender(<SessionBehavior config={base} setConfig={setConfig} />);
+    expect(screen.queryByTestId('clipboard-session-state')).not.toBeInTheDocument();
+  });
+
   it('explains that a record checkbox applies when a new stream starts', () => {
     const config:ScrcpyConfig={device:'device-1',sessionMode:'mirror',record:true};
     render(<SessionBehavior config={config} setConfig={vi.fn()}/>);

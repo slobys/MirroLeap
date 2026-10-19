@@ -31,6 +31,14 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.1.2 · 多设备安全隔离、剪贴板状态与 Auto 档位优化（Windows 预发布测试版）
+
+- **避免跨设备画质串改**：手机 A 的视频重启即使在切换至手机 B 后完成，也不会覆盖 B 的当前配置。A 的已保存画质只有在没有被后续编辑时才同步更新。
+- **剪贴板隐私状态明确**：按手机记录本次 scrcpy 投屏启动时实际采用的剪贴板开关；运行中更改后明确提示“尚未生效、必须停止并重新开始投屏”。是否能真正复制粘贴仍受 Android 版本和应用策略限制，MirroLeap 不读取或另存剪贴板文字。
+- **Auto 逐档调整更平滑**：加入 576P 与 900P 中间画质档，降低单次升降幅度。Auto 仍只依靠真实 FPS 与跳帧采样，3 分钟冷却、不在录制中重启，4K 保持手动设置；遇到系统时钟逆跳或异常时间戳不触发。
+- **减少重复开销**：每台设备的历史画质配置仅在应用初始化时解析一次，不随 FPS 面板刷新重复解析。
+- **发布隔离**：此版本仅为 Pre-release；v5.0.20 继续作为 Latest 正式版，Windows/Android 实机仍须复测。
+
 ## 🧪 v5.1.1 · 真实文件传输进度与安全恢复（Windows 预发布测试版）
 
 - **传输进度不再猜测**：ADB 支持 `push -p` 时，逐文件展示 ADB 实际返回的百分比；不支持时保持文件级进度，不伪造百分比或传输速度。
@@ -205,11 +213,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.1.1_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.1.1_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.1.1_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.1.2_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.1.2_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.1.2_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.1.1 测试版请到 [GitHub Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.1.1) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 保持 v5.0.20 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**v5.1.2 测试版请到 [GitHub Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.1.2) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 保持 v5.0.20 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

@@ -31,7 +31,7 @@ describe('conservative opt-in auto quality',()=>{
     it('first reduces bitrate and only then steps down resolution',()=>{
         const x=sample(17,20,2000);
         expect(calc(x)).toEqual({res:'2560',bitrate:12,reason:'slow'});
-        expect(calc(x,{res:'1920',bitrate:6})).toEqual({res:'1280',bitrate:4,reason:'slow'});
+        expect(calc(x,{res:'1920',bitrate:6})).toEqual({res:'1600',bitrate:6,reason:'slow'});
         expect(calc(x,{res:'800',bitrate:3})).toBeNull();
         // scrcpy FPS reports arrive roughly once per second, not every 2s.
         // The observation window must be wide enough to recognize a sustained dip.
@@ -44,6 +44,20 @@ describe('conservative opt-in auto quality',()=>{
         // Samples from before a recent stream handoff cannot justify another change.
         expect(calc(sustained,{}, {lastChangeAt:NOW-181_000})).toEqual({res:'2560',bitrate:12,reason:'slow'});
         expect(calc({...sustained,samples:sustained.samples.map(v=>({...v,skipped:NaN}))})).toBeNull();
+    });
+    it('supports the intermediate 576p/900p settings with gradual changes',()=>{
+        const congested=sample(17,30,1000);
+        expect(calc(congested,{res:'1600',bitrate:6})).toEqual({res:'1280',bitrate:4,reason:'slow'});
+        expect(calc(congested,{res:'1024',bitrate:4})).toEqual({res:'800',bitrate:3,reason:'slow'});
+        expect(calc(sample(59,70,1000),{res:'1280',bitrate:4}))
+            .toEqual({res:'1600',bitrate:6,reason:'stable'});
+        expect(calc(congested,{res:'3840',bitrate:20})).toBeNull();
+    });
+    it('refuses to adjust after nonsensical or out-of-order timestamps',()=>{
+        const congested=sample(17,30,1000);
+        expect(calc(congested,{}, {lastChangeAt:NOW+1000})).toBeNull();
+        expect(calc({...congested,observedAt:NOW+1000})).toBeNull();
+        expect(calc({...congested,observedAt:Number.NaN})).toBeNull();
     });
     it('requires sustained high observed motion before upgrading, never to 4K',()=>{
         expect(calc(sample(59,70,1000),{res:'1920',bitrate:8})).toEqual({res:'2560',bitrate:16,reason:'stable'});

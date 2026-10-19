@@ -50,6 +50,7 @@ function App() {
     isApplyingRecording,
     recordingStatuses,
     activeRecordingSessions,
+    sessionClipboardSync,
     downloadScrcpy,
     checkScrcpy,
     scrcpyStatus,
@@ -611,6 +612,7 @@ function App() {
                       <SessionBehavior config={config} setConfig={setConfig}
                         isRunning={sessionRunning}
                         activeRecording={activeRecordingSessions[activeDevice]}
+                        activeClipboardSync={sessionClipboardSync[activeDevice]}
                         recordingStatus={recordingStatuses[activeDevice]}
                         isApplyingRecording={isApplyingRecording}
                         onApplyRecordingNow={() => applyRecordingNow(activeDevice || config.device, config)}/>

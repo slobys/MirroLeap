@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react';
 import {Activity, Gauge, Wifi} from 'lucide-react';
 import type {MirrorPerformance, ScrcpyConfig, VideoDecoderSupport} from '../hooks/useScrcpy';
+import { AUTO_QUALITY_SIZES } from '../utils/autoQuality';
 
 type Props = {
     locale: string;
@@ -15,6 +16,8 @@ type Props = {
 
 export default function LivePerformance({locale, device, running, config, setConfig, performance, decoder, support}: Props) {
     const zh = locale.startsWith('zh');
+    const autoResolutionSupported = AUTO_QUALITY_SIZES.includes(
+        config.res as typeof AUTO_QUALITY_SIZES[number]);
     const [now, setNow] = useState(() => Date.now());
     useEffect(() => {
         if (!running) return;
@@ -57,7 +60,7 @@ export default function LivePerformance({locale, device, running, config, setCon
         </div>}
         {!running ? <p className="ml-muted text-xs">{zh ? '开始投屏后显示实时测量数据。' : 'Start mirroring to collect measurements.'}</p>
             : !available && <p className="ml-muted text-xs">
-                {support?.supportsPrintFps && config.printFps
+                {support?.supportsPrintFps && (config.printFps || config.autoQuality)
                     ? (zh ? '等待 scrcpy 输出实测帧率；静止画面可能不会持续产生新帧。' : 'Waiting for measured FPS. A static screen may not produce new frames.')
                     : (zh ? '启用「在运行日志输出实际帧率」并重新开始投屏以获取 FPS。' : 'Enable FPS logging and restart mirroring to collect measurements.')}
             </p>}
@@ -69,7 +72,8 @@ export default function LivePerformance({locale, device, running, config, setCon
         <label className="flex items-center gap-2 text-sm font-medium">
             <input type="checkbox" className="accent-primary" aria-label={zh ? '智能画质 Auto 模式' : 'Smart quality Auto'}
                 checked={Boolean(config.autoQuality)}
-                disabled={!device || !support?.supportsPrintFps || config.sessionMode !== 'mirror'}
+                disabled={!device || !support?.supportsPrintFps || config.sessionMode !== 'mirror' ||
+                    (!autoResolutionSupported && !config.autoQuality)}
                 onChange={event => setConfig({...config, autoQuality:event.target.checked,
                     printFps:event.target.checked ? true : config.printFps})}/>
             {zh ? '智能画质 Auto（稳定优先）' : 'Smart quality Auto (stability first)'}
@@ -79,6 +83,12 @@ export default function LivePerformance({locale, device, running, config, setCon
                 ? '需手动开启：仅在持续测得低帧率或高帧率、且非录制状态时保守调整码率或分辨率。每次至少冷却 3 分钟，最高自动升到 2K。实际低帧率也可能来自视频本身，并不能证明 Wi-Fi 变慢。'
                 : 'Opt-in only: sustained measured FPS may cautiously change bitrate or resolution when not recording. At least 3 minutes between adjustments; never auto-upgrade past 2K. Low FPS does not necessarily mean weak Wi-Fi.'}
         </p>
+        {!autoResolutionSupported && <p className="ml-muted text-xs" role="note"
+            data-testid="auto-quality-resolution-note">
+            {zh
+                ? 'Auto 支持 480P、576P、720P、900P、1080P 和 2K；4K 及其他自定义分辨率保持手动控制。'
+                : 'Auto supports 480p, 576p, 720p, 900p, 1080p and 2K. 4K and other custom resolutions remain manual.'}
+        </p>}
         {running && config.autoQuality && !performance && <p className="text-xs text-amber-600" role="note">
             {zh ? '若本次投屏未启用 FPS 日志，Auto 将等待下次启动，不会打断正在播放的画面。'
                 : 'If FPS logging was not active at launch, Auto waits until the next session without interrupting playback.'}

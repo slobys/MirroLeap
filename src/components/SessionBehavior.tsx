@@ -13,18 +13,22 @@ interface SessionBehaviorProps {
     setConfig: (c: ScrcpyConfig) => void;
     isRunning?: boolean;
     activeRecording?: { record: boolean; recordPath: string };
+    /** Actual scrcpy launch-time setting (undefined until a session is confirmed). */
+    activeClipboardSync?: boolean;
     recordingStatus?: RecordingEvent;
     isApplyingRecording?: boolean;
     onApplyRecordingNow?: () => Promise<boolean>;
 }
 
 export default function SessionBehavior({
-    config, setConfig, isRunning = false, activeRecording, recordingStatus,
+    config, setConfig, isRunning = false, activeRecording, activeClipboardSync, recordingStatus,
     isApplyingRecording = false, onApplyRecordingNow,
 }: SessionBehaviorProps) {
     const { t, locale } = useI18n();
     const [folderError, setFolderError] = useState('');
     const [recordingActionError, setRecordingActionError] = useState('');
+    const clipboardSettingsPending = isRunning && activeClipboardSync !== undefined &&
+        activeClipboardSync !== (config.clipboardSync !== false);
     const recordingSettingsPending = isRunning && (!activeRecording
         || activeRecording.record !== Boolean(config.record)
         || (Boolean(config.record) && activeRecording.recordPath !== (config.recordPath || '')));
@@ -189,6 +193,34 @@ export default function SessionBehavior({
                             ? '使用 scrcpy 内置同步：手机复制文字后同步到电脑；在手机投屏窗口按 Ctrl+V 将电脑文字粘贴到手机。可关闭以保护敏感内容；更改在下次投屏时生效。'
                             : 'Built-in scrcpy text sync: phone copies reach the PC; Ctrl+V in the mirror pastes PC text on Android. Disable for privacy; applies next session.'}
                     />
+                    {isRunning && clipboardSettingsPending && (
+                        <p className="px-3 text-xs text-amber-600 dark:text-amber-400" role="alert"
+                            data-testid="clipboard-session-pending">
+                            {locale.startsWith('zh')
+                                ? (activeClipboardSync
+                                    ? '本次投屏仍按启用剪贴板同步的参数运行；要关闭同步，必须停止并重新开始投屏。在此之前请勿复制敏感文字。'
+                                    : '本次投屏仍未启用剪贴板同步，新设置需要停止并重新开始投屏。')
+                                : (activeClipboardSync
+                                    ? 'Clipboard auto-sync remains ENABLED for this session. Stop and restart mirroring to disable it; avoid copying sensitive text until then.'
+                                    : 'Clipboard auto-sync remains DISABLED for this session. Stop and restart mirroring to enable it.')}
+                        </p>
+                    )}
+                    {isRunning && !clipboardSettingsPending && (
+                        <p className="ml-setting-hint px-3" role="note"
+                            data-testid="clipboard-session-state">
+                            {activeClipboardSync === undefined
+                                ? (locale.startsWith('zh')
+                                    ? '正在确认本次投屏的剪贴板状态；修改设置需要重新开始投屏。'
+                                    : 'Current clipboard sync state is not yet confirmed; changing this setting requires a new session.')
+                                : activeClipboardSync
+                                    ? (locale.startsWith('zh')
+                                        ? '本次投屏按启用剪贴板同步的参数启动，实际同步仍取决于 Android 应用及系统限制。'
+                                        : 'This session launched with clipboard auto-sync enabled; Android apps or system policy may still restrict it.')
+                                    : (locale.startsWith('zh')
+                                        ? '本次投屏：剪贴板同步已关闭。'
+                                        : 'This session: clipboard synchronization is disabled.')}
+                        </p>
+                    )}
                     <p className="ml-setting-hint px-3" role="note">
                         {locale.startsWith('zh')
                             ? '剪贴板内容不由 MirroLeap 单独保存。向手机粘贴密码等敏感文字前请确认安全。'

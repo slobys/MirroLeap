@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyDeviceProfile, selectDeviceConfig, profileFromConfig, readDeviceProfiles } from './deviceProfiles';
+import { applyDeviceProfile, selectDeviceConfig, profileFromConfig, readDeviceProfiles,
+    rememberCompletedVideoForInactiveDevice } from './deviceProfiles';
 import type { ScrcpyConfig } from '../hooks/useScrcpy';
 
 const base: ScrcpyConfig = {
@@ -33,6 +34,26 @@ describe('device-scoped mirroring preferences', () => {
         const restored = selectDeviceConfig(other,profileFromConfig(phoneA),'phone-a',true);
         expect(restored).toMatchObject({device:'phone-a',res:'2560',bitrate:16,codec:'h265',
             autoQuality:true,clipboardSync:false,audioEnabled:false,record:false});
+    });
+
+    it('isolates delayed video restart completion to the original device profile', () => {
+        const before = {
+            'phone-a': {res:'1920',bitrate:8,fps:60,codec:'h264',deviceFrame:true},
+            'phone-b': {res:'1280',bitrate:4,fps:60,codec:'h264',clipboardSync:false},
+        };
+        const result = rememberCompletedVideoForInactiveDevice(before,'phone-a',base,
+            {res:'2560',bitrate:16,fps:60,codec:'h264'});
+        expect(result['phone-a']).toEqual({res:'2560',bitrate:16,fps:60,codec:'h264',deviceFrame:true});
+        expect(result['phone-b']).toEqual(before['phone-b']);
+        expect(before['phone-a'].res).toBe('1920');
+    });
+
+    it('does not overwrite video settings changed while an old restart was in flight', () => {
+        const updated = {'phone-a':{res:'1280',bitrate:4,fps:60,codec:'h264'}};
+        expect(rememberCompletedVideoForInactiveDevice(updated,'phone-a',base,
+            {res:'2560',bitrate:16,fps:60,codec:'h264'})).toBe(updated);
+        expect(rememberCompletedVideoForInactiveDevice({},'phone-a',base,
+            {res:'2560',bitrate:16,fps:60,codec:'h264'})).toEqual({});
     });
 
     it('rejects malformed and unsafe persisted values and legacy native resolution', () => {

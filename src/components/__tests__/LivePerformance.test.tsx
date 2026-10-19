@@ -32,6 +32,21 @@ describe('live quality monitor',()=>{
         fireEvent.click(screen.getByRole('checkbox',{name:'智能画质 Auto 模式'}));
         expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({autoQuality:true,printFps:true}));
     });
+    it('only enables Auto on a supported resolution and explains the 4K limit',()=>{
+        const setConfig=vi.fn();
+        const {rerender}=render(<LivePerformance locale="zh-CN" device="phone1" running={false}
+            config={{...config,res:'3840',autoQuality:false}} setConfig={setConfig} support={support}/>);
+        expect(screen.getByRole('checkbox',{name:'智能画质 Auto 模式'})).toBeDisabled();
+        expect(screen.getByTestId('auto-quality-resolution-note')).toHaveTextContent('4K');
+        rerender(<LivePerformance locale="zh-CN" device="phone1" running={false}
+            config={{...config,res:'1600'}} setConfig={setConfig} support={support}/>);
+        expect(screen.getByRole('checkbox',{name:'智能画质 Auto 模式'})).toBeEnabled();
+        expect(screen.queryByTestId('auto-quality-resolution-note')).not.toBeInTheDocument();
+        rerender(<LivePerformance locale="zh-CN" device="phone1" running={false}
+            config={{...config,res:'3840',autoQuality:true}} setConfig={setConfig} support={support}/>);
+        expect(screen.getByRole('checkbox',{name:'智能画质 Auto 模式'})).toBeEnabled();
+    });
+
     it('never claims an obsolete disconnected measurement',()=>{
         render(<LivePerformance locale="zh-CN" device="phone1" running={false}
             config={config} setConfig={vi.fn()} support={support} performance={sample}/>);

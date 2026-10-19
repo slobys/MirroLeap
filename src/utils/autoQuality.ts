@@ -4,8 +4,10 @@ import type {ScrcpyConfig, MirrorPerformance} from '../hooks/useScrcpy';
  * FPS depends on app activity and is never interpreted as packet loss.
  */
 export type AutoQualityStep = {res: string; bitrate: number; reason: 'slow' | 'stable'};
-const SIZES = ['800','1280','1920','2560'] as const;
-const BITRATES = [3,4,8,16] as const;
+// Include every non-4K resolution offered by advanced settings. Small
+// intermediate steps reduce visible disruption when auto-recovering quality.
+export const AUTO_QUALITY_SIZES = ['800','1024','1280','1600','1920','2560'] as const;
+const BITRATES = [3,4,4,6,8,16] as const;
 const COOLDOWN_MS = 180_000;
 
 export function chooseAutoQualityStep(input: {
@@ -20,10 +22,12 @@ export function chooseAutoQualityStep(input: {
     const {config, performance, now, lastChangeAt, running, recording, switching} = input;
     if (!config.autoQuality || !running || recording || switching ||
         config.sessionMode !== 'mirror' || !performance ||
-        now - lastChangeAt < COOLDOWN_MS ||
-        now - performance.observedAt > 8_000) return null;
+        !Number.isFinite(now) || !Number.isFinite(lastChangeAt) ||
+        lastChangeAt > now || now - lastChangeAt < COOLDOWN_MS ||
+        !Number.isFinite(performance.observedAt) ||
+        performance.observedAt > now || now - performance.observedAt > 8_000) return null;
 
-    const index = SIZES.indexOf(config.res as typeof SIZES[number]);
+    const index = AUTO_QUALITY_SIZES.indexOf(config.res as typeof AUTO_QUALITY_SIZES[number]);
     if (index < 0 || !Number.isInteger(config.bitrate) || (config.bitrate ?? 0) <= 0) return null;
     // Auto mode requests its own FPS telemetry regardless of the optional
     // manual print-FPS switch. Never use stale samples from before a restart.
@@ -44,10 +48,10 @@ export function chooseAutoQualityStep(input: {
         const bitrate = config.bitrate!;
         // Try cheaper bitrate adjustment before changing the video dimensions.
         if (bitrate > BITRATES[index] * 0.8 + 2) {
-            return {res: SIZES[index], bitrate: Math.max(3, Math.round(bitrate * 0.75)), reason:'slow'};
+            return {res: AUTO_QUALITY_SIZES[index], bitrate: Math.max(3, Math.round(bitrate * 0.75)), reason:'slow'};
         }
         if (index > 0) {
-            return {res:SIZES[index - 1], bitrate:Math.min(bitrate, BITRATES[index - 1]), reason:'slow'};
+            return {res:AUTO_QUALITY_SIZES[index - 1], bitrate:Math.min(bitrate, BITRATES[index - 1]), reason:'slow'};
         }
     }
 
@@ -58,10 +62,10 @@ export function chooseAutoQualityStep(input: {
     if (cap >= 60 && stable.length >= 45 && stable[stable.length - 1].at - stable[0].at >= 65_000 &&
         stable.filter(s => s.fps >= cap * 0.92 && s.skipped <= 1).length >= stable.length * 0.90) {
         if (config.bitrate! < BITRATES[index]) {
-            return {res:SIZES[index],bitrate:Math.min(BITRATES[index],config.bitrate! + 2),reason:'stable'};
+            return {res:AUTO_QUALITY_SIZES[index],bitrate:Math.min(BITRATES[index],config.bitrate! + 2),reason:'stable'};
         }
-        if (index < SIZES.length - 1) {
-            return {res:SIZES[index+1],bitrate:BITRATES[index+1],reason:'stable'};
+        if (index < AUTO_QUALITY_SIZES.length - 1) {
+            return {res:AUTO_QUALITY_SIZES[index+1],bitrate:BITRATES[index+1],reason:'stable'};
         }
     }
     return null;

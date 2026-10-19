@@ -49,6 +49,25 @@ export function applyDeviceProfile(config: ScrcpyConfig, profile: DeviceProfile 
     return { ...config, ...(profile || {}), device };
 }
 
+/** A stream restart may finish after its phone is no longer selected.
+ * Update only that phone's stored preferences and only if the user has not
+ * changed its video settings since the restart began. Never touch another
+ * device's active UI config from a stale async completion.
+ */
+export function rememberCompletedVideoForInactiveDevice(
+    profiles: DeviceProfiles, device: string,
+    previous: ScrcpyConfig,
+    video: Pick<ScrcpyConfig, 'res' | 'bitrate' | 'fps' | 'codec'>,
+): DeviceProfiles {
+    if (!Object.prototype.hasOwnProperty.call(profiles, device)) return profiles;
+    const saved = profiles[device];
+    const keys = ['res', 'bitrate', 'fps', 'codec'] as const;
+    if (keys.some(key => (saved[key] ?? previous[key]) !== previous[key])) {
+        return profiles;
+    }
+    return {...profiles, [device]: {...saved, ...video}};
+}
+
 /** A never-before-seen phone starts from safe defaults, not the last phone's
  * quality/decoder/clipboard policy. First selection on legacy installations
  * retains the existing saved global config for backwards compatibility.
