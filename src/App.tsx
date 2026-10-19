@@ -341,15 +341,26 @@ function App() {
         }
         const name = transferDisplayName(files[i]);
         setTransferStatus({phase:'sending',completed,total:files.length,label:name,device});
-        const result = await pushFile(device, files[i]);
-        if (result?.success) completed++;
-        else failed++;
+        // A single rejected transfer must not strand the progress overlay
+        // in its sending state or prevent remaining files from being tried.
+        try {
+          const result = await pushFile(device, files[i]);
+          if (result?.success) completed++;
+          else failed++;
+        } catch (error) {
+          console.warn('[MirroLeap] file transfer failed:', error);
+          failed++;
+        }
       }
       setTransferStatus({phase:failed ? 'failed' : 'completed',completed,
         total:files.length,device,
         label:failed
           ? (locale.startsWith('zh') ? failed + ' 个文件传输失败，请查看日志' : failed + ' transfers failed; check logs')
           : (locale.startsWith('zh') ? '已发送到手机 Download 文件夹' : 'Sent to the phone Downloads folder')});
+    } catch (error) {
+      console.warn('[MirroLeap] unexpected transfer queue failure:', error);
+      setTransferStatus({phase:'failed',completed,total:files.length,device,
+        label:locale.startsWith('zh') ? '传输队列发生错误，请查看日志' : 'Transfer queue failed; check logs'});
     } finally {
       transferBusyRef.current = false;
     }

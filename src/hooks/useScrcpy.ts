@@ -960,6 +960,9 @@ export function useScrcpy() {
             setLogs(prev => [...prev.slice(-100), '[VIDEO] Unsupported resolution']);
             return false;
         }
+        // Respect an explicit user choice: Auto must wait through the same
+        // cooldown before it can override a manually chosen resolution.
+        autoLastChangeRef.current[device] = Date.now();
         return applyMirrorVideoConfig(
             device, applyMirrorResolution(liveConfigRef.current, nextSize)
         );
