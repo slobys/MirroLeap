@@ -72,6 +72,8 @@ jobs:
         run: node scripts/windows-settings-layout.mjs
       - name: Real Edge phone quick-controls (8 layouts, 3 DPI scales)
         run: node scripts/windows-phone-controls-layout.mjs
+      - name: Real Edge phone metal frame anti-alias (all corners, 3 DPI scales)
+        run: node scripts/windows-phone-frame-visual.mjs
       - name: Build original standalone desktop executable (unpatched, without any installer)
         run: npm run tauri build -- --no-bundle
       - name: Stage extract-and-run portable version

@@ -31,6 +31,15 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.0.16 · 轻薄钛金边框与平滑圆角（Windows 预发布测试版）
+
+在 v5.0.15 实机确认**退出全屏四角不再凸出**之后，用户反馈外框仍有多层明显的深色边线，在黑色背景下尤为突兀，四角边缘也可见 GDI 硬裁剪的锯齿。本版只针对外观进行精修：
+
+- **边框减少重复装饰**：原来仿真手机的 7 道金属／暗色嵌套圆环，精简成单一细钛金属外沿和一整层深色玻璃边框；降低金属色对比度，去掉额外的发亮描线，同时保留原来的真实 Android 屏幕透明开孔，绝不改手机投屏比例。
+- **缓和四角硬裁剪**：原先 WebView2 外框窗口的 GDI 裁剪**向内缩了 2 个物理像素**，会切掉 SVG 平滑边缘。本版改为让硬裁剪边界比可见金属轮廓**向外放宽约 1 个物理像素**，用原有 SVG 的透明／半透明抗锯齿边缘呈现最终外形。手机视频 GDI 内屏裁剪、SDL 和机身双层防漏角，以及 v5.0.15 DWM 修复均保留。
+- **新增 Windows Edge 像素检查**：Windows CI 通过真实 Edge 渲染横竖两款 SVG，在 100%、125%、150% 缩放下验证四个圆角存在平滑的半透明边缘、屏幕开孔仍透明、外框不再绘制多余的金属圈。
+- **仅外观改动**：置顶、全屏旋转、HID、录屏保存、Wi-Fi 等功能不改。此为候选视觉优化，仍需 Windows 实机在亮／暗桌面背景下验收后，才考虑合入正式版。**v5.0.12 Latest 保持不变。**
+
 ## 🧪 v5.0.15 · DWM 全屏圆角修复与原生窗口诊断（Windows 预发布测试版）
 
 v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已修复。本版针对旧方案未覆盖的 **Windows Desktop Window Manager (DWM) 非客户区渲染**，不再只是调整 GDI 圆角半径：
@@ -132,11 +141,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.0.15_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.0.15_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.0.15_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.16_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.16_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.16_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**测试版请到 [MirroLeap v5.0.15 Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.15) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍保留 v5.0.12 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**测试版请到 [MirroLeap v5.0.16 Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.16) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍保留 v5.0.12 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

@@ -393,11 +393,11 @@ fn apply_native_corner_clip(hwnd: HWND, screen: ScreenRect) -> Result<(), String
         let _ = unsafe { DeleteObject(HGDIOBJ(video_region.0)) };
         return Err(format!("Cannot locate physical handset clipping bounds: {error}"));
     }
-    let margin = crate::frame_layout::BEZEL_CLIP_INSET_PX;
+    let overscan = crate::frame_layout::BEZEL_CLIP_OVERSCAN_PX;
     let physical = unsafe { CreateRoundRectRgn(
-        frame.x-window_rect.left+margin, frame.y-window_rect.top+margin,
-        frame.x+frame.width-window_rect.left-margin+1,
-        frame.y+frame.height-window_rect.top-margin+1,
+        frame.x-window_rect.left-overscan, frame.y-window_rect.top-overscan,
+        frame.x+frame.width-window_rect.left+overscan+1,
+        frame.y+frame.height-window_rect.top+overscan+1,
         2*outer_rx,2*outer_ry,
     ) };
     if physical.0.is_null() {
@@ -484,10 +484,13 @@ fn native_outer_bezel_region(hwnd: HWND) -> Option<(RECT, i32, i32)> {
     let width = window.right - window.left;
     let height = window.bottom - window.top;
     let (rx,ry) = crate::frame_layout::bezel_outer_clip_radii(width,height)?;
-    let margin = crate::frame_layout::BEZEL_CLIP_INSET_PX;
+    // Preserve the WebView2 SVG antialiasing: the old 2px INSET sliced
+    // visible titanium and exposed hard GDI steps on all four corners.
+    // The antialiased SVG edge is x=1, this region stays 1px outside it.
+    let overscan = crate::frame_layout::BEZEL_CLIP_OVERSCAN_PX;
     Some((RECT {
-        left: margin, top: margin,
-        right: width - margin + 1, bottom: height - margin + 1,
+        left: -overscan, top: -overscan,
+        right: width + overscan + 1, bottom: height + overscan + 1,
     },rx,ry))
 }
 
@@ -511,12 +514,16 @@ fn native_outer_bezel_clip_intact(hwnd: HWND) -> bool {
     if region.0.is_null() { return false; }
     let state = unsafe { GetWindowRgn(hwnd,region) };
     let mut actual = RECT::default();
+    // GetWindowRgn may clamp our 1px OUTER overscan to the HWND bounds.
+    // Do not mistakenly classify that harmless rounding as mask loss and
+    // reapply the native region every 350ms, causing flickering hard edges.
+    let bbox_tolerance = crate::frame_layout::BEZEL_CLIP_OVERSCAN_PX + 1;
     let mut valid = state.0 != 0
         && unsafe { GetRgnBox(region,&mut actual) }.0 != 0
-        && actual.left.abs_diff(bounds.left) <= 1
-        && actual.top.abs_diff(bounds.top) <= 1
-        && actual.right.abs_diff(bounds.right) <= 1
-        && actual.bottom.abs_diff(bounds.bottom) <= 1;
+        && actual.left.abs_diff(bounds.left) <= bbox_tolerance as u32
+        && actual.top.abs_diff(bounds.top) <= bbox_tolerance as u32
+        && actual.right.abs_diff(bounds.right) <= bbox_tolerance as u32
+        && actual.bottom.abs_diff(bounds.bottom) <= bbox_tolerance as u32;
     if valid {
         valid = !unsafe { PtInRegion(region,bounds.left,bounds.top) }.as_bool()
             && !unsafe { PtInRegion(region,bounds.right-2,bounds.top) }.as_bool()

@@ -206,13 +206,17 @@ pub fn corner_clip_action(
     }
 }
 
-/// The phone SVG's *outer* physical body is x=1/y=1 with rx=76 on its
-/// 1000 x 2150 artboard. Clipping the transparent WebView's own HWND to this
-/// silhouette prevents Windows/WebView2's opaque black rectangular corners
-/// from leaking past the titanium case after a fullscreen/restore transition.
-/// This is independent of the inner SDL video clip.
+/// The SVG's *visible* physical body is x/y=1 with rx=76 (1000x2150).
+/// Windows GDI HRGN is bitmap HARD CLIPPING, unlike SVG/WebView2's smooth
+/// subpixel alpha. Insetting the GDI edge 2px INSIDE the metal body cut away
+/// the antialiased perimeter and made all four corners visibly stair-stepped.
+///
+/// Keep the native hard-clipping constraint 1 physical px OUTSIDE the visible
+/// SVG body, and make it slightly LESS rounded. DWM's borderless compositor
+/// guard plus the SDL video-region intersection still block square artifacts;
+/// the SVG owns the final visible AA silhouette at all Windows DPI scales.
 pub const BEZEL_OUTER_RADIUS: f64 = 76.0;
-pub const BEZEL_CLIP_INSET_PX: i32 = 2;
+pub const BEZEL_CLIP_OVERSCAN_PX: i32 = 1;
 pub fn bezel_outer_clip_radii(width: i32, height: i32) -> Option<(i32, i32)> {
     if width < 80 || height < 80 || width > 15000 || height > 15000 {
         return None;
@@ -222,9 +226,10 @@ pub fn bezel_outer_clip_radii(width: i32, height: i32) -> Option<(i32, i32)> {
     } else {
         (ARTBOARD_WIDTH, ARTBOARD_HEIGHT)
     };
-    let radius_x = ((width as f64 * BEZEL_OUTER_RADIUS / art_w).ceil() as i32 + 2)
+    // A looser mask must NEVER shave the smoothly rasterized titanium arc.
+    let radius_x = ((width as f64 * BEZEL_OUTER_RADIUS / art_w).ceil() as i32 - 2)
         .clamp(3, width / 3);
-    let radius_y = ((height as f64 * BEZEL_OUTER_RADIUS / art_h).ceil() as i32 + 2)
+    let radius_y = ((height as f64 * BEZEL_OUTER_RADIUS / art_h).ceil() as i32 - 2)
         .clamp(3, height / 3);
     Some((radius_x, radius_y))
 }
@@ -464,8 +469,12 @@ mod tests {
             } else { (ARTBOARD_WIDTH,ARTBOARD_HEIGHT) };
             let expected_x = width as f64 * BEZEL_OUTER_RADIUS / ax;
             let expected_y = height as f64 * BEZEL_OUTER_RADIUS / ay;
-            assert!((rx as f64) > expected_x);
-            assert!((ry as f64) > expected_y);
+            assert!((rx as f64) <= expected_x, "hard clip must not cut the antialiased SVG curve");
+            assert!((ry as f64) <= expected_y, "hard clip must not cut the antialiased SVG curve");
+            // Hard native region is allowed outside the visible physical
+            // x=1 silhouette, while rejecting the rectangular window corners.
+            let over = BEZEL_CLIP_OVERSCAN_PX;
+            assert!(over >= 1 && over <= 2);
         }
         // The outer contour is applied both before and after fullscreen:
         // restoring the previous W/H does NOT make the old WebView2 region
@@ -475,6 +484,38 @@ mod tests {
             assert!(bezel_outer_clip_radii(1920,1080).is_some());
             assert!(bezel_outer_clip_radii(560,1180).is_some());
         }
+    }
+
+    #[test]
+    fn native_corner_mask_respects_svg_antialias_at_common_windows_dpi() {
+        use std::f64::consts::PI;
+        // Screen/outer-frame scaling at 100%, 125%, 150%, portrait and
+        // landscape; the visible x/y=1 metal contour must always lie INSIDE
+        // the hard native clipping ellipse, never be chopped by stair steps.
+        let frames = [(430,900),(538,1125),(645,1350),(540,1180),
+                      (675,1475),(810,1770),(1000,465),(1250,582)];
+        let mut inspected = 0;
+        for (width,height) in frames {
+            let (native_rx,native_ry) = bezel_outer_clip_radii(width,height).unwrap();
+            let (art_w,art_h) = if is_landscape(width,height) {
+                (LANDSCAPE_ARTBOARD_WIDTH,LANDSCAPE_ARTBOARD_HEIGHT)
+            } else { (ARTBOARD_WIDTH,ARTBOARD_HEIGHT) };
+            let svg_rx = width as f64 * BEZEL_OUTER_RADIUS / art_w;
+            let svg_ry = height as f64 * BEZEL_OUTER_RADIUS / art_h;
+            let svg_left = width as f64 / art_w;  // original SVG body starts x=1
+            let svg_top = height as f64 / art_h;  // original SVG body starts y=1
+            let region_left = -BEZEL_CLIP_OVERSCAN_PX as f64;
+            for angle in [0.0, PI/6.0, PI/4.0, PI/3.0, PI/2.0] {
+                let native_x = region_left + native_rx as f64 * (1.0-angle.cos());
+                let native_y = region_left + native_ry as f64 * (1.0-angle.sin());
+                let svg_x = svg_left + svg_rx * (1.0-angle.cos());
+                let svg_y = svg_top + svg_ry * (1.0-angle.sin());
+                assert!(native_x < svg_x && native_y < svg_y,
+                    "the GDI hard edge must stay behind the SVG alpha edge at angle={angle}");
+                inspected += 1;
+            }
+        }
+        assert_eq!(inspected, 40);
     }
 
     #[test]

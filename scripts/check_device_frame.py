@@ -80,11 +80,45 @@ gasket = seal.find('svg:rect[@id="video-edge-gasket"]', ns)
 assert gasket is not None, "Antialiased gasket is missing"
 for attr, expected in {
     "x": "18", "y": "18", "width": "964", "height": "2114", "rx": "72",
-    "stroke": "#06080b", "stroke-width": "7", "fill": "none"
+    "stroke": "#06080b", "stroke-width": "6", "fill": "none"
 }.items():
     assert gasket.attrib.get(attr) == expected, f"Screen gasket {attr} drifted"
-# Overscanned native GDI clip is required: its hard edge must be INSIDE the
-# metal bezel, not coincident with the antialiased aperture and not absent.
+# Visual quality regression: the old skin stacked SEVEN separate dark
+# rectangles and multiple metallic outlines, which read as a doubled border
+# on dark Windows desktops. The streamlined SVG has exactly ONE thin metal
+# contour and ONE continuous glass backing. Both orientations share the same
+# portrait-space geometry (landscape rotates it, no extra fake layer).
+for name in ("iphone-black-portrait.svg", "iphone-black-landscape.svg"):
+    asset = ET.parse(root / "public/device-frame" / name).getroot()
+    assert asset.attrib.get("shape-rendering") == "geometricPrecision", (
+        f"{name}: preserve the smooth SVG quarter-ellipse at nonintegral Windows DPI"
+    )
+    bodies = asset.findall('.//svg:g[@mask="url(#transparentScreen)"]', ns)
+    assert len(bodies) == 1, f"{name}: expected one masked phone body"
+    layers = list(bodies[0])
+    assert [layer.attrib.get("id") for layer in layers] == [
+        "phone-titanium-outline", "phone-glass-bezel",
+    ], f"{name}: removed multi-ring body was reintroduced"
+    assert all(layer.tag.endswith("rect") for layer in layers)
+    metal, glass = layers
+    assert (metal.attrib["x"], metal.attrib["y"], metal.attrib["width"],
+        metal.attrib["height"], metal.attrib["rx"]) == ("1","1","998","2148","76")
+    assert metal.attrib["fill"] == "url(#titanium)"
+    assert glass.attrib["fill"] == "#0a0c10"
+    assert float(glass.attrib["x"]) < 4.5, "metal needs a hairline, not a thick border"
+    assert float(glass.attrib["rx"]) > 70
+    assert "stroke" not in metal.attrib and "stroke" not in glass.attrib
+    gasket_for_asset = asset.find('.//svg:g[@id="screen-seam-seal"]/svg:rect[@id="video-edge-gasket"]',ns)
+    assert gasket_for_asset is not None
+    assert gasket_for_asset.attrib["stroke-width"] == "6"
+    assert gasket_for_asset.attrib["fill"] == "none"
+    assert asset.find('.//svg:linearGradient[@id="edge"]',ns) is None, (
+        "A second glossy metallic stripe would restore the unwanted extra ring"
+    )
+
+# The SDL VIDEO mask is safely oversized behind the glass aperture.
+# The separate NATIVE OUTER BODY mask is one pixel OUTSIDE the SVG's visible
+# titanium contour, so hard GDI raster steps cannot amputate SVG alpha.
 assert "CreateRoundRectRgn" in backend and "SetWindowRgn" in backend
 assert "native_clip_radius" in backend and "reset_native_corner_clip" in backend
 assert "SCREEN_CORNER_RADIUS: f64 = 72.0" in rust
@@ -113,7 +147,12 @@ assert "CreateRoundRectRgn" in backend and "SetWindowRgn" in backend
 # fragments after fullscreen. Clip the transparent WebView2 case HWND too,
 # and constrain the SDL video HRGN to the physical phone silhouette.
 assert "BEZEL_OUTER_RADIUS: f64 = 76.0" in rust
-assert "BEZEL_CLIP_INSET_PX: i32 = 2" in rust
+assert "BEZEL_CLIP_OVERSCAN_PX: i32 = 1" in rust
+assert "BEZEL_CLIP_INSET_PX" not in rust
+assert "let overscan = crate::frame_layout::BEZEL_CLIP_OVERSCAN_PX;" in backend
+assert "left: -overscan, top: -overscan" in backend
+assert "frame.x-window_rect.left-overscan" in backend
+assert "native_corner_mask_respects_svg_antialias_at_common_windows_dpi" in rust
 assert "bezel_outer_clip_radii(" in rust and "native_outer_bezel_clip_intact(" in backend
 assert "apply_native_outer_bezel_clip(shell)" in backend
 assert "last_outer_mask_geometry" in backend
@@ -151,8 +190,8 @@ assert "round_clip_radius" not in backend, (
 )
 # A thin gasket (3.5 SVG units per side) is enough to smooth underscanned GDI
 # edges without introducing a thick, square, black overlay.
-assert (7 / 2) * 720 / 964 > 2.5, "Insufficient gasket overdraw"
-assert (7 / 2) * 720 / 964 < 4.0, "Gasket would visibly thicken the bezel"
+assert (6 / 2) * 720 / 964 > 2.0, "Insufficient gasket overdraw"
+assert (6 / 2) * 720 / 964 < 3.0, "Gasket would visibly thicken the bezel"
 
 assert "set_ignore_cursor_events(true)" in backend, "Main overlay must stay click-through"
 assert "GetAsyncKeyState" in backend, "Dragging must end when left mouse button is released"
