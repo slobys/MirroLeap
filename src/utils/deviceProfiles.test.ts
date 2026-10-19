@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyDeviceProfile, selectDeviceConfig, profileFromConfig, readDeviceProfiles,
-    rememberCompletedVideoForInactiveDevice } from './deviceProfiles';
+    rememberCompletedVideoForInactiveDevice, transitionDeviceSelection } from './deviceProfiles';
 import type { ScrcpyConfig } from '../hooks/useScrcpy';
 
 const base: ScrcpyConfig = {
@@ -34,6 +34,33 @@ describe('device-scoped mirroring preferences', () => {
         const restored = selectDeviceConfig(other,profileFromConfig(phoneA),'phone-a',true);
         expect(restored).toMatchObject({device:'phone-a',res:'2560',bitrate:16,codec:'h265',
             autoQuality:true,clipboardSync:false,audioEnabled:false,record:false});
+    });
+
+    it('saves settings by actual config device during rapid A-to-B-to-C switches', () => {
+        const phoneA={...base,device:'phone-a',res:'2560',bitrate:16,
+            autoQuality:true,clipboardSync:false};
+        const first=transitionDeviceSelection(phoneA,'phone-b',{});
+        expect(first.profiles['phone-a']).toMatchObject({
+            res:'2560',bitrate:16,autoQuality:true,clipboardSync:false});
+        expect(first.config).toMatchObject({device:'phone-b',res:'1920',
+            bitrate:8,autoQuality:false,clipboardSync:true,record:false});
+        const second=transitionDeviceSelection(first.config,'phone-c',first.profiles);
+        expect(second.profiles['phone-a']).toMatchObject({res:'2560',bitrate:16});
+        expect(second.profiles['phone-b']).toMatchObject({
+            res:'1920',bitrate:8,autoQuality:false,clipboardSync:true});
+        expect(second.config.device).toBe('phone-c');
+        const restore=transitionDeviceSelection(second.config,'phone-a',second.profiles);
+        expect(restore.config).toMatchObject({device:'phone-a',res:'2560',
+            bitrate:16,autoQuality:true,clipboardSync:false,record:false});
+        expect(second.profiles['phone-a']).toMatchObject({res:'2560',bitrate:16});
+    });
+    it('rejects dangerous profile keys from a selected device serial', () => {
+        const initial={'phone-a':profileFromConfig(base)};
+        for (const target of ['__proto__','constructor','prototype']) {
+            const output=transitionDeviceSelection(base,target,initial);
+            expect(output.config).toBe(base);
+            expect(output.profiles).toBe(initial);
+        }
     });
 
     it('isolates delayed video restart completion to the original device profile', () => {

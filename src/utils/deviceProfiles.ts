@@ -49,6 +49,32 @@ export function applyDeviceProfile(config: ScrcpyConfig, profile: DeviceProfile 
     return { ...config, ...(profile || {}), device };
 }
 
+/** Saving the phone found on the CURRENT config (not a captured previous
+ * selection) prevents rapid A→B→C switches from assigning A's settings
+ * to B. This pure transition works correctly with React's queued updates.
+ */
+export function transitionDeviceSelection(
+    current: ScrcpyConfig, target: string, profiles: DeviceProfiles,
+): {config: ScrcpyConfig; profiles: DeviceProfiles} {
+    if (!target || current.device === target ||
+        ['__proto__', 'constructor', 'prototype'].includes(target)) {
+        return {config: current, profiles};
+    }
+    const previous = current.device;
+    const safePrevious = previous && !['__proto__', 'constructor', 'prototype'].includes(previous);
+    const updatedProfiles = safePrevious
+        ? {...profiles, [previous]: profileFromConfig(current)}
+        : profiles;
+    return {
+        config: selectDeviceConfig(
+            current, Object.prototype.hasOwnProperty.call(updatedProfiles, target)
+                ? updatedProfiles[target] : undefined,
+            target, Boolean(safePrevious),
+        ),
+        profiles: updatedProfiles,
+    };
+}
+
 /** A stream restart may finish after its phone is no longer selected.
  * Update only that phone's stored preferences and only if the user has not
  * changed its video settings since the restart began. Never touch another

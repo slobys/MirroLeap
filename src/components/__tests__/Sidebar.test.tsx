@@ -74,6 +74,26 @@ describe('Sidebar Component', () => {
         expect(screen.getByTitle('32c35470')).toBeDisabled();
     });
 
+    it('offers a verified same-IP wireless port only after explicit user choice',()=>{
+        const onSelectDevice=vi.fn();
+        const common={...mockProps,onSelectDevice,selectedDevice:'192.168.2.226:5555'};
+        const {rerender}=render(<Sidebar {...common}
+            devices={['192.168.2.226:42137']} runningDevices={[]}/>);
+        const notice=screen.getByRole('region',{name:'Wireless port may have changed'});
+        expect(notice).toHaveTextContent('a matching IP does not prove device identity');
+        expect(onSelectDevice).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button',{name:'Use connected wireless port'}));
+        expect(onSelectDevice).toHaveBeenCalledExactlyOnceWith('192.168.2.226:42137');
+        rerender(<Sidebar {...common}
+            devices={['192.168.2.226:42137','192.168.2.226:43210']} runningDevices={[]}/>);
+        expect(screen.queryByRole('region',{name:'Wireless port may have changed'}))
+            .not.toBeInTheDocument();
+        rerender(<Sidebar {...common}
+            devices={['192.168.2.226:5555']} runningDevices={[]}/>);
+        expect(screen.queryByRole('region',{name:'Wireless port may have changed'}))
+            .not.toBeInTheDocument();
+    });
+
     it('shows unauthorized and offline devices without claiming they are ready', () => {
         render(<Sidebar {...mockProps} devices={[]} pendingDevices={[
             { serial: '32c35470', state: 'unauthorized' },

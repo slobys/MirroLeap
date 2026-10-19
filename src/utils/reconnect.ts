@@ -29,3 +29,25 @@ export function reconnectCandidates(history:string[], connected:string[]):string
     }
     return candidates;
 }
+
+/** Offer an explicit switch to a *verified connected* TLS port. The same IP
+ * is only a hint, NOT device identity: never switch automatically. Multiple
+ * candidates or an already connected old port are deliberately ambiguous.
+ */
+export function suggestedConnectedPort(selected:string, connected:string[]):string | null {
+    const host=adbHistoryHost(selected);
+    if (!host || connected.includes(selected)) return null;
+    const matches=[...new Set(connected.filter(endpoint =>
+        endpoint !== selected && adbHistoryHost(endpoint) === host))];
+    return matches.length === 1 ? matches[0] : null;
+}
+
+/** A background reconnection can finish after the user clears remembered
+ * addresses. Never re-add a removed endpoint from a stale async result.
+ */
+export function isReconnectStillApproved(
+    address:string, savedHistory:string[], attemptEpoch:number, currentEpoch:number,
+):boolean {
+    return attemptEpoch === currentEpoch && savedHistory.includes(address) &&
+        adbHistoryHost(address) !== null;
+}

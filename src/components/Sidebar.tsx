@@ -3,6 +3,7 @@ import { Smartphone, RefreshCw, Usb, Wifi, UploadCloud, Zap, X } from 'lucide-re
 import { useI18n } from '../i18n';
 import { MdnsDevice, PendingAdbDevice, WirelessDiagnosis, isMdnsDeviceConnected } from '../hooks/useScrcpy';
 import WirelessConnectionStatus from './WirelessConnectionStatus';
+import { suggestedConnectedPort } from '../utils/reconnect';
 import { historicWirelessStatus, mdnsServiceKind, normalizeWirelessEndpoint,
     type WirelessFeedback, type WirelessOperationResult } from '../utils/wirelessCenter';
 
@@ -85,6 +86,7 @@ export default function Sidebar({
     const [pairCode, setPairCode] = React.useState('');
     const pairCodeRef = React.useRef<HTMLInputElement>(null);
     const usbDevices = devices.filter(serial => !serial.includes(':') && !serial.startsWith('adb-') && !serial.startsWith('emulator-'));
+    const replacementPort = suggestedConnectedPort(selectedDevice, devices);
 
     // Tapping a discovered device opens this instead of attempting a doomed
     // `adb connect`: a device that shows up here but isn't in the hub above
@@ -369,6 +371,23 @@ export default function Sidebar({
                             })
                         )}
                     </div>
+
+                    {replacementPort && (
+                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2"
+                            role="region" aria-label={locale.startsWith('zh') ? '无线端口已变化' : 'Wireless port may have changed'}>
+                            <p className="text-xs text-amber-300">
+                                {locale.startsWith('zh')
+                                    ? '之前选中的无线端口已离线，但同一 IP 发现一个已连接的新端口。IP 相同不能证明是同一部手机，请核对设备后再切换。'
+                                    : 'The selected wireless port is offline, but a different port on the same IP is connected. Verify the phone first: a matching IP does not prove device identity.'}
+                            </p>
+                            <button type="button" className="w-full rounded-md border border-amber-500/30 p-2 text-left text-xs text-amber-200 hover:bg-amber-500/10 break-all"
+                                onClick={() => onSelectDevice(replacementPort)}
+                                aria-label={locale.startsWith('zh') ? '手动选用已连接端口' : 'Use connected wireless port'}>
+                                <Wifi size={13} className="inline mr-1.5"/>
+                                {locale.startsWith('zh') ? '确认设备并切换至' : 'Verify and switch to'} {replacementPort}
+                            </button>
+                        </div>
+                    )}
 
                     {pendingDevices.length > 0 && (
                         <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 space-y-1" role="region" aria-label={t('sidebar.devicesNeedAttention')}>

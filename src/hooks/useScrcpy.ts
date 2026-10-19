@@ -2,14 +2,15 @@ import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useI18n } from '../i18n';
-import { adbHistoryHost, reconnectDelayMs, reconnectCandidates } from '../utils/reconnect';
+import { adbHistoryHost, reconnectDelayMs, reconnectCandidates,
+    isReconnectStillApproved } from '../utils/reconnect';
 import { createSingleFlightDiscovery } from '../utils/deviceDiscovery';
 import { canApplyMirrorVideo, MIRROR_SIZES } from '../utils/resolutionSwitch';
 import { applyMirrorResolution, videoParams } from '../utils/mirrorPresets';
 import { restartMirrorVideoStream } from '../utils/streamRestart';
 import { MIRROR_PRESETS } from '../utils/mirrorPresets';
-import { DEVICE_PROFILES_KEY, selectDeviceConfig, profileFromConfig, readDeviceProfiles,
-    rememberCompletedVideoForInactiveDevice } from '../utils/deviceProfiles';
+import { DEVICE_PROFILES_KEY, profileFromConfig, readDeviceProfiles,
+    rememberCompletedVideoForInactiveDevice, transitionDeviceSelection } from '../utils/deviceProfiles';
 import { chooseAutoQualityStep } from '../utils/autoQuality';
 import { measuredSkippedFrames } from '../utils/performanceSamples';
 
@@ -168,13 +169,13 @@ export function useScrcpy() {
     const profilesRef = useRef(initialProfiles);
     const selectedDeviceRef = useRef('');
     const setActiveDevice = (next: string) => {
-        if (selectedDeviceRef.current === next) return;
-        const previous = selectedDeviceRef.current;
+        if (selectedDeviceRef.current === next ||
+            ['__proto__', 'prototype', 'constructor'].includes(next)) return;
         selectedDeviceRef.current = next;
         setConfig(current => {
-            if (previous) profilesRef.current[previous] = profileFromConfig(current);
-            if (previous) localStorage.setItem(DEVICE_PROFILES_KEY, JSON.stringify(profilesRef.current));
-            return next ? selectDeviceConfig(current, profilesRef.current[next], next, Boolean(previous)) : current;
+            const transition = transitionDeviceSelection(current, next, profilesRef.current);
+            profilesRef.current = transition.profiles;
+            return transition.config;
         });
         setActiveDeviceState(next);
     };
@@ -256,6 +257,7 @@ export function useScrcpy() {
     const prevDevicesRef = useRef<string[]>([]);
     const mdnsDevicesRef = useRef<MdnsDevice[]>([]);
     const reconnectAttemptsRef = useRef(new Map<string, { failures: number; retryAfter: number; pending: boolean }>());
+    const reconnectHistoryEpochRef = useRef(0);
     const rememberWindowPositionRef = useRef(true);
     const liveConfigRef = useRef(config);
     const liveRunningDevicesRef = useRef(runningDevices);
@@ -360,11 +362,14 @@ export function useScrcpy() {
     useEffect(() => {
         if (!isInitialized) return;
         localStorage.setItem('scrcpy_config', JSON.stringify(config));
-        if (activeDevice && selectedDeviceRef.current === activeDevice) {
+        if (activeDevice && selectedDeviceRef.current === activeDevice &&
+            config.device === activeDevice) {
             profilesRef.current[activeDevice] = profileFromConfig(config);
-            localStorage.setItem(DEVICE_PROFILES_KEY, JSON.stringify(profilesRef.current));
         }
-    }, [config, isInitialized]);
+        // Persist also on deselection: the last phone's preferences must
+        // survive if the user clears the selection before quitting.
+        localStorage.setItem(DEVICE_PROFILES_KEY, JSON.stringify(profilesRef.current));
+    }, [config, activeDevice, isInitialized]);
 
     // Kept in a ref (not read from `config` directly) so the window-position
     // listener below, which only subscribes once on mount, always sees the
@@ -571,7 +576,9 @@ export function useScrcpy() {
         });
     };
 
+    // Invalidate callbacks from all previously queued wireless reconnects.
     const clearHistory = () => {
+        reconnectHistoryEpochRef.current += 1;
         reconnectAttemptsRef.current.clear();
         setHistoryDevices([]);
         localStorage.removeItem('scrcpy_history');
@@ -790,6 +797,9 @@ export function useScrcpy() {
     // when a phone is powered off or its Wi-Fi IP has changed.
     useEffect(() => {
         let disposed = false;
+        const generation = reconnectHistoryEpochRef.current;
+        const isApproved = (address:string) => !disposed && isReconnectStillApproved(
+            address, historyDevices, generation, reconnectHistoryEpochRef.current);
         const tryReconnectHistory = () => {
             if (document.visibilityState === 'hidden' || isRefreshingRef.current) return;
             const now = Date.now();
@@ -807,20 +817,22 @@ export function useScrcpy() {
                 invoke<{ success: boolean; address?: string }>('adb_connect', {
                     ip: address, customPath: config.scrcpyPath, silent: true
                 }).then(res => {
+                    if (!isApproved(address)) return;
                     if (res.success) {
                         reconnectAttemptsRef.current.delete(address);
-                        if (disposed) return;
                         if (res.address && res.address !== address) addToHistory(res.address);
                         void fetchDevicesOnceRef.current(config.scrcpyPath, true);
-                    } else if (!disposed) {
+                    } else {
                         current.failures += 1;
                         current.retryAfter = Date.now() + reconnectDelayMs(current.failures);
                     }
                 }).catch(() => {
-                    if (disposed) return;
+                    if (!isApproved(address)) return;
                     current.failures += 1;
                     current.retryAfter = Date.now() + reconnectDelayMs(current.failures);
-                }).finally(() => { current.pending = false; });
+                }).finally(() => {
+                    if (reconnectAttemptsRef.current.get(address) === current) current.pending = false;
+                });
             }
         };
         tryReconnectHistory();

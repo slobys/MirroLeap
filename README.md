@@ -31,6 +31,14 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.1.4 · 无线端口恢复与设备配置隔离（Windows 预发布测试版）
+
+- **无线端口变化提醒**：Android 11+ 无线调试的连接端口可能变化。当原选中端口离线，且同 IP 上只有一个已连接的新端口时，在设备面板提供显式切换入口。用户必须先核对手机身份，再点击切换；同 IP 并不能证明是同一部手机，程序绝不自动改变选择。
+- **清空历史真正生效**：用户清空无线历史时，所有此前发起但尚未返回的后台重连结果失效，不能再把已清除的地址写回历史或后台悄悄恢复自动重连。
+- **快速切换手机配置不串改**：A→B→C 连续快速切换时，按实际配置的设备编号保存画质与剪贴板偏好，避免 React 更新队列造成另一台手机设置被覆盖；拒绝危险的原型属性设备标识。
+- **不牺牲稳定性**：继续沿用 v5.1.3 的 ADB 单路查询、超时保护及真实性能采样；不修改录制内容、授权凭据或用户剪贴板。
+- **预发布验证**：保留 v5.0.20 为 Latest 正式版；CI 验证通过后发布 Windows ZIP、EXE、MSI 测试包，实际不同 ROM 的端口变化仍需实机验证。
+
 ## 🧪 v5.1.3 · 无线重连稳定性与真实跳帧数据（Windows 预发布测试版）
 
 本次只修复无线发现和性能采样，不增加多余设置项。
@@ -223,11 +231,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.1.3_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.1.3_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.1.3_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.1.4_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.1.4_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.1.4_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.1.3 测试版请到 [GitHub Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.1.3) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 保持 v5.0.20 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**v5.1.4 测试版请到 [GitHub Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.1.4) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 保持 v5.0.20 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 
