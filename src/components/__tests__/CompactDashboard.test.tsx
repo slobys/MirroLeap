@@ -17,7 +17,7 @@ function props(overrides: Partial<React.ComponentProps<typeof CompactDashboard>>
         deviceModels: {}, deviceFriendlyNames: { [selected]: 'Xiaomi 14 Ultra' },
         runningDevices: [], activeDevice: selected,
         onSelectDevice: vi.fn(), onRefresh: vi.fn(), isRefreshing: false,
-        config, onConfigChange: vi.fn(), onPresetChange: vi.fn(), onResolutionChange: vi.fn(),
+        config, onConfigChange: vi.fn(), onResolutionChange: vi.fn(),
         isSwitchingResolution: false,
         onStart: vi.fn(), onStop: vi.fn(), onOpenSettings: vi.fn(),
         coreReady: true, onDownloadCore: vi.fn(),
@@ -109,40 +109,46 @@ describe('MirroLeap daily workspace', () => {
         fireEvent.click(screen.getByRole('button', {name:'安装投屏引擎'}));
         expect(args.onDownloadCore).toHaveBeenCalledOnce();
     });
-    it('provides exactly four resolution-based scenes and applies them through the shared live callback', () => {
-        const args=props();
+    it('shows only one resolution dropdown and retains the detailed 480p video settings line', () => {
+        const args=props({config:{...config,res:'800',bitrate:3,fps:60,codec:'h264'}});
         render(<CompactDashboard {...args}/>);
-        const selector = screen.getByRole('combobox', {name:'场景预设'});
-        expect(selector).toHaveValue('custom');
-        expect(screen.getByRole('option',{name:/720P · 流畅省流/})).toBeInTheDocument();
-        expect(screen.getByRole('option',{name:/1080P · 均衡推荐/})).toBeInTheDocument();
-        expect(screen.getAllByRole('option',{name:/2K · 高清/}).length).toBeGreaterThan(0);
-        expect(screen.getAllByRole('option',{name:/4K · 极致画质/}).length).toBeGreaterThan(0);
-        fireEvent.change(selector,{target:{value:'quality'}});
-        expect(args.onPresetChange).toHaveBeenCalledExactlyOnceWith('quality');
-        expect(args.onConfigChange).not.toHaveBeenCalled();
+        expect(screen.queryByRole('combobox',{name:'场景预设'})).not.toBeInTheDocument();
+        expect(screen.getAllByRole('combobox')).toHaveLength(1);
+        const selector = screen.getByRole('combobox',{name:'分辨率'});
+        expect(selector).toHaveValue('800');
+        expect(screen.getByTestId('home-video-summary')).toHaveTextContent(
+            '当前参数：480p · 3Mbps · 最高 60 帧 · H264'
+        );
+        for (const value of ['1280','1920','2560','3840']) {
+            expect(screen.getByRole('option',{name:new RegExp(value === '1280' ? '720p' :
+                value === '1920' ? '1080P' : value === '2560' ? '2K' : '4K')})).toBeInTheDocument();
+        }
+        fireEvent.change(selector,{target:{value:'2560'}});
+        expect(args.onResolutionChange).toHaveBeenCalledExactlyOnceWith('2560');
         expect(args.onStart).not.toHaveBeenCalled();
         expect(args.onStop).not.toHaveBeenCalled();
     });
-    it('immediately routes scene changes without exposing the manual Stop/Start sequence', () => {
+    it('routes a running 720p resolution selection through automatic video switching', () => {
         const args=props({runningDevices:[selected]});
         render(<CompactDashboard {...args}/>);
-        expect(screen.getByText(/选择场景立即自动应用/)).toBeInTheDocument();
-        fireEvent.change(screen.getByRole('combobox', {name:'场景预设'}),
-            {target:{value:'low-latency'}});
-        expect(args.onPresetChange).toHaveBeenCalledExactlyOnceWith('low-latency');
+        expect(screen.getByText(/切换分辨率将自动匹配画质参数/)).toBeInTheDocument();
+        fireEvent.change(screen.getByRole('combobox',{name:'分辨率'}),
+            {target:{value:'1280'}});
+        expect(args.onResolutionChange).toHaveBeenCalledExactlyOnceWith('1280');
         expect(args.onStop).not.toHaveBeenCalled();
         expect(args.onStart).not.toHaveBeenCalled();
     });
-    it('recognizes the smooth 2K target and still allows direct resolution selection', () => {
-        const args=props({config:{...config,res:'2560',bitrate:16,fps:60,codec:'h264'}});
-        render(<CompactDashboard {...args}/>);
-        expect(screen.getByRole('combobox',{name:'场景预设'})).toHaveValue('quality');
+    it('shows the current 2K parameters and updates the description for the selected config', () => {
+        const initial = props({config:{...config,res:'2560',bitrate:16,fps:60,codec:'h264'}});
+        const {rerender}=render(<CompactDashboard {...initial}/>);
+        expect(screen.getByTestId('home-video-summary')).toHaveTextContent(
+            '当前参数：2K · 16Mbps · 最高 60 帧 · H264'
+        );
         expect(screen.getByText(/2K 已可流畅使用/)).toBeInTheDocument();
-        const select = screen.getByRole('combobox',{name:'分辨率'});
-        expect(select).toHaveValue('2560');
-        fireEvent.change(select,{target:{value:'3840'}});
-        expect(args.onResolutionChange).toHaveBeenCalledExactlyOnceWith('3840');
+        rerender(<CompactDashboard {...props({config:{...config,res:'3840',bitrate:20,fps:30,codec:'h264'}})}/>);
+        expect(screen.getByTestId('home-video-summary')).toHaveTextContent(
+            '当前参数：4K · 20Mbps · 最高 30 帧 · H264'
+        );
     });
 
     it('keeps switching indicator in place and disables manual stop until handoff finishes', () => {

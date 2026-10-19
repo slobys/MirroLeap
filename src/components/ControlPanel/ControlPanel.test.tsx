@@ -83,35 +83,35 @@ describe('Android phone screen recording mode boundaries', () => {
     });
 });
 
-describe('four-resolution live engine configuration', () => {
-    it('matches the homepage preset and keeps scene-specific bitrate/FPS while defaulting to H.264', async () => {
-        const user = userEvent.setup();
-        const setConfig = renderControlPanel(createConfig({
+describe('single resolution control with dynamic video parameter summary', () => {
+    it('removes the duplicate scene preset while preserving the current custom encoding details', () => {
+        renderControlPanel(createConfig({
             res:'2560',bitrate:16,codec:'h265',fps:30,audioEnabled:false,
             renderDriver:'opengl',rotation:'90'
         }), supportedRenderers);
-        const select = screen.getByRole('combobox',{name:'Profiles · Instant selection'});
-        expect(select).toHaveValue('custom');
+        expect(screen.queryByRole('combobox',{name:/Profiles|Scenario profile/})).not.toBeInTheDocument();
+        expect(screen.queryByText(/场景预设/)).not.toBeInTheDocument();
+        expect(screen.getAllByText('Resolution')).toHaveLength(1);
+        expect(screen.getByTestId('settings-video-summary')).toHaveTextContent(
+            'Current settings: 2K · 16Mbps · up to 30 fps · H265'
+        );
         expect(screen.getByText(/Use 2K when it runs smoothly/)).toBeInTheDocument();
-        await user.selectOptions(select,'balanced');
-        expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({
-            res:'1920',bitrate:8,fps:60,codec:'h264',
-            audioEnabled:false,renderDriver:'opengl',rotation:'90'
-        }));
     });
 
-    it('dispatches a running-session scene change through its live preset callback', async () => {
-        const user=userEvent.setup();
-        const onPresetChange=vi.fn();
-        const setConfig=vi.fn();
-        render(<ControlPanel config={createConfig({res:'1920',bitrate:8,codec:'h264'})}
-            setConfig={setConfig} onPresetChange={onPresetChange}
-            onStart={vi.fn()} onStop={vi.fn()} isRunning
-            onListOptions={vi.fn()} detectedCameras={[]}
-            renderDriverSupport={supportedRenderers}/>);
-        await user.selectOptions(screen.getByRole('combobox',{name:'Profiles · Instant selection'}),'ultra');
-        expect(onPresetChange).toHaveBeenCalledExactlyOnceWith('ultra');
-        expect(setConfig).not.toHaveBeenCalled();
+    it('refreshes the parameter explanation whenever the saved resolution/bitrate/FPS changes', () => {
+        const common = {setConfig:vi.fn(),onStart:vi.fn(),onStop:vi.fn(),
+            isRunning:false,onListOptions:vi.fn(),detectedCameras:[],
+            renderDriverSupport:supportedRenderers};
+        const {rerender}=render(<ControlPanel {...common}
+            config={createConfig({res:'800',bitrate:3,fps:60,codec:'h264'})}/>);
+        expect(screen.getByTestId('settings-video-summary')).toHaveTextContent(
+            'Current settings: 480p · 3Mbps · up to 60 fps · H264'
+        );
+        rerender(<ControlPanel {...common}
+            config={createConfig({res:'3840',bitrate:20,fps:30,codec:'h264'})}/>);
+        expect(screen.getByTestId('settings-video-summary')).toHaveTextContent(
+            'Current settings: 4K · 20Mbps · up to 30 fps · H264'
+        );
     });
 
     it('keeps advanced codec, rotation and renderer available but collapsed by default', async () => {
@@ -149,9 +149,11 @@ describe('four-resolution live engine configuration', () => {
         expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({bitrate:11}));
     });
 
-    it('preserves legacy custom high-resolution settings, and warns about lag', () => {
+    it('preserves the legacy manually selected codec and automatic FPS while explaining 2K use', () => {
         renderControlPanel(createConfig({res:'2560',bitrate:16,codec:'h265',fps:undefined}), supportedRenderers);
-        expect(screen.getByRole('combobox',{name:'Profiles · Instant selection'})).toHaveValue('custom');
+        expect(screen.getByTestId('settings-video-summary')).toHaveTextContent(
+            '2K · 16Mbps · automatic fps · H265'
+        );
         expect(screen.getByText(/Use 2K when it runs smoothly/)).toBeInTheDocument();
     });
 });

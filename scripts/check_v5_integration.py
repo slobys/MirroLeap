@@ -116,18 +116,21 @@ assert all(size in preset_table for size in ("1280","1920","2560","3840"))
 assert "...MIRROR_PRESETS.balanced" in hooks, "New install defaults must use canonical profile"
 assert "balanced" in preset_table, "Canonical default must be defined"
 assert "...prev, ...parsed" in hooks, "Do not erase old manual configuration"
-assert "MIRROR_PRESET_ORDER.map" in home and "MIRROR_PRESET_ORDER.map" in panel
-assert "activeMirrorPreset(config)" in home and "activeMirrorPreset(config)" in panel
+assert "场景预设" not in home and "场景预设" not in panel, "Duplicate UI scene selector still exists"
+assert "ml-preset" not in home and "ml-engine-preset" not in panel
+assert "mirrorVideoSummary(config, locale)" in home and "mirrorVideoSummary(config, locale)" in panel
+assert 'data-testid="home-video-summary"' in home
+assert 'data-testid="settings-video-summary"' in panel
 assert "Advanced encoding & display" in panel
 assert "videoLoadWarning(config, locale)" in panel and "videoLoadWarning(config, locale)" in home
 assert "applyMirrorPreset(config:" in presets and "applyMirrorResolution(config:" in presets
-assert "onPresetChange(event.target.value as MirrorPreset)" in home
+assert "onResolutionChange(event.target.value)" in home
 assert "mirror_scene_profile_settings_generate_expected_scrcpy_video_flags" in commands
 assert "restartMirrorVideoStream" in hooks
 assert "applyMirrorVideoConfig" in hooks
-assert "onPresetChange={handlePresetChange}" in app
+assert "onPresetChange" not in app and "onPresetChange" not in home and "onPresetChange" not in panel
 assert "onResolutionChange={handleResolutionChange}" in app
-assert "onPresetChange" in home and "onPresetChange" in panel
+assert "onResolutionChange" in home and "onResolutionChange" in panel
 assert "canApplyMirrorVideo" in hooks
 assert "applyMirrorResolution" in hooks
 assert "restartMirrorVideoStream(previous, launch" in hooks

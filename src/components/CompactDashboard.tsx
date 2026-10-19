@@ -6,8 +6,7 @@ import type { PendingAdbDevice, ScrcpyConfig } from '../hooks/useScrcpy';
 import {invoke} from '@tauri-apps/api/core';
 import {useState, type MouseEvent} from 'react';
 import VersionUpdateBadge from './VersionUpdateBadge';
-import { activeMirrorPreset, MIRROR_PRESET_ORDER,
-    MIRROR_PRESET_COPY, mirrorVideoSummary, videoLoadWarning, type MirrorPreset } from '../utils/mirrorPresets';
+import { mirrorVideoSummary, videoLoadWarning } from '../utils/mirrorPresets';
 
 type Props = {
     locale: string;
@@ -26,7 +25,6 @@ type Props = {
     isRefreshing: boolean;
     config: ScrcpyConfig;
     onConfigChange: (config: ScrcpyConfig) => void;
-    onPresetChange: (preset: MirrorPreset) => void;
     onResolutionChange: (size: string) => void;
     isSwitchingResolution: boolean;
     onStart: () => void;
@@ -51,19 +49,14 @@ export default function CompactDashboard({
     locale, version, hasUpdate, checkingUpdate, onOpenUpdate,
     devices, pendingDevices, deviceModels, deviceFriendlyNames,
     runningDevices, activeDevice, onSelectDevice, onRefresh, isRefreshing,
-    config, onConfigChange, onPresetChange, onResolutionChange, isSwitchingResolution,
+    config, onConfigChange, onResolutionChange, isSwitchingResolution,
     onStart, onStop, onOpenSettings, coreReady, onDownloadCore,
     isDownloading, downloadProgress,
 }: Props) {
     const zh = locale.startsWith('zh');
     const copy = (chinese: string, english: string) => zh ? chinese : english;
     const running = runningDevices.includes(activeDevice);
-    const activePreset = activeMirrorPreset(config);
     const loadWarning = videoLoadWarning(config, locale);
-    const presetHint = activePreset === 'custom'
-        ? copy('已保留你的手动视频参数', 'Your custom video settings are preserved')
-        : (zh ? MIRROR_PRESET_COPY[activePreset].hintZh
-              : MIRROR_PRESET_COPY[activePreset].hintEn);
     const selected = devices.includes(activeDevice);
     const deviceLabel = (serial: string) =>
         deviceFriendlyNames[serial] || deviceModels[serial] || serial;
@@ -224,35 +217,6 @@ export default function CompactDashboard({
                         </div>
 
                         <div className="ml-field mt-3">
-                            <label htmlFor="ml-preset" className="ml-field-title">
-                                {copy('场景预设', 'Scenario profile')}
-                            </label>
-                            <select id="ml-preset" className="ml-select"
-                                value={activePreset}
-                                disabled={isSwitchingResolution}
-                                onChange={(event) => {
-                                    if (event.target.value !== 'custom') {
-                                        onPresetChange(event.target.value as MirrorPreset);
-                                    }
-                                }}>
-                                <option value="custom" disabled>{copy('自定义参数', 'Custom settings')}</option>
-                                {MIRROR_PRESET_ORDER.map(preset => (
-                                    <option key={preset} value={preset}>
-                                        {zh ? MIRROR_PRESET_COPY[preset].zh : MIRROR_PRESET_COPY[preset].en}
-                                    </option>
-                                ))}
-                            </select>
-                            <p className="ml-muted mt-1 text-[11px] leading-5" role="note">
-                                {presetHint} · {mirrorVideoSummary(config, locale)}
-                            </p>
-                            {visibleRunning && <p className="ml-muted mt-1 text-[11px]" role="note">
-                                {isSwitchingResolution
-                                    ? copy('正在自动切换视频流，请稍候…', 'Applying new video stream automatically…')
-                                    : copy('选择场景立即自动应用，无需手动停止投屏（视频会短暂重启）。',
-                                        'Choose a profile to apply automatically (brief video restart).')}
-                            </p>}
-                        </div>
-                        <div className="ml-field mt-2">
                             <label htmlFor="ml-resolution" className="ml-field-title">{copy('分辨率', 'Resolution')}</label>
                             <select id="ml-resolution" value={config.res || '0'}
                                 disabled={isSwitchingResolution}
@@ -264,6 +228,17 @@ export default function CompactDashboard({
                                 {!resolutions.some(({value}) => value === config.res) && config.res !== '0' &&
                                     <option value={config.res}>{config.res}</option>}
                             </select>
+                            <p className="ml-muted mt-2 text-xs leading-5" role="note" data-testid="home-video-summary">
+                                {copy('当前参数：', 'Current settings: ')}{mirrorVideoSummary(config, locale)}
+                            </p>
+                            {visibleRunning && (
+                                <p className="ml-muted mt-1 text-[11px] leading-5" role="note">
+                                    {isSwitchingResolution
+                                        ? copy('正在自动切换视频流，请稍候…', 'Applying new video stream…')
+                                        : copy('切换分辨率将自动匹配画质参数并短暂重启视频，无需手动停止。',
+                                            'Changing resolution applies matching video settings automatically (brief restart).')}
+                                </p>
+                            )}
                             {loadWarning && (
                                 <p className="mt-1 text-[11px] leading-5 text-amber-600 dark:text-amber-400" role="note">
                                     {loadWarning}

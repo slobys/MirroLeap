@@ -17,7 +17,6 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import OnboardingModal from "./components/OnboardingModal";
 import ThemedModal from "./components/ThemedModal";
 import { useScrcpy } from "./hooks/useScrcpy";
-import { applyMirrorPreset, type MirrorPreset } from './utils/mirrorPresets';
 import { getVersion } from '@tauri-apps/api/app';
 import { useI18n } from "./i18n";
 import {useStartupUpdateCheck} from "./hooks/useStartupUpdateCheck";
@@ -45,7 +44,6 @@ function App() {
     runScrcpy,
     stopScrcpy,
     changeMirrorResolution,
-    applyMirrorVideoConfig,
     applyRecordingNow,
     isApplyingRecording,
     recordingStatuses,
@@ -104,7 +102,7 @@ function App() {
     kind: 'info'
   });
 
-  const [appVersion, setAppVersion] = useState("5.0.18");
+  const [appVersion, setAppVersion] = useState("5.0.19");
   const [appVersionReady,setAppVersionReady] = useState(false);
   const {startupRelease, startupInstallKind, showStartupPrompt,
     checking: checkingUpdate, rememberUpdate, dismissStartupPrompt} =
@@ -258,11 +256,6 @@ function App() {
       'warning',
     );
   };
-  const handlePresetChange = (preset: MirrorPreset) => {
-    const requested = applyMirrorPreset(config, preset);
-    void applyMirrorVideoConfig(activeDevice || config.device, requested)
-      .then(ok => { if (!ok) notifySwitchFailure(); });
-  };
   const handleResolutionChange = (size: string) => {
     if (config.sessionMode !== 'mirror') {
       setConfig(prev => ({...prev, res:size}));
@@ -413,7 +406,6 @@ function App() {
               isRefreshing={isRefreshing}
               config={config}
               onConfigChange={setConfig}
-              onPresetChange={handlePresetChange}
               onResolutionChange={handleResolutionChange}
               isSwitchingResolution={isSwitchingResolution}
               onStart={handleStartMirror}
@@ -461,7 +453,6 @@ function App() {
                       <ControlPanel
                         config={config} setConfig={setConfig} onStart={handleStart}
                         onStop={handleStop} isRunning={sessionRunning || isSwitchingResolution}
-                        onPresetChange={handlePresetChange}
                         onResolutionChange={handleResolutionChange}
                         isSwitchingResolution={isSwitchingResolution} detectedCameras={detectedCameras}
                         renderDriverSupport={renderDriverSupport}

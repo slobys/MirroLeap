@@ -4,8 +4,7 @@ import { RenderDriverSupport, ScrcpyConfig } from '../../hooks/useScrcpy';
 import Tooltip from '../Tooltip';
 import { buildRendererOptions, mapRendererSelection } from './rendererOptions';
 import { useI18n } from '../../i18n';
-import { activeMirrorPreset, applyMirrorPreset, MIRROR_PRESET_COPY,
-    MIRROR_PRESET_ORDER, mirrorVideoSummary, videoLoadWarning, type MirrorPreset } from '../../utils/mirrorPresets';
+import { mirrorVideoSummary, videoLoadWarning } from '../../utils/mirrorPresets';
 
 interface ControlPanelProps {
     config: ScrcpyConfig;
@@ -14,7 +13,6 @@ interface ControlPanelProps {
     onStop: () => void;
     isRunning: boolean;
     onResolutionChange?: (size: string) => void;
-    onPresetChange?: (preset: MirrorPreset) => void;
     isSwitchingResolution?: boolean;
     onListOptions: (arg: string) => void;
     detectedCameras?: { id: string, name: string }[];
@@ -94,7 +92,6 @@ export default function ControlPanel({
     onStop,
     isRunning,
     onResolutionChange,
-    onPresetChange,
     isSwitchingResolution = false,
     onListOptions,
     detectedCameras = [],
@@ -207,6 +204,7 @@ export default function ControlPanel({
         <>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {showResolution && (
+                <div className="space-y-2">
                 <CustomSelect
                     label={t('controlPanel.resolution')}
                     value={config.res || "0"}
@@ -223,6 +221,13 @@ export default function ControlPanel({
                         { value: "800", label: "480p" },
                     ]}
                 />
+                {config.sessionMode === 'mirror' && (
+                    <p className="text-xs text-zinc-500 leading-5" role="note" data-testid="settings-video-summary">
+                        {locale.startsWith('zh') ? '当前参数：' : 'Current settings: '}
+                        {mirrorVideoSummary(config, locale)}
+                    </p>
+                )}
+                </div>
             )}
             {showCodec && config.sessionMode !== 'mirror' && <CodecField />}
             <CustomSelect
@@ -256,8 +261,8 @@ export default function ControlPanel({
                 </div>
                 <p className="text-xs text-zinc-500 mt-3 leading-5" role="note">
                     {locale.startsWith('zh')
-                        ? '编码器、旋转和图形渲染器属于兼容性选项，不必随场景切换；H.264 和自动渲染器更稳妥。更改后在下次投屏时生效。'
-                        : 'Codec, rotation and graphics renderer are compatibility controls, not scenario presets. H.264 and Auto are safer defaults. Changes take effect next session.'}
+                        ? '编码器、旋转和图形渲染器属于高级兼容性选项；H.264 和自动渲染器更稳妥。更改后在下次投屏时生效。'
+                        : 'Codec, rotation and graphics renderer are advanced compatibility controls. H.264 and Auto are safer defaults. Changes take effect next session.'}
                 </p>
             </details>
         )}
@@ -359,40 +364,6 @@ export default function ControlPanel({
                     {config.sessionMode === 'mirror' && (
                         <>
                             <div className="space-y-3 pt-0.5">
-                                <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
-                                    <label htmlFor="ml-engine-preset" className="block text-xs font-bold text-zinc-600 dark:text-zinc-300">
-                                        {locale.startsWith('zh') ? '场景预设 · 一键切换画质' : 'Profiles · Instant selection'}
-                                    </label>
-                                    <select id="ml-engine-preset" className="ml-select"
-                                        value={activeMirrorPreset(config)}
-                                        disabled={isSwitchingResolution}
-                                        onChange={(event) => {
-                                            if (event.target.value !== 'custom') {
-                                                const preset = event.target.value as MirrorPreset;
-                                                if (onPresetChange) onPresetChange(preset);
-                                                else setConfig(applyMirrorPreset(config, preset));
-                                            }
-                                        }}>
-                                        <option value="custom" disabled>
-                                            {locale.startsWith('zh') ? '自定义参数（保留旧设置）' : 'Custom settings (preserved)'}
-                                        </option>
-                                        {MIRROR_PRESET_ORDER.map(preset => (
-                                            <option key={preset} value={preset}>
-                                                {locale.startsWith('zh')
-                                                    ? MIRROR_PRESET_COPY[preset].zh
-                                                    : MIRROR_PRESET_COPY[preset].en}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <p className="text-xs text-zinc-500 leading-5" role="note">
-                                        {mirrorVideoSummary(config, locale)}
-                                        {isSwitchingResolution
-                                            ? (locale.startsWith('zh') ? ' · 正在自动切换画质…' : ' · Applying new video stream…')
-                                            : isRunning && (locale.startsWith('zh')
-                                                ? ' · 选中即自动切换，无需手动停止；视频短暂重启'
-                                                : ' · Applies automatically (brief video restart)')}
-                                    </p>
-                                </div>
                                 <PerformanceGrid />
                                 <BitrateControl label={t('controlPanel.bitrate')} value={config.bitrate ?? 8} onChange={(v) => handleChange('bitrate', v)} />
                                 {videoLoadWarning(config, locale) && (

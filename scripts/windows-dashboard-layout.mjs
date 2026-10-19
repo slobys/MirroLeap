@@ -47,6 +47,24 @@ async function check(page, mode, viewport, scale) {
     mode === 'running' || mode === 'switching'
       ? '.ml-stop-action' : '.ml-primary-action');
   await button.waitFor({state: 'visible'});
+  // v5.0.19: only ONE quality selector. The dynamic description must remain
+  // directly below it at every Windows DPI/viewport size, including while
+  // auto-restarting the video or when scrcpy isn't installed yet.
+  assert.equal(await page.locator('.ml-mirror-card select').count(),1,
+    'Home must not present duplicate scene and resolution dropdowns');
+  assert.equal(await page.locator('#ml-preset').count(),0,
+    'Legacy scene dropdown was reintroduced');
+  const resolution = page.locator('#ml-resolution');
+  const summary = page.locator('[data-testid="home-video-summary"]');
+  await summary.waitFor({state:'visible'});
+  const text = await summary.textContent();
+  assert(text?.includes('当前参数：') && text.includes('8Mbps'),
+    'Actual size / bitrate / FPS / codec summary is missing: ' + text);
+  const selectorBounds = await resolution.boundingBox();
+  const summaryBounds = await summary.boundingBox();
+  assert(selectorBounds && summaryBounds &&
+    summaryBounds.y >= selectorBounds.y + selectorBounds.height - 1,
+    'Quality parameter explanation must sit immediately below resolution select');
   if (mode === 'switching') {
     assert(await button.isDisabled(),
       'During an automatic video switch the Stop control must be disabled');

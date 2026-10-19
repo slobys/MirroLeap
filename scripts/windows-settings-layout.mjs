@@ -104,6 +104,25 @@ async function verify(page, viewport, scale) {
   assert.equal(geometry.outerColumns, viewport.width > 1050 ? 2 : 1,
     desc + ': mirrored layout did not adapt to available width: ' + geometry.outerTemplate);
 
+  // v5.0.19: the professional video panel has one resolution selector,
+  // not a second "scene" dropdown. Preserve an accurate live parameters
+  // description immediately below that resolution control.
+  assert.equal(await page.locator('#ml-engine-preset').count(),0,
+    desc + ': duplicate scene selector is still visible');
+  const videoSummary = page.locator('[data-testid="settings-video-summary"]');
+  await videoSummary.waitFor({state:'visible'});
+  const detailsText = (await videoSummary.textContent()) || '';
+  assert(detailsText.includes('1080p · 8Mbps') &&
+    detailsText.includes('H264') &&
+    (detailsText.includes('最高 60 帧') || detailsText.includes('up to 60 fps')),
+    desc + ': incorrect current-video parameters: ' + detailsText);
+  const summaryBelowSelect = await videoSummary.evaluate((el) => {
+    const selector = el.parentElement?.querySelector('button');
+    if (!selector) return false;
+    return el.getBoundingClientRect().top >= selector.getBoundingClientRect().bottom - 1;
+  });
+  assert(summaryBelowSelect, desc + ': video summary must follow the single resolution input');
+
   // The bottom action must remain reachable at the minimum window size,
   // even though it is intentionally below the fold instead of being squeezed.
   const action = page.locator('.ml-comfort-settings > div:last-child > button');
