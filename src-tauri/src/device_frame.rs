@@ -433,7 +433,7 @@ fn native_corner_clip_intact(hwnd: HWND, screen: ScreenRect) -> bool {
     if probe.0.is_null() { return false; }
     let kind = unsafe { GetWindowRgn(hwnd, probe) };
     let mut actual = RECT::default();
-    let valid = kind.0 != 0
+    let mut valid = kind.0 != 0
         && unsafe { GetRgnBox(probe, &mut actual) }.0 != 0
         // Win32 region rasterization can adjust an exclusive edge by one
         // physical pixel. The 4px underscan/gasket margin covers it.
