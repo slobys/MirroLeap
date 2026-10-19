@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ControlPanel from '.';
@@ -47,6 +47,8 @@ function renderControlPanel(config: ScrcpyConfig, support: RenderDriverSupport, 
 }
 
 async function openRendererSelect(user: ReturnType<typeof userEvent.setup>) {
+    const advanced = screen.queryByText('Advanced encoding & display');
+    if (advanced) await user.click(advanced);
     const label = screen.getByText('Graphics Renderer');
     const container = label.parentElement as HTMLElement;
     const button = container.querySelector('button') as HTMLButtonElement;
@@ -78,6 +80,65 @@ describe('Android phone screen recording mode boundaries', () => {
         expect(setConfig).toHaveBeenLastCalledWith(expect.objectContaining({
             sessionMode:'desktop',record:false
         }));
+    });
+});
+
+describe('1080p-first engine configuration', () => {
+    it('matches the homepage preset and keeps scene-specific bitrate/FPS while defaulting to H.264', async () => {
+        const user = userEvent.setup();
+        const setConfig = renderControlPanel(createConfig({
+            res:'2560',bitrate:16,codec:'h265',fps:30,audioEnabled:false,
+            renderDriver:'opengl',rotation:'90'
+        }), supportedRenderers);
+        const select = screen.getByRole('combobox',{name:'Scenario profile · 1080p first'});
+        expect(select).toHaveValue('custom');
+        expect(screen.getByText(/Native, 2K and 4K sizes can add/)).toBeInTheDocument();
+        await user.selectOptions(select,'balanced');
+        expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({
+            res:'1920',bitrate:8,fps:60,codec:'h264',
+            audioEnabled:false,renderDriver:'opengl',rotation:'90'
+        }));
+    });
+
+    it('keeps advanced codec, rotation and renderer available but collapsed by default', async () => {
+        const user = userEvent.setup();
+        renderControlPanel(createConfig({res:'1920',bitrate:8,codec:'h264'}), supportedRenderers);
+        const advanced = screen.getByText('Advanced encoding & display').closest('details') as HTMLDetailsElement;
+        expect(advanced).not.toHaveAttribute('open');
+        expect(advanced).toContainElement(screen.getByText('Graphics Renderer'));
+        await user.click(screen.getByText('Advanced encoding & display'));
+        expect(advanced).toHaveAttribute('open');
+        expect(screen.getByText('Resolution')).toBeInTheDocument();
+        expect(screen.getByText('Bitrate')).toBeInTheDocument();
+    });
+
+    it('keeps advanced settings open when a manual codec or renderer value changes', async () => {
+        const user = userEvent.setup();
+        const settings = createConfig({res:'1920',bitrate:8,codec:'h264'});
+        const common = {setConfig:vi.fn(),onStart:vi.fn(),onStop:vi.fn(),
+            isRunning:false,onListOptions:vi.fn(),detectedCameras:[],
+            renderDriverSupport:supportedRenderers};
+        const {rerender}=render(<ControlPanel {...common} config={settings}/>);
+        await user.click(screen.getByText('Advanced encoding & display'));
+        const advanced=screen.getByText('Advanced encoding & display').closest('details') as HTMLDetailsElement;
+        expect(advanced).toHaveAttribute('open');
+        rerender(<ControlPanel {...common} config={{...settings,codec:'h265'}}/>);
+        expect(screen.getByText('Advanced encoding & display').closest('details')).toHaveAttribute('open');
+    });
+
+    it('commits manual bitrate slider changes made with the keyboard', () => {
+        const setConfig=renderControlPanel(
+            createConfig({res:'1920',bitrate:8,fps:60,codec:'h264'}), supportedRenderers);
+        const slider=screen.getByRole('slider',{name:'Bitrate'});
+        fireEvent.change(slider,{target:{value:'11'}});
+        fireEvent.keyUp(slider,{key:'ArrowRight',target:{value:'11'}});
+        expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({bitrate:11}));
+    });
+
+    it('preserves legacy custom high-resolution settings, and warns about lag', () => {
+        renderControlPanel(createConfig({res:'2560',bitrate:16,codec:'h265',fps:undefined}), supportedRenderers);
+        expect(screen.getByRole('combobox',{name:'Scenario profile · 1080p first'})).toHaveValue('custom');
+        expect(screen.getByText(/Native, 2K and 4K sizes can add/)).toBeInTheDocument();
     });
 });
 
@@ -134,7 +195,7 @@ describe('ControlPanel renderer selector', () => {
         });
 
         it('shows auto renderer value by default', () => {
-            expect(screen.getByText('Auto')).toBeInTheDocument();
+            expect(screen.getAllByText('Auto').length).toBeGreaterThan(0);
         });
 
         it('shows supported renderer option', async () => {

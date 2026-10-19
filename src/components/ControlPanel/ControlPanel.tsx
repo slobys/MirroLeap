@@ -4,6 +4,8 @@ import { RenderDriverSupport, ScrcpyConfig } from '../../hooks/useScrcpy';
 import Tooltip from '../Tooltip';
 import { buildRendererOptions, mapRendererSelection } from './rendererOptions';
 import { useI18n } from '../../i18n';
+import { activeMirrorPreset, applyMirrorPreset, MIRROR_PRESET_COPY,
+    MIRROR_PRESET_ORDER, mirrorVideoSummary, videoLoadWarning, type MirrorPreset } from '../../utils/mirrorPresets';
 
 interface ControlPanelProps {
     config: ScrcpyConfig;
@@ -20,11 +22,18 @@ interface ControlPanelProps {
 
 const BitrateControl = ({ label, value, onChange }: { label: string, value: number, onChange: (val: number) => void }) => {
     const [localValue, setLocalValue] = useState(value);
+    const lastCommitted = useRef(value);
 
-    // Sync from parent if parent changes externally (e.g. preset load)
+    // Sync from parent if parent changes externally (e.g. preset load).
     useEffect(() => {
         setLocalValue(value);
+        lastCommitted.current = value;
     }, [value]);
+    const commit = (next: number) => {
+        if (!Number.isFinite(next) || next === lastCommitted.current) return;
+        lastCommitted.current = next;
+        onChange(next);
+    };
 
     return (
         <div className="space-y-1">
@@ -34,12 +43,20 @@ const BitrateControl = ({ label, value, onChange }: { label: string, value: numb
             </div>
             <input
                 type="range"
+                aria-label={label}
                 min="1"
                 max="50"
                 value={localValue}
-                onChange={(e) => setLocalValue(parseInt(e.target.value))}
-                onMouseUp={() => onChange(localValue)}
-                onTouchEnd={() => onChange(localValue)}
+                onChange={(e) => setLocalValue(Number(e.currentTarget.value))}
+                onMouseUp={(e) => commit(Number(e.currentTarget.value))}
+                onTouchEnd={(e) => commit(Number(e.currentTarget.value))}
+                onKeyUp={(e) => {
+                    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+                        'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) {
+                        commit(Number(e.currentTarget.value));
+                    }
+                }}
+                onBlur={(e) => commit(Number(e.currentTarget.value))}
                 className="w-full h-1 accent-primary bg-zinc-800 rounded-full appearance-none cursor-pointer hover:bg-zinc-700 transition-colors"
             />
         </div>
@@ -82,6 +99,10 @@ export default function ControlPanel({
     renderDriverSupport = { hostOs: 'unknown', supportsRenderDriver: false, supportedDrivers: [] }
 }: ControlPanelProps) {
     const { t, locale } = useI18n();
+    // PerformanceGrid is a legacy nested component, so rerenders from any
+    // selected value remount its contents. Keep the advanced section's open
+    // state at the stable ControlPanel level instead of snapping closed.
+    const [advancedOpen, setAdvancedOpen] = useState(false);
 
     const handleChange = (field: keyof ScrcpyConfig, value: any) => {
         // "Record phone screen" is strictly tied to Android's physical
@@ -144,6 +165,42 @@ export default function ControlPanel({
 
     // BitrateControl removed from here
 
+    const CodecField = () => (
+        <CustomSelect
+            label={t('controlPanel.codec')}
+            value={config.codec || 'h264'}
+            onChange={(val) => handleChange('codec', val)}
+            options={[
+                { value: 'h264', label: 'H.264' },
+                { value: 'h265', label: 'H.265' },
+                { value: 'av1', label: 'AV1' },
+                { value: 'vp8', label: 'VP8' },
+                { value: 'vp9', label: 'VP9' },
+            ]}
+        />
+    );
+    const RotationField = () => (
+        <CustomSelect
+            label={t('controlPanel.rotation')}
+            value={config.rotation || '0'}
+            onChange={(val) => handleChange('rotation', val)}
+            options={[
+                { value: '0', label: '0°' },
+                { value: '270', label: '-90°' },
+                { value: '90', label: '+90°' },
+                { value: '180', label: '180°' },
+            ]}
+        />
+    );
+    const RendererField = () => (
+        <CustomSelect
+            label={t('controlPanel.graphicsRenderer')}
+            value={config.renderDriver || 'auto'}
+            onChange={(val) => handleChange('renderDriver', mapRendererSelection(val))}
+            options={rendererOptions}
+        />
+    );
+
     const PerformanceGrid = ({ showResolution = true, showCodec = true }: { showResolution?: boolean, showCodec?: boolean }) => (
         <>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -165,20 +222,7 @@ export default function ControlPanel({
                     ]}
                 />
             )}
-            {showCodec && (
-                <CustomSelect
-                    label={t('controlPanel.codec')}
-                    value={config.codec || "h264"}
-                    onChange={(val) => handleChange('codec', val)}
-                    options={[
-                        { value: "h264", label: "H.264" },
-                        { value: "h265", label: "H.265" },
-                        { value: "av1", label: "AV1" },
-                        { value: "vp8", label: "VP8" },
-                        { value: "vp9", label: "VP9" },
-                    ]}
-                />
-            )}
+            {showCodec && config.sessionMode !== 'mirror' && <CodecField />}
             <CustomSelect
                 label={t('controlPanel.fps')}
                 value={config.fps === undefined || config.fps === null ? 0 : config.fps}
@@ -191,24 +235,30 @@ export default function ControlPanel({
                     { value: 120, label: "120" },
                 ]}
             />
-            <CustomSelect
-                label={t('controlPanel.rotation')}
-                value={config.rotation || "0"}
-                onChange={(val) => handleChange('rotation', val)}
-                options={[
-                    { value: "0", label: "0°" },
-                    { value: "270", label: "-90°" },
-                    { value: "90", label: "+90°" },
-                    { value: "180", label: "180°" },
-                ]}
-            />
-            <CustomSelect
-                label={t('controlPanel.graphicsRenderer')}
-                value={config.renderDriver || 'auto'}
-                onChange={(val) => handleChange('renderDriver', mapRendererSelection(val))}
-                options={rendererOptions}
-            />
+            {config.sessionMode !== 'mirror' && <RotationField />}
+            {config.sessionMode !== 'mirror' && <RendererField />}
         </div>
+        {config.sessionMode === 'mirror' && (
+            <details className="ml-settings-details" open={advancedOpen}
+                onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
+                <summary>
+                    {locale.startsWith('zh') ? '高级编码与显示' : 'Advanced encoding & display'}
+                    <span>{locale.startsWith('zh')
+                        ? 'H.264 优先 · 渲染器自动 · 旋转按需设置'
+                        : 'Prefer H.264, automatic renderer and on-demand rotation'}</span>
+                </summary>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+                    {showCodec && <CodecField />}
+                    <RotationField />
+                    <RendererField />
+                </div>
+                <p className="text-xs text-zinc-500 mt-3 leading-5" role="note">
+                    {locale.startsWith('zh')
+                        ? '编码器、旋转和图形渲染器属于兼容性选项，不必随场景切换；H.264 和自动渲染器更稳妥。更改后在下次投屏时生效。'
+                        : 'Codec, rotation and graphics renderer are compatibility controls, not scenario presets. H.264 and Auto are safer defaults. Changes take effect next session.'}
+                </p>
+            </details>
+        )}
             {showResolution && isRunning && config.sessionMode === 'mirror' && (
                 <div className="mt-1 text-[10px] text-zinc-500 leading-relaxed" role="status">
                     {isSwitchingResolution
@@ -289,7 +339,11 @@ export default function ControlPanel({
             <div className="glass p-5 sm:p-6 rounded-2xl space-y-5 transition-all duration-300 border border-zinc-800 bg-zinc-900/40 backdrop-blur-md relative z-20">
                 <div className="flex justify-between items-center border-b border-zinc-800/60 pb-1.5 mb-1">
                     <div className="flex items-center gap-3">
-                        <h2 className="text-[11px] font-black uppercase text-zinc-400 tracking-widest">{t('controlPanel.engineConfiguration')}</h2>
+                        <h2 className="text-[11px] font-black uppercase text-zinc-400 tracking-widest">
+                            {config.sessionMode === 'mirror'
+                                ? (locale.startsWith('zh') ? '画质与性能' : 'Video quality & performance')
+                                : t('controlPanel.engineConfiguration')}
+                        </h2>
                         <div className="flex gap-1.5">
                             <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded border ${isRunning ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-zinc-800/30 text-zinc-600 border-zinc-700/30'}`}>
                                 {isRunning ? t('controlPanel.active') : t('controlPanel.ready')}
@@ -302,9 +356,44 @@ export default function ControlPanel({
                     {/* Screen Config */}
                     {config.sessionMode === 'mirror' && (
                         <>
-                            <div className="space-y-2.5 pt-0.5">
+                            <div className="space-y-3 pt-0.5">
+                                <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
+                                    <label htmlFor="ml-engine-preset" className="block text-xs font-bold text-zinc-600 dark:text-zinc-300">
+                                        {locale.startsWith('zh') ? '场景预设 · 1080P 优先' : 'Scenario profile · 1080p first'}
+                                    </label>
+                                    <select id="ml-engine-preset" className="ml-select"
+                                        value={activeMirrorPreset(config)}
+                                        disabled={isSwitchingResolution}
+                                        onChange={(event) => {
+                                            if (event.target.value !== 'custom') {
+                                                setConfig(applyMirrorPreset(config, event.target.value as MirrorPreset));
+                                            }
+                                        }}>
+                                        <option value="custom" disabled>
+                                            {locale.startsWith('zh') ? '自定义参数（保留旧设置）' : 'Custom settings (preserved)'}
+                                        </option>
+                                        {MIRROR_PRESET_ORDER.map(preset => (
+                                            <option key={preset} value={preset}>
+                                                {locale.startsWith('zh')
+                                                    ? MIRROR_PRESET_COPY[preset].zh
+                                                    : MIRROR_PRESET_COPY[preset].en}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <p className="text-xs text-zinc-500 leading-5" role="note">
+                                        {mirrorVideoSummary(config, locale)}
+                                        {isRunning && (locale.startsWith('zh')
+                                            ? ' · 场景与码率帧率调整下次启动生效'
+                                            : ' · Profile and bitrate/FPS changes apply next session')}
+                                    </p>
+                                </div>
                                 <PerformanceGrid />
-                                <BitrateControl label={t('controlPanel.bitrate')} value={config.bitrate || 8} onChange={(v) => handleChange('bitrate', v)} />
+                                <BitrateControl label={t('controlPanel.bitrate')} value={config.bitrate ?? 8} onChange={(v) => handleChange('bitrate', v)} />
+                                {videoLoadWarning(config, locale) && (
+                                    <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-xs leading-5 text-amber-600 dark:text-amber-400" role="note">
+                                        {videoLoadWarning(config, locale)}
+                                    </div>
+                                )}
                             </div>
 
                             <div className="space-y-4 p-5 rounded-xl border border-zinc-800 bg-zinc-950/20">

@@ -6,7 +6,8 @@ import type { PendingAdbDevice, ScrcpyConfig } from '../hooks/useScrcpy';
 import {invoke} from '@tauri-apps/api/core';
 import {useState, type MouseEvent} from 'react';
 import VersionUpdateBadge from './VersionUpdateBadge';
-import { applyMirrorPreset, activeMirrorPreset, type MirrorPreset } from '../utils/mirrorPresets';
+import { applyMirrorPreset, activeMirrorPreset, MIRROR_PRESET_ORDER,
+    MIRROR_PRESET_COPY, mirrorVideoSummary, videoLoadWarning, type MirrorPreset } from '../utils/mirrorPresets';
 
 type Props = {
     locale: string;
@@ -37,12 +38,12 @@ type Props = {
 };
 
 const resolutions = [
-    { value: '0', zh: '原始画质（推荐）', en: 'Original (recommended)' },
+    { value: '0', zh: '原始分辨率 · 可能延迟', en: 'Native size · Higher latency risk' },
     { value: '800', zh: '480p · 省流量', en: '480p · Low bandwidth' },
     { value: '1280', zh: '720p · 流畅', en: '720p · Smooth' },
-    { value: '1920', zh: '1080p · 清晰', en: '1080p · Sharp' },
-    { value: '2560', zh: '2K · 高清', en: '2K · High resolution' },
-    { value: '3840', zh: '4K · 超清', en: '4K · Ultra HD' },
+    { value: '1920', zh: '1080P · 流畅推荐', en: '1080p · Recommended' },
+    { value: '2560', zh: '2K · 高负载', en: '2K · High load' },
+    { value: '3840', zh: '4K · 极高负载', en: '4K · Very high load' },
 ];
 
 export default function CompactDashboard({
@@ -56,6 +57,12 @@ export default function CompactDashboard({
     const zh = locale.startsWith('zh');
     const copy = (chinese: string, english: string) => zh ? chinese : english;
     const running = runningDevices.includes(activeDevice);
+    const activePreset = activeMirrorPreset(config);
+    const loadWarning = videoLoadWarning(config, locale);
+    const presetHint = activePreset === 'custom'
+        ? copy('已保留你的手动视频参数', 'Your custom video settings are preserved')
+        : (zh ? MIRROR_PRESET_COPY[activePreset].hintZh
+              : MIRROR_PRESET_COPY[activePreset].hintEn);
     const selected = devices.includes(activeDevice);
     const deviceLabel = (serial: string) =>
         deviceFriendlyNames[serial] || deviceModels[serial] || serial;
@@ -217,7 +224,7 @@ export default function CompactDashboard({
                                 {copy('场景预设', 'Scenario profile')}
                             </label>
                             <select id="ml-preset" className="ml-select"
-                                value={activeMirrorPreset(config)}
+                                value={activePreset}
                                 disabled={isSwitchingResolution}
                                 onChange={(event) => {
                                     if (event.target.value !== 'custom') {
@@ -225,12 +232,16 @@ export default function CompactDashboard({
                                     }
                                 }}>
                                 <option value="custom" disabled>{copy('自定义参数', 'Custom settings')}</option>
-                                <option value="balanced">{copy('均衡 · 日常使用', 'Balanced · Everyday')}</option>
-                                <option value="presentation">{copy('演示 · 文字清晰', 'Presentation · Clear text')}</option>
-                                <option value="low-latency">{copy('流畅 · 游戏操作', 'Smooth · Low latency')}</option>
-                                <option value="quality">{copy('高清 · 视频观看', 'Quality · Video')}</option>
+                                {MIRROR_PRESET_ORDER.map(preset => (
+                                    <option key={preset} value={preset}>
+                                        {zh ? MIRROR_PRESET_COPY[preset].zh : MIRROR_PRESET_COPY[preset].en}
+                                    </option>
+                                ))}
                             </select>
-                            {running && <p className="ml-muted mt-1 text-[11px]" role="note">
+                            <p className="ml-muted mt-1 text-[11px] leading-5" role="note">
+                                {presetHint} · {mirrorVideoSummary(config, locale)}
+                            </p>
+                            {running && <p className="ml-muted mt-1 text-[11px]">
                                 {copy('场景配置下次启动投屏时生效，不会打断当前画面。', 'Profile settings apply on the next session without interrupting this mirror.')}
                             </p>}
                         </div>
@@ -246,6 +257,11 @@ export default function CompactDashboard({
                                 {!resolutions.some(({value}) => value === config.res) && config.res !== '0' &&
                                     <option value={config.res}>{config.res}</option>}
                             </select>
+                            {loadWarning && (
+                                <p className="mt-1 text-[11px] leading-5 text-amber-600 dark:text-amber-400" role="note">
+                                    {loadWarning}
+                                </p>
+                            )}
                         </div>
                         <div className="ml-quick-toggles grid grid-cols-2 gap-3 mt-3">
                             <button className={'ml-toggle-card ' + (config.deviceFrame ? 'ml-enabled' : '')}

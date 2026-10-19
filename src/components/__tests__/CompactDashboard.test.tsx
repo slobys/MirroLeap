@@ -116,7 +116,7 @@ describe('MirroLeap daily workspace', () => {
         fireEvent.change(screen.getByRole('combobox', {name:'场景预设'}),
             {target:{value:'presentation'}});
         expect(args.onConfigChange).toHaveBeenCalledWith({
-            ...config, bitrate: 8, fps: 30, res:'1920',
+            ...config, bitrate: 6, fps: 30, res:'1920', codec:'h264',
         });
         expect(args.onStart).not.toHaveBeenCalled();
         expect(args.onStop).not.toHaveBeenCalled();
@@ -128,10 +128,20 @@ describe('MirroLeap daily workspace', () => {
         fireEvent.change(screen.getByRole('combobox', {name:'场景预设'}),
             {target:{value:'low-latency'}});
         expect(args.onConfigChange).toHaveBeenCalledWith({
-            ...config, bitrate:8, fps:60, res:'1280',
+            ...config, bitrate:4, fps:60, res:'1280', codec:'h264',
         });
         expect(args.onStop).not.toHaveBeenCalled();
     });
+    it('recommends 1080p over 2K when using Wi-Fi and retains manual 2K control', () => {
+        render(<CompactDashboard {...props({config:{...config,res:'2560',bitrate:16,fps:60,codec:'h264'}})}/>);
+        expect(screen.getByRole('combobox',{name:'场景预设'})).toHaveValue('custom');
+        expect(screen.getByText(/可能增加编码、Wi-Fi 传输与解码延迟/)).toBeInTheDocument();
+        const select = screen.getByRole('combobox',{name:'分辨率'});
+        expect(select).toHaveValue('2560');
+        expect(screen.getByRole('option',{name:/1080P · 流畅推荐/})).toBeInTheDocument();
+        expect(screen.getByRole('option',{name:/2K · 高负载/})).toBeInTheDocument();
+    });
+
     it('keeps the settings shortcut in a separate semantic footer when running', () => {
         const args = props({runningDevices:[selected]});
         const {container} = render(<CompactDashboard {...args}/>);

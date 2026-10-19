@@ -3053,6 +3053,47 @@ mod tests {
     }
 
     #[test]
+    fn mirror_scene_profile_settings_generate_expected_scrcpy_video_flags() {
+        // These are the transport-safe TS scenario combinations. The max-size
+        // number is the encoded PHONE SCREEN'S LONG EDGE, not a request to
+        // change Android's own display resolution.
+        for (name, size, bit_rate, fps) in [
+            ("balanced", "1920", 8, 60),
+            ("presentation", "1920", 6, 30),
+            ("low-latency", "1280", 4, 60),
+            ("quality", "1920", 12, 60),
+        ] {
+            let mut config = base_config("mirror");
+            config.device = "192.168.50.23:5555".into(); // Wi-Fi transport
+            config.res = Some(size.into());
+            config.bitrate = Some(bit_rate);
+            config.fps = Some(fps);
+            config.codec = Some("h264".into());
+            config.audio_enabled = Some(false);
+            config.render_driver = Some("auto".into());
+            let args = build_scrcpy_args(&config, None, None);
+            let value_after = |flag: &str| -> Option<&str> {
+                args.iter().position(|value| value == flag)
+                    .and_then(|index| args.get(index + 1)).map(String::as_str)
+            };
+            assert_eq!(value_after("--max-size"), Some(size), "{name} size");
+            assert_eq!(value_after("--video-bit-rate"),
+                Some(format!("{bit_rate}M").as_str()), "{name} bitrate");
+            assert_eq!(value_after("--max-fps"),
+                Some(fps.to_string().as_str()), "{name} fps cap");
+            assert_eq!(args.iter().filter(|arg| arg.starts_with("--video-codec=")).count(),1);
+            assert!(args.contains(&"--video-codec=h264".to_string()), "{name} codec");
+            assert!(!args.iter().any(|arg| arg.starts_with("--video-buffer=")),
+                "{name} should not introduce extra video buffering");
+            assert!(!args.iter().any(|arg| arg == "--render-driver"),
+                "{name} leaves host renderer in scrcpy's auto mode");
+            assert!(args.contains(&"--no-audio".to_string()),
+                "{name} must preserve the user's separate audio choice");
+            assert_ne!(size,"2560", "2K is user-opt-in only, never a default scene");
+        }
+    }
+
+    #[test]
     fn test_audio_codec_auto_adds_no_flag() {
         let mut config = base_config("mirror");
         config.audio_codec = Some("auto".to_string());

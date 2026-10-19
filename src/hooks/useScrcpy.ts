@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useI18n } from '../i18n';
 import { adbHistoryHost, reconnectDelayMs } from '../utils/reconnect';
 import { canQuickSwitchResolution } from '../utils/resolutionSwitch';
+import { MIRROR_PRESETS } from '../utils/mirrorPresets';
 
 export interface RenderDriverOption {
     id: string;
@@ -177,8 +178,9 @@ export function useScrcpy() {
     const [config, setConfig] = useState<ScrcpyConfig>({
         device: "",
         sessionMode: "mirror",
-        bitrate: 8,
-        fps: undefined,
+        // A NEW install starts from one canonical 1080p recommendation.
+        // Restore any legacy saved custom configuration unchanged below.
+        ...MIRROR_PRESETS.balanced,
         stayAwake: false,
         turnOff: false,
         audioEnabled: true,
@@ -187,7 +189,6 @@ export function useScrcpy() {
         // New Windows installs present the native mirror in an iPhone-style shell.
         // It remains optional and does not affect camera/desktop/fullscreen modes.
         deviceFrame: typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent),
-        res: "0",
         recordPath: "",
         vdWidth: 1920,
         vdHeight: 1080,
