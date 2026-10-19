@@ -42,6 +42,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     isRefreshing={false}
     config={config}
     onConfigChange={() => {}}
+    onPresetChange={() => {}}
     onResolutionChange={() => {}}
     isSwitchingResolution={mode === 'switching'}
     onStart={() => {}}

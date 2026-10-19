@@ -44,8 +44,17 @@ async function check(page, mode, viewport, scale) {
   });
   await page.locator('.ml-mirror-card').waitFor({state: 'visible'});
   const button = page.locator(
-    mode === 'running' ? '.ml-stop-action' : '.ml-primary-action');
+    mode === 'running' || mode === 'switching'
+      ? '.ml-stop-action' : '.ml-primary-action');
   await button.waitFor({state: 'visible'});
+  if (mode === 'switching') {
+    assert(await button.isDisabled(),
+      'During an automatic video switch the Stop control must be disabled');
+    assert(await button.textContent().then(text => text?.includes('正在切换画质')),
+      'During switching the action should say video quality is applying');
+    assert.equal(await page.locator('.ml-primary-action').count(),0,
+      'Do not offer Start while the existing video stream is restarting');
+  }
   const result = await page.evaluate(() => {
     const get = (selector) => {
       const element = document.querySelector(selector);
