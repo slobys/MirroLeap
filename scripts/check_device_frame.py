@@ -122,6 +122,30 @@ assert "CombineRgn(Some(region),Some(video_region),Some(physical),RGN_AND)" in b
 assert "Restored phone body HWND silhouette after fullscreen" in backend
 assert "fn bezel_outer_region_rejects_square_window_corners_after_fullscreen()" in rust
 
+# SDL's Windows fullscreen implementation resets DWM-managed border and
+# corner preferences independently of the user-code Win32 HRGN. A healthy
+# GDI region cannot prove that its DWM non-client pixels are rounded.
+dwm = (root / "src-tauri/src/win_chrome.rs").read_text(encoding="utf-8")
+cargo = (root / "src-tauri/Cargo.toml").read_text(encoding="utf-8")
+lib = (root / "src-tauri/src/lib.rs").read_text(encoding="utf-8")
+assert 'mod win_chrome;' in lib
+assert '"Win32_Graphics_Dwm"' in cargo
+assert "DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY" in dwm
+assert "DWMNCRP_DISABLED" in dwm
+assert "DWMWA_WINDOW_CORNER_PREFERENCE" in dwm and "DWMWCP_DONOTROUND" in dwm
+assert "DWMWA_BORDER_COLOR" in dwm and "DWMWA_COLOR_NONE" in dwm
+assert "DwmGetWindowAttribute(" in dwm
+assert "CS_DROPSHADOW" in dwm, "Include window-class shadow in diagnostic report"
+assert "DWMWA_EXTENDED_FRAME_BOUNDS" in dwm
+assert "last_dwm_report" in backend
+assert "crate::win_chrome::neutralize(hwnd)" in backend
+assert "crate::win_chrome::neutralize(shell)" in backend
+assert "[FRAME][DWM] SDL fullscreen transition" in backend
+assert "if !fullscreen && dwm_checked_at.is_none_or" in backend
+assert "DwmSetWindowAttribute" not in (root / "src-tauri/src/commands.rs").read_text(encoding="utf-8"), (
+    "Never mutate DWM for the MirroLeap main app, only framed video/shell HWNDs"
+)
+
 assert "round_clip_radius" not in backend, (
     "Using exact SVG radius for native mask causes wallpaper-colored seams"
 )

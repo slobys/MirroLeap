@@ -678,6 +678,9 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut clip_checked_at: Option<Instant> = None;
     let mut previous_fullscreen: Option<bool> = None;
     let mut clip_recovery_until: Option<Instant> = None;
+    // SDL overwrites Windows DWM non-client attributes when leaving fullscreen.
+    let mut dwm_checked_at: Option<Instant> = None;
+    let mut last_dwm_report: Option<String> = None;
     let mut last_outer_mask_geometry: Option<(usize,i32,i32)> = None;
     let mut outer_mask_checked_at: Option<Instant> = None;
     let mut outer_mask_warned = false;
@@ -806,10 +809,17 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // Never mask a true full-monitor fullscreen video.
         let fullscreen = monitor_full_bounds(hwnd)
             .is_some_and(|monitor| is_fullscreen_client(screen, monitor));
-        if previous_fullscreen != Some(fullscreen) {
+        let fullscreen_changed = previous_fullscreen != Some(fullscreen);
+        if fullscreen_changed {
             previous_fullscreen = Some(fullscreen);
             clip_recovery_until = Some(Instant::now() + Duration::from_secs(3));
             clip_checked_at = None;
+            dwm_checked_at = None;
+            last_dwm_report = None;
+            let _ = app.emit("scrcpy-log", format!(
+                "[FRAME][DWM] SDL fullscreen transition {}",
+                if fullscreen { "ENTER" } else { "EXIT" },
+            ));
             // Do not clear the OUTER WebView mask here: the fullscreen branch
             // below must still see its presence and reset that GDI region.
             // On return to windowed, it is rebuilt at the restored frame size.
@@ -980,6 +990,45 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                     outer_mask_checked_at = Some(Instant::now());
                 }
             }
+        }
+
+        // SDL changes its DWM corner/border preferences during Alt+F.
+        // The compositor can draw square non-client pixels beyond the GDI
+        // region, even if both region health checks report a perfect ellipse.
+        // The native SDL and transparent phone-bezel windows are borderless:
+        // disable DWM-owned chrome after fullscreen exits, and recheck slowly.
+        // Windows 10 may not support the Windows 11 corner/border attributes.
+        if !fullscreen && dwm_checked_at.is_none_or(|time|
+            time.elapsed() >= Duration::from_millis(1650)) {
+            let video_chrome = crate::win_chrome::neutralize(hwnd);
+            let video_clip_ok = native_corner_clip_intact(hwnd, screen);
+            let video_still_uses_dwm = crate::win_chrome::needs_chrome_repair(
+                video_chrome.after.corner, video_chrome.after.border,
+                video_chrome.after.nc_rendering);
+            let mut diag = crate::win_chrome::describe(
+                "scrcpy video", video_clip_ok, &video_chrome,
+            );
+            if let Some(shell) = shell_hwnd.filter(|_| shell_visible) {
+                let shell_chrome = crate::win_chrome::neutralize(shell);
+                diag.push_str(" | ");
+                diag.push_str(&crate::win_chrome::describe(
+                    "phone bezel", native_outer_bezel_clip_intact(shell),
+                    &shell_chrome,
+                ));
+                if crate::win_chrome::needs_chrome_repair(
+                    shell_chrome.after.corner, shell_chrome.after.border,
+                    shell_chrome.after.nc_rendering,
+                ) || video_still_uses_dwm {
+                    diag.push_str(" | compositor-nonclient-still-enabled");
+                }
+            }
+            // No restarts, HWND recreation, or focus changes. Keep one entry
+            // at each transition or when observed compositor state differs.
+            if fullscreen_changed || last_dwm_report.as_deref() != Some(&diag) {
+                let _ = app.emit("scrcpy-log", diag.clone());
+                last_dwm_report = Some(diag);
+            }
+            dwm_checked_at = Some(Instant::now());
         }
 
         // Keep Android interactions native. The palette is contained in the

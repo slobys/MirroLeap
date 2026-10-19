@@ -1,6 +1,6 @@
 [package]
 name = "mirroleap"
-version = "5.0.14"
+version = "5.0.15"
 authors = ["slobys", "KB-kil0bit contributors"]
 description = "MirroLeap: a lightweight Android mirroring desktop client powered by scrcpy"
 edition = "2021"
@@ -50,6 +50,7 @@ windows = { version = "0.62", features = [
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
 ] }

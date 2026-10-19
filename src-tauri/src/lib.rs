@@ -7,6 +7,8 @@ mod core_manager;
 mod frame_layout;
 #[cfg(target_os = "windows")]
 mod device_frame;
+#[cfg(target_os = "windows")]
+mod win_chrome;
 // Windows-only: drag the borderless scrcpy window with the mouse
 // (Ctrl+Alt+Shift+W).
 #[cfg(target_os = "windows")]

@@ -31,6 +31,15 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.0.15 · DWM 全屏圆角修复与原生窗口诊断（Windows 预发布测试版）
+
+v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已修复。本版针对旧方案未覆盖的 **Windows Desktop Window Manager (DWM) 非客户区渲染**，不再只是调整 GDI 圆角半径：
+
+- **DWM 属性恢复**：SDL 在 Alt+F 进入/退出全屏时会重置 Windows 11 的原生圆角和边框颜色设置。退出全屏后，MirroLeap 会让 *scrcpy 无边框视频窗口* 和 *透明 WebView2 手机外框窗口* 明确关闭系统绘制的非客户区、系统圆角及系统边框；原有 GDI 原生圆角和 SVG 金属外框负责视觉外形。Windows 10 若不支持部分 Windows 11 属性，保留原有功能，不要求关闭系统安全设置。
+- **可追踪的诊断**：在「工具与日志」中新增 `[FRAME][DWM]` 记录，包含全屏进入/退出、SDL 和外框 GDI 裁剪状态、DWM 圆角/边框属性变化、窗口阴影标志及 DWM 真实边界。若仍出现方块，**请在出现后打开工具与日志，将这些日志连同截图发回来**，即可进一步区分系统阴影、SDL 视频、WebView2 外框的实际来源。报告不包含手机内容或录屏文件。
+- **测试要求**：建议在不同桌面背景下连续进行至少 5 次全屏往返，退出全屏后等待 3 秒再观察；本版本仍是候选修复，不在 Windows 真机复测前宣称完全解决。
+- **其他功能不变**：继续保留 v5.0.14 Android 主屏录制、正常保存 MKV、HID 设置精简、实时置顶、旋转和无线连接。v5.0.12 仍是 Latest 正式版。
+
 ## 🧪 v5.0.14 · 双层圆角边界和 Android 主屏幕录制修复（Windows 预发布测试版）
 
 - **全屏退出仍见四角黑色方块**：v5.0.13 虽恢复了 SDL 窗口的原生 GDI 裁剪，用户 Windows 实机反馈仍有方角漏出。新方案同时裁剪底层 SDL 视频和上层透明 WebView2 手机外框。外框独立使用实体手机轮廓的原生 HWND 圆角，SDL 视频区域另与实体外框范围相交，避免黑色矩形越过机身。
@@ -123,11 +132,11 @@
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.0.14_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.0.14_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.0.14_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.0.15_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.0.15_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.0.15_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**测试版请到 [MirroLeap v5.0.14 Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.14) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍保留 v5.0.12 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**测试版请到 [MirroLeap v5.0.15 Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.0.15) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍保留 v5.0.12 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 
