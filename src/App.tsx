@@ -26,11 +26,6 @@ import { ArrowLeft, Keyboard, MonitorPlay, Palette, Settings2, Smartphone, Termi
 import './settings-center.css';
 
 type SettingsTab = 'devices' | 'mirror' | 'behavior' | 'appearance' | 'tools';
-const RESOLUTION_LABELS: Record<string, string> = {
-  '3840': '4K', '2560': '2K', '1920': '1080p', '1600': '900p',
-  '1280': '720p', '1024': '576p', '800': '480p',
-};
-
 function App() {
   const { t, locale } = useI18n();
   const {
@@ -571,7 +566,7 @@ function App() {
                         renderDriverSupport={renderDriverSupport}
                         onListOptions={(arg) => { if (activeDevice) listScrcpyOptions(activeDevice, arg); }}
                       />
-                      <aside className="ml-settings-stack" aria-label={locale.startsWith('zh') ? '解码与当前配置' : 'Decoder and current settings'}>
+                      <aside className="ml-settings-stack" aria-label={locale.startsWith('zh') ? '解码与性能监控' : 'Decoder and performance monitoring'}>
                         <DecoderPerformance config={config} setConfig={setConfig}
                           support={videoDecoderSupport}
                           observedMode={observedDecoders[activeDevice]}
@@ -581,16 +576,6 @@ function App() {
                           performance={mirrorPerformance[activeDevice]}
                           decoder={observedDecoders[activeDevice]}
                           support={videoDecoderSupport}/>
-                        <section className="ml-card ml-settings-summary">
-                          <h2>{locale.startsWith('zh') ? '当前参数概览' : 'Configuration at a glance'}</h2>
-                          <p className="ml-muted">{locale.startsWith('zh') ? '以下是已选择的参数，部分修改在下次投屏时生效。' : 'Selected values; some changes apply on the next session.'}</p>
-                          <dl>
-                            <div><dt>{t('controlPanel.resolution')}</dt><dd>{config.res === '0' || !config.res ? (locale.startsWith('zh') ? '原始' : 'Original') : RESOLUTION_LABELS[String(config.res)] || String(config.res)}</dd></div>
-                            <div><dt>{t('controlPanel.codec')}</dt><dd>{String(config.codec || 'h264').toUpperCase()}</dd></div>
-                            <div><dt>{t('controlPanel.fps')}</dt><dd>{config.fps || (locale.startsWith('zh') ? '自动' : 'Auto')}</dd></div>
-                            <div><dt>{t('controlPanel.bitrate')}</dt><dd>{config.bitrate || 8} Mbps</dd></div>
-                          </dl>
-                        </section>
                       </aside>
                     </div>
                   )}

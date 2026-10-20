@@ -80,11 +80,6 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 .ml-settings-group-head p { font-size: 13px; margin-top: 2px; }
-.ml-settings-summary > p { font-size: 13px; margin: 6px 0 16px; }
-.ml-settings-summary dl { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
-.ml-settings-summary dl > div { padding: 12px; border: 1px solid var(--border-subtle); border-radius: 11px; min-width: 0; }
-.ml-settings-summary dt { font-size: 12px; color: var(--text-muted); }
-.ml-settings-summary dd { margin-top: 4px; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
 .ml-mirror-layout .ml-comfort-settings .ml-settings-details { margin-top: 20px; }
 .ml-mirror-layout .ml-comfort-settings .ml-settings-details summary { font-weight: 700; }
 
@@ -159,5 +154,4 @@
   .ml-settings .ml-card,
   .ml-mirror-layout .ml-comfort-settings > .glass { padding: 17px; }
   .ml-preference-segment span { font-size: 12px; }
-  .ml-settings-summary dl { grid-template-columns: minmax(0,1fr); }
 }

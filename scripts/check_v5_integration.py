@@ -121,6 +121,13 @@ assert "ml-preset" not in home and "ml-engine-preset" not in panel
 assert "mirrorVideoSummary(config, locale)" in home and "mirrorVideoSummary(config, locale)" in panel
 assert 'data-testid="home-video-summary"' in home
 assert 'data-testid="settings-video-summary"' in panel
+# Keep one concise parameter explanation under the resolution selector.
+# The former four-tile overview duplicated the same values and wasted space
+# below the decoder/performance cards.
+assert "当前参数概览" not in app and "Configuration at a glance" not in app
+assert "ml-settings-summary" not in app and "ml-settings-summary" not in read("src/settings-center.css")
+assert "DecoderPerformance" in app and "LivePerformance" in app
+assert "解码与性能监控" in app
 assert "Advanced encoding & display" in panel
 assert "videoLoadWarning(config, locale)" in panel and "videoLoadWarning(config, locale)" in home
 assert "applyMirrorPreset(config:" in presets and "applyMirrorResolution(config:" in presets
