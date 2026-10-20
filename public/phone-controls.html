@@ -180,6 +180,16 @@
       font-size:10px;background:rgba(113,129,147,.16);
     }
     #present-live.active,#creator-click.active {background:rgba(18,185,151,.34);color:#a6fff0;}
+    /* Persistent diagnostic: native + Canvas ACKs received since enabling.
+       It is not the number of Android actions (which may also be blocked). */
+    #creator-click {position:relative;}
+    #creator-click[data-native-clicks]::after {
+      content:attr(data-native-clicks);position:absolute;right:1px;top:1px;
+      font-size:9px;line-height:13px;min-width:13px;border-radius:8px;
+      background:#19c6a5;color:#071a19;font-weight:700;padding:0 2px;
+      pointer-events:none;
+    }
+
     .present-grid button svg {width:19px;height:19px;}
     .present-hint {font-size:11px;line-height:16px;color:#98a9bb;}
     /* Stack mode has only 168x202 physical CSS pixels. A 3x2 palette
@@ -204,6 +214,7 @@
     #present-feedback[data-feedback="error"] {color:#fda4af;}
     #present-feedback[data-feedback="sent"] {color:#9fffea;}
     #present-feedback[data-feedback="busy"] {color:#ffd080;}
+    #present-feedback {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .quick-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
     .quick-grid button { width:100%; height:46px; min-height:46px; gap:1px; font-size:11px;
       background:rgba(113,129,147,.17); }
@@ -432,7 +443,7 @@
         <button id="present-magnifier" aria-pressed="false" aria-label="定格放大镜" title="自动读取手机静态截图 · 滚轮调大小">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="10" cy="10" r="6"/><path d="m14 14 7 7M8 10h4m-2-2v4"/></svg>放大镜
         </button>
-        <button id="present-live" aria-pressed="false" aria-label="连续实时放大" title="Windows 系统原生实时画面放大：不使用 ADB 截图，支持视频动态；点击可继续操作手机">
+        <button id="present-live" aria-pressed="false" aria-label="连续实时放大" title="滚轮调放大圈大小；Ctrl+滚轮调放大倍率。默认较清晰的 1.55 倍原生显示">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6M10 7v6M18 3v5"/></svg>实时放大
         </button>
         <button id="creator-click" aria-pressed="false" aria-label="点击特效" title="显示电脑鼠标点击位置，不阻挡手机触控">
@@ -445,7 +456,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="m8 8 8 8M16 8l-8 8"/></svg>退出演示
         </button>
       </div>
-      <div class="present-hint" id="present-hint">实时放大使用 Windows 合成画面，能跟随视频；定格放大使用静态截图</div>
+      <div class="present-hint" id="present-hint">实时放大：滚轮调圈圈大小，Ctrl+滚轮调倍率</div>
     </div>
   </div>
   <div id="status" role="status" aria-live="assertive" title=""></div>
@@ -483,6 +494,20 @@
           presenterTimer = null;
         }, state === 'error' ? 5500 : 2800);
       }
+      // A real native-to-WebView acknowledgement updates this counter after
+      // a phone click. If the counter advances but the glow is invisible,
+      // the remaining problem is the visual window stack, not mouse input.
+      let creatorNativeClicks=0;
+      window.mirroCreatorNativeClick = () => {
+        const button=document.getElementById('creator-click');
+        if (button.getAttribute('aria-pressed')!=='true') return false;
+        creatorNativeClicks+=1;
+        button.dataset.nativeClicks=String(creatorNativeClicks);
+        button.title='画布已收到 '+creatorNativeClicks+' 次点击；若未看见光圈请反馈截图';
+        presentFeedback('sent',
+          '已识别 '+creatorNativeClicks+' 次点击 · 绘图已确认');
+        return true;
+      };
       function displayPresentState(open, spotlight, magnifier, live = false) {
         document.body.classList.toggle('present-open', !!open);
         presenterButton.classList.toggle('active', !!open);
@@ -496,7 +521,7 @@
         }
         document.getElementById('present-refresh').disabled = !open || !magnifier;
         document.getElementById('present-hint').textContent = live
-          ? 'Windows 原生实时画面 · 可点击和滑动手机 · 不使用 ADB 截图'
+          ? '滚轮调圈大小 · Ctrl+滚轮调倍率 · 低倍率更清晰'
           : '实时模式跟随视频；定格和聚光灯暂停触控';
       }
       async function syncPresentState() {
@@ -775,9 +800,11 @@
         presenterSwitching=true; button.disabled=true;
         try {
           const active=await invoke('creator_click_toggle');
+          creatorNativeClicks=0;
+          delete button.dataset.nativeClicks;
           button.classList.toggle('active',active);
           button.setAttribute('aria-pressed',String(active));
-          presentFeedback('sent',active ? '点击光圈已开启 · 手机中心会显示预览' : '已关闭点击光圈');
+          presentFeedback('sent',active ? '已开启光圈并显示中心预览，点击手机后会显示检测次数' : '已关闭点击光圈');
         } catch(error) {
           report(error);
           presentFeedback('error','点击特效未开启 · '+String(error));

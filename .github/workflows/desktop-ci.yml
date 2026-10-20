@@ -76,6 +76,10 @@ jobs:
         run: node scripts/windows-phone-frame-visual.mjs
       - name: Build original standalone desktop executable (unpatched, without any installer)
         run: npm run tauri build -- --no-bundle
+      # Linux CI excludes Windows-only Magnification.dll code. Run its
+      # geometry, wheel bounds and source-centering tests on Windows too.
+      - name: Windows native MirroCreator magnifier wheel tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_live_lens::tests
       - name: Stage extract-and-run portable version
         shell: pwsh
         run: ./scripts/windows-stage-portable.ps1

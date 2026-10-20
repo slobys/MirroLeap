@@ -1892,10 +1892,18 @@ fn start_creator_click_sampler(app: AppHandle, device: String) {
                 // WebView so the ripple remains visible and Android receives
                 // the original tap.
                 let _=promote_drawing_windows(&app,&device,&overlay);
-                if overlay.eval(format!(
-                    "window.scrcpyCreator?.flashClick({x:.6},{y:.6})"
-                )).is_ok() {
-                    last_emit = Instant::now();
+                // WebviewWindow::eval() reports only that the command was
+                // QUEUED. Require a real acknowledgement from the ink canvas
+                // before counting a click; otherwise a stale or occluded
+                // WebView can misleadingly claim the effect worked.
+                let command=format!(
+                    "return window.scrcpyCreator?.flashClick({x:.6},{y:.6}) === true;"
+                );
+                if evaluate_ink(&overlay,&command).await.is_ok() {
+                    last_emit=Instant::now();
+                    if let Some(bar)=app.get_webview_window(&toolbar_label(&device)) {
+                        let _=bar.eval("window.mirroCreatorNativeClick?.()");
+                    }
                 }
             }
         }

@@ -142,11 +142,18 @@ describe('real Tauri phone-controls HTML', () => {
     await nextTask();await nextTask();
     expect(actions).toContain('creator_click_toggle');
     expect(document.getElementById('creator-click').getAttribute('aria-pressed')).toBe('true');
+    // A native callback is emitted ONLY after the WebView canvas confirms it
+    // processed the actual click. The count distinguishes missing input from
+    // missing visual compositing.
+    expect(dom.window.mirroCreatorNativeClick()).toBe(true);
+    expect(dom.window.mirroCreatorNativeClick()).toBe(true);
+    expect(document.getElementById('creator-click').dataset.nativeClicks).toBe('2');
+    expect(document.getElementById('present-feedback')).toHaveTextContent('已识别 2 次点击');
     document.getElementById('present-live').click();
     await nextTask();await nextTask();
     expect(actions).toContain('present_live');
     expect(document.getElementById('present-live').getAttribute('aria-pressed')).toBe('true');
-    expect(document.getElementById('present-hint')).toHaveTextContent('Windows 原生实时画面');
+    expect(document.getElementById('present-hint')).toHaveTextContent('滚轮调圈大小');
     document.getElementById('present-off').click();
     await nextTask();await nextTask();
     expect(document.getElementById('present-live').getAttribute('aria-pressed')).toBe('false');

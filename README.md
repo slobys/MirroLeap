@@ -31,6 +31,16 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.2.3 · 原生镜头滚轮缩放与可确认的点击光圈（Windows 预发布测试版）
+
+根据实际视频教程反馈，进一步完善 Windows 原生 MirroCreator：
+
+- **镜头范围与内容倍率分别可调**：开启「实时放大」并把鼠标放在手机画面内，直接滚动鼠标滚轮来增大或缩小放大圆圈；按住 **Ctrl＋滚轮** 单独增减内容的放大倍数。Windows 专属的被动低层鼠标滚轮侦听仅在实时放大启用期间安装，不吞鼠标滚轮消息，不更改 Android 权限；退出实时放大会及时卸载。
+- **清晰度优先**：默认放大倍率从 2.35× 改为约 **1.55×**，可手动调至 1.15×–3.0×，降低常用场景下的像素颗粒感；圈圈直径可在屏幕宽度的约 28%–90% 间变化，始终留在手机画面内部。请注意放大现有桌面像素无法产生比实际屏幕更多的细节。
+- **点击特效诊断**：启用时先在手机中央演示一次青绿色扩散双环；之后每次鼠标点击都等待 WebView 绘图 ACK，成功后悬浮栏显示「已识别 N 次鼠标点击」。可判断「鼠标检测没有收到」还是「画布层叠遮住」的问题；未收到 ACK 不虚报成功。
+- **新回归门槛**：Windows CI 除实际编译、启动、打包签名以外，额外运行 Windows-only 原生镜头的圆圈边缘与滚轮倍率测试；前端交互及不同 DPI 布局检查继续保留。
+- **独立预览**：不修改 v5.1.4 正式版或主分支，完整 CI 全部通过后才发布 v5.2.3 预览安装包。
+
 ## 🧪 v5.2.2 · Windows 原生视频实时放大和点击特效修复（预览版）
 
 针对 YouTube 视频教程中的「视频放大卡帧」和「点击看不到光圈」实际反馈，重新处理底层机制，而不是继续提高 Android 截图轮询频率。
@@ -260,11 +270,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.2.2_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.2.2_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.2.2_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.2.3_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.2.3_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.2.3_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.2.2 测试版需通过完整 CI 验证后才能在 GitHub Pre-release 下载；正式版请到 [GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍为 v5.1.4 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**v5.2.3 预览版通过 GitHub CI 后提供下载；正式版请到 [GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍为 v5.1.4 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

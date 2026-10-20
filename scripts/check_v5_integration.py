@@ -165,6 +165,10 @@ assert 'start_creator_click_sampler' in frame_native
 assert 'Duration::from_millis(12)' in frame_native
 assert 'WindowFromPoint' in frame_native
 assert 'promote_drawing_windows(&app,&device,&overlay)' in frame_native
+assert 'evaluate_ink(&overlay,&command).await.is_ok()' in frame_native
+assert 'window.mirroCreatorNativeClick?.()' in frame_native
+assert 'window.mirroCreatorNativeClick = () =>' in phone_toolbar
+assert 'creatorNativeClicks+=1' in phone_toolbar
 
 for name in ("arrow", "rect", "step", "mask"):
     assert "ink_" + name in frame_native, name
@@ -181,6 +185,13 @@ assert 'native_live_lens::update' in frame_native
 assert 'MagInitialize' in native_lens and 'MagSetWindowSource' in native_lens
 assert 'MagSetWindowFilterList' in native_lens and 'EX_TRANSPARENT' in native_lens
 assert 'lens_geometry' in native_lens and 'fn stop(' in native_lens
+assert 'SetWindowsHookExW' in native_lens and 'UnhookWindowsHookEx' in native_lens
+assert 'WH_MOUSE_LL' in native_lens and 'CallNextHookEx' in native_lens
+assert 'WHEEL_SIZE_DELTA' in native_lens and 'WHEEL_ZOOM_DELTA' in native_lens
+assert 'adjust_wheel' in native_lens and 'DEFAULT_FACTOR: f32 = 1.55' in native_lens
+assert 'FACTOR_MAX: f32 = 3.0' in native_lens
+assert 'struct ScopedWheelHook' in native_lens
+
 assert 'set_ignore_cursor_events(mode == "live")' in frame_native
 assert 'start_live_zoom_sampling' not in frame_native
 assert "mode === 'live'" in present and "mode === 'off' || mode === 'live'" in present

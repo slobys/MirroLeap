@@ -181,8 +181,8 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
     </p>}
     {mode==='live' && <p role="note" className="ml-muted text-xs">
       {zh
-        ? '实时放大改由 Windows 系统直接放大当前投屏视频画面，不再通过 ADB 反复截图。允许继续操作手机，刷新效果由 Windows 合成器与显卡决定。点击悬浮栏“退出演示”即可关闭。'
-        : 'The live lens uses native Windows Magnification over the changing SDL video, not ADB screenshots. Taps and swipes remain available; rendering depends on GPU and desktop compositor.'}
+        ? '实时放大来自 Windows 原生视频画面。鼠标停留手机内，滚轮调节放大圆圈范围，Ctrl＋滚轮单独调节内容倍率。默认倍率降至约 1.55 倍，避免过度放大导致明显像素块；高倍率仍受投屏窗口实际像素数量限制。'
+        : 'The live lens follows the Windows-rendered SDL video. Wheel changes circle size; Ctrl+wheel changes magnification separately. Default zoom is about 1.55× for clearer pixels. Higher zoom exposes the limited pixel detail of the displayed screen.'}
     </p>}
     {mode==='spotlight' && <p role="note" className="ml-muted text-xs">
       {zh ? '在手机画面内滚动鼠标滚轮即可放大或缩小聚光灯范围。' :
