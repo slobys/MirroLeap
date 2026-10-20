@@ -4,8 +4,8 @@ import {listen} from '@tauri-apps/api/event';
 import {Eye, Focus, Maximize, Move, RefreshCw, ScanSearch, XCircle} from 'lucide-react';
 import {useI18n} from '../i18n';
 
-type PresentMode = 'off' | 'spotlight' | 'magnifier';
-const validModes: readonly string[] = ['off', 'spotlight', 'magnifier'];
+type PresentMode = 'off' | 'spotlight' | 'magnifier' | 'live';
+const validModes: readonly string[] = ['off', 'spotlight', 'magnifier', 'live'];
 const safeMode = (mode: unknown): PresentMode =>
   typeof mode === 'string' && validModes.includes(mode) ? mode as PresentMode : 'off';
 
@@ -135,7 +135,7 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
     </div>
     <p className="ml-muted text-xs leading-relaxed">
       {zh ?
-        '课堂演示与会议讲解：聚光灯、定格放大镜。' :
+        '聚光灯、定格放大镜与右侧悬浮栏的 MirroCreator 创作者工具。' :
         'Present with spotlight and a still-frame magnifier.'}
     </p>
     <div className="flex flex-wrap gap-2">
@@ -179,6 +179,11 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
           'Still image loaded. Wheel changes lens size; Ctrl+wheel adjusts magnification. Refresh after changes.') :
         (zh ? '尚未加载截图。请点击刷新放大快照。' : 'No still frame loaded. Refresh before zooming.')}
     </p>}
+    {mode==='live' && <p role="note" className="ml-muted text-xs">
+      {zh
+        ? '连续放大正在使用新的 ADB 截图更新画面（通常只有每秒约 1–3 帧，可能影响无线投屏流畅度）。可通过悬浮栏或退出演示停止采样。'
+        : 'Continuous lens uses fresh ADB screenshots at roughly 1–3 fps and may impact Wi-Fi mirroring. Exit presenter to stop sampling.'}
+    </p>}
     {mode==='spotlight' && <p role="note" className="ml-muted text-xs">
       {zh ? '在手机画面内滚动鼠标滚轮即可放大或缩小聚光灯范围。' :
         'Scroll the mouse wheel over the phone to resize the spotlight.'}
@@ -195,8 +200,8 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
       <summary>{zh ? '使用说明与安全提示' : 'How it works & safety'}</summary>
       <p>
         {zh ?
-          '演示聚光灯或放大镜开启时会暂时接管手机触控；退出演示后恢复。投屏右侧悬浮栏的“一键恢复”也可紧急退出（同时会清空画笔）。现有 MirroCapture 保存的是原始手机画面或画笔图层，不包含演示聚光灯和定格放大镜。' :
-          'Presenter focus temporarily intercepts phone taps. Exit to restore touch, or use the phone toolbar’s one-click reset (also clears ink). MirroCapture saves phone pixels and optional pen ink, not the temporary spotlight or snapshot lens.'}
+          '聚光灯或放大镜开启时暂时接管手机触控；退出演示恢复。创作者的遮挡框只覆盖可见图层，不保护 scrcpy 原始录像、OBS 单窗口捕捉或普通截图，请勿据此处理敏感信息。连续放大采用低帧率 ADB 新截图，不是 60FPS 视频放大。右侧悬浮栏“一键恢复”可紧急退出并清空标注。' :
+          'Presenter modes temporarily intercept taps; exit to restore touch. Creator masks only cover the visible overlay, NOT raw scrcpy recordings, OBS single-window capture or unannotated screenshots. Do not rely on masks to hide sensitive content. Continuous lens uses low-FPS fresh ADB screenshots, not 60fps video. One-click restore exits and clears annotations.'}
       </p>
     </details>
   </section>;

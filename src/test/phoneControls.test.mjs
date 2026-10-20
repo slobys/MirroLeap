@@ -14,6 +14,7 @@ function setup({ failToggle = false, failAction = null, failReason = 'Native act
   let quick = false;
   let presenter = false;
   let presenterMode = 'off';
+  let clickEffect = false;
   let top = false;
   let remember = true;
   const dom = new JSDOM(html, {
@@ -40,6 +41,9 @@ function setup({ failToggle = false, failAction = null, failReason = 'Native act
         if (action === 'present_status') return presenter;
         if (action === 'present_is_spotlight') return presenterMode === 'spotlight';
         if (action === 'present_is_magnifier') return presenterMode === 'magnifier';
+        if (action === 'present_is_live') return presenterMode === 'live';
+        if (action === 'creator_click_status') return clickEffect;
+        if (action === 'creator_click_toggle') return (clickEffect = !clickEffect);
         if (action === 'present_toggle') {
           presenter = !presenter;
           enabled = false;quick = false;
@@ -48,6 +52,7 @@ function setup({ failToggle = false, failAction = null, failReason = 'Native act
         }
         if (action === 'present_spotlight') { presenterMode = 'spotlight'; return true; }
         if (action === 'present_magnifier') { presenterMode = 'magnifier'; return true; }
+        if (action === 'present_live') { presenterMode = presenterMode === 'live' ? 'off' : 'live'; return presenterMode === 'live'; }
         if (action === 'present_refresh') return true;
         if (action === 'present_off') { presenterMode = 'off'; return false; }
         if (action === 'quick_status') return quick;
@@ -100,6 +105,50 @@ describe('real Tauri phone-controls HTML', () => {
     dom.window.scrcpyControls.setLayout('invalid-layout');
     expect(document.body.dataset.layout).toBe('short-ink-left');
     expect(document.documentElement.style.zoom).toBe('1');
+    dom.window.close();
+  });
+
+  it('offers creator shapes and warns masks do not protect raw recording',async()=>{
+    const {dom,document,actions}=setup();
+    document.getElementById('ink-toggle').click();
+    await nextTask();await nextTask();
+    document.getElementById('ink-creator-tab').click();
+    await nextTask();
+    expect(document.body.dataset.inkPage).toBe('creator');
+    expect(actions).toContain('ink_arrow');
+    for (const action of ['rect','step','mask']) {
+      document.getElementById('creator-'+action).click();
+      await nextTask();
+      expect(actions).toContain('ink_'+action);
+      expect(document.body.dataset.inkTool).toBe(action);
+    }
+    expect(document.getElementById('ink-privacy-note').textContent)
+      .toMatch(/原始录屏\/OBS/);
+    expect(document.getElementById('creator-mask').getAttribute('aria-pressed')).toBe('true');
+    document.getElementById('ink-basic-tab').click();
+    await nextTask();
+    expect(document.body.dataset.inkTool).toBe('pen');
+    document.getElementById('restore').click();
+    await nextTask();
+    expect(document.body.dataset.inkPage).toBe('basic');
+    dom.window.close();
+  });
+
+  it('click effects stay native mouse-through and live lens is opt-in',async()=>{
+    const {dom,document,actions}=setup();
+    document.getElementById('present-toggle').click();
+    await nextTask();await nextTask();
+    document.getElementById('creator-click').click();
+    await nextTask();await nextTask();
+    expect(actions).toContain('creator_click_toggle');
+    expect(document.getElementById('creator-click').getAttribute('aria-pressed')).toBe('true');
+    document.getElementById('present-live').click();
+    await nextTask();await nextTask();
+    expect(actions).toContain('present_live');
+    expect(document.getElementById('present-live').getAttribute('aria-pressed')).toBe('true');
+    document.getElementById('present-off').click();
+    await nextTask();await nextTask();
+    expect(document.getElementById('present-live').getAttribute('aria-pressed')).toBe('false');
     dom.window.close();
   });
 

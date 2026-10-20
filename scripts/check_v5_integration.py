@@ -146,6 +146,30 @@ assert "src/utils/streamRestart.test.ts" in [str(p.relative_to(root)) for p in (
 assert "recording in progress" in read("src/utils/resolutionSwitch.ts").lower()
 assert "isSwitchingResolution" in home and "isSwitchingResolution" in panel
 
+# v5.2 creator overlays must be real native/JS integrations, not decorative
+# toggles. Click graphics must never intercept the SDL pointer.
+phone_toolbar = read("public/phone-controls.html")
+frame_page = read("public/frame.html")
+frame_native = read("src-tauri/src/device_frame.rs")
+creator_click = read("public/creator-effects.js")
+present = read("public/present-overlay.js")
+assert '<canvas id="creator-effects"' in frame_page
+assert 'pointer-events:none' in frame_page
+assert 'window.scrcpyCreator=Object.freeze' in creator_click
+assert 'GetAsyncKeyState(VK_LBUTTON' in frame_native and 'is_creator_click_enabled' in frame_native
+assert 'creator_click_toggle' in frame_native and 'creator-click' in phone_toolbar
+for name in ("arrow", "rect", "step", "mask"):
+    assert "ink_" + name in frame_native, name
+    assert "creator-" + name in phone_toolbar, name
+    assert "stroke.tool === '" + name + "'" in frame_page, name
+assert 'scrcpy 原始录像' in read("README.md")
+assert '原始录屏/OBS' in phone_toolbar
+assert 'refresh_presenter_image(&app,&device,None)' in frame_native
+assert 'start_live_zoom_sampling' in frame_native and 'present_is_live' in frame_native
+assert '"live" => Some("live")' in frame_native and 'mode === \'live\'' in present
+assert 'mode == "live"' in commands, "Main IPC must not enable a non-started sampler"
+assert "set_ignore_cursor_events(true)" in frame_native, "Release Android touch on failures"
+
 for expected in (
     f"MirroLeap_{version}_x64_Portable.zip",
     f"MirroLeap_{version}_x64-setup.exe",

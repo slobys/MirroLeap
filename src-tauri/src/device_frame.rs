@@ -52,6 +52,26 @@ static PRESENTATION_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static QUICK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static PRESENT_TOOL_OPEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static CREATOR_CLICKS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static LIVE_ZOOM_GENERATION: AtomicU64 = AtomicU64::new(1);
+static LIVE_ZOOM_SESSIONS: OnceLock<Mutex<HashMap<String,u64>>> = OnceLock::new();
+fn creator_clicks() -> &'static Mutex<HashSet<String>> {
+    CREATOR_CLICKS.get_or_init(||Mutex::new(HashSet::new()))
+}
+fn live_zoom_sessions() -> &'static Mutex<HashMap<String,u64>> {
+    LIVE_ZOOM_SESSIONS.get_or_init(||Mutex::new(HashMap::new()))
+}
+fn is_creator_click_enabled(device:&str) -> bool {
+    creator_clicks().lock().map(|set|set.contains(device)).unwrap_or(false)
+}
+fn cancel_live_zoom(device:&str) {
+    if let Ok(mut map)=live_zoom_sessions().lock() { map.remove(device); }
+}
+fn is_live_zoom_current(device:&str, token:u64)->bool {
+    presentation_mode(device)=="live" && live_zoom_sessions().lock()
+        .map(|map|map.get(device)==Some(&token)).unwrap_or(false)
+}
+
 fn presenter_panels() -> &'static Mutex<HashSet<String>> {
     PRESENT_TOOL_OPEN.get_or_init(|| Mutex::new(HashSet::new()))
 }
@@ -270,6 +290,7 @@ fn known_present_mode(mode: &str) -> Option<&'static str> {
         "off" => Some("off"),
         "spotlight" => Some("spotlight"),
         "magnifier" => Some("magnifier"),
+        "live" => Some("live"),
         _ => None,
     }
 }
@@ -704,6 +725,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut layout_synced_at: Option<Instant> = None;
     let mut topmost_checked_at: Option<Instant> = None;
     let mut clip_retry_reported = false;
+    let mut last_left_held = false;
+    let mut last_click_effect_at = Instant::now() - Duration::from_secs(2);
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -725,6 +748,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let Some(pid) = pid else { break };
 
         let Some(captured) = capture_screen(pid) else {
+            last_left_held = false;
             // The underlying video is temporarily minimized or unavailable.
             // Don't terminate the follow task: it must reattach when the user
             // restores scrcpy via taskbar/Alt+Tab, even after several minutes.
@@ -1043,6 +1067,25 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // until a narrow desktop margin requires a compact stacked layout.
         let cursor = pointer();
         let dragging = is_dragging(&device);
+        // Click ripples observe the real SDL mouse edge while the visual
+        // overlay stays click-through. Do not route or synthesize Android input.
+        let held=(unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } as u16 & 0x8000)!=0;
+        if held && !last_left_held && foreground==hwnd &&
+            !is_inking(&device) && presentation_mode(&device)=="off" &&
+            is_creator_click_enabled(&device) &&
+            last_click_effect_at.elapsed()>=Duration::from_millis(130)
+        {
+            if let Some((px,py))=cursor.filter(|&(x,y)|inside(x,y,screen,0)) {
+                let x=(px-screen.x) as f64 / screen.width.max(1) as f64;
+                let y=(py-screen.y) as f64 / screen.height.max(1) as f64;
+                if overlay.eval(format!(
+                    "window.scrcpyCreator?.flashClick({x:.6},{y:.6})"
+                )).is_ok() {
+                    last_click_effect_at=Instant::now();
+                }
+            }
+        }
+        last_left_held=held;
         let close_to_edge = cursor.map(|(x,y)| is_frame_edge_hover(x,y,frame)).unwrap_or(false);
         let inside_controls = match (cursor, controls_rect) {
             (Some((x,y)), Some(r)) => inside(x,y,r,12),
@@ -1159,6 +1202,9 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     if let Ok(mut set) = ink_sessions().lock() { set.remove(&device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(&device); }
     update_presentation_mode(&app, &device, "off");
+    cancel_live_zoom(&device);
+    if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(&device);}
+
     let _ = overlay.set_ignore_cursor_events(true);
     if let Some(pid) = clipped_pid {
         if let Some(hwnd) = crate::commands::find_window_by_pid(pid) {
@@ -1184,6 +1230,10 @@ fn ink_action_script(action: &str) -> Option<&'static str> {
     match action {
         "ink_pen" => Some("window.scrcpyInk?.setTool('pen')"),
         "ink_erase" => Some("window.scrcpyInk?.setTool('erase')"),
+        "ink_arrow" => Some("window.scrcpyInk?.setTool('arrow')"),
+        "ink_rect" => Some("window.scrcpyInk?.setTool('rect')"),
+        "ink_step" => Some("window.scrcpyInk?.setTool('step')"),
+        "ink_mask" => Some("window.scrcpyInk?.setTool('mask')"),
         "ink_color_yellow" => Some("window.scrcpyInk?.setColor('#ffd54b')"),
         "ink_color_red" => Some("window.scrcpyInk?.setColor('#ff5252')"),
         "ink_color_white" => Some("window.scrcpyInk?.setColor('#ffffff')"),
@@ -1272,6 +1322,7 @@ pub(crate) async fn set_presentation_mode(
 ) -> Result<String, String> {
     let mode = known_present_mode(requested).ok_or("Unknown MirroPresent mode")?;
     let _guard = PresentationTransitionGuard::begin(device)?;
+    if mode != "live" { cancel_live_zoom(device); }
     if ink_busy().lock().map_err(|e| e.to_string())?.contains(device) {
         return Err("Please wait for the pen mode to finish switching".into());
     }
@@ -1313,6 +1364,7 @@ pub(crate) async fn set_presentation_mode(
     let js = match mode {
         "spotlight" => "return window.scrcpyPresent?.setMode('spotlight') === 'spotlight';",
         "magnifier" => "return window.scrcpyPresent?.setMode('magnifier') === 'magnifier';",
+        "live" => "return window.scrcpyPresent?.setMode('live') === 'live';",
         _ => unreachable!(),
     };
     if let Err(error) = evaluate_ink(&overlay, js).await {
@@ -1353,8 +1405,8 @@ pub(crate) async fn set_presentation_snapshot(
     app: &AppHandle, device: &str, png: &[u8],
 ) -> Result<(), String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
-    if presentation_mode(device) != "magnifier" {
-        return Err("Switch to MirroPresent snapshot magnifier before capturing".into());
+    if !matches!(presentation_mode(device).as_str(),"magnifier" | "live") {
+        return Err("Enable a MirroPresent magnifier before capturing".into());
     }
     if !ready_to_ink(device) {
         return Err("Phone presentation view has not loaded".into());
@@ -1432,6 +1484,10 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
     if action == "ink_reset" {
         let _guard = InkTransitionGuard::begin(device)?;
         // One-click restore is deliberately allowed with pen mode ON or OFF.
+        cancel_live_zoom(device);
+        if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(device);}
+        let _=overlay.eval("window.scrcpyCreator?.reset()");
+
         // Recover Android input first even if the canvas has reloaded.
         overlay.set_ignore_cursor_events(true)
             .map_err(|e| format!("恢复手机鼠标输入失败: {e}"))?;
@@ -1726,6 +1782,54 @@ fn toggle_video_topmost(app: &AppHandle, device: &str, hwnd: HWND) -> Result<boo
     Ok(desired)
 }
 
+/// Opt-in bounded cadence of NEW Android screencaps, not a frozen replay.
+/// Never stores pixels or increases scrcpy's codec/bitrate settings.
+fn start_live_zoom_sampling(app: AppHandle, device: String) {
+    let token=LIVE_ZOOM_GENERATION.fetch_add(1,Ordering::Relaxed);
+    if let Ok(mut sessions)=live_zoom_sessions().lock() {
+        sessions.insert(device.clone(),token);
+    } else {return;}
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(650)).await;
+            if !is_live_zoom_current(&device,token) {break;}
+            let pid=app.state::<ScrcpyState>().processes.lock().ok()
+                .and_then(|processes|processes.get(&device).and_then(|child|child.id()));
+            let focused=pid.and_then(capture_screen).map(|screen| {
+                let foreground=unsafe { GetForegroundWindow() };
+                foreground==screen.hwnd ||
+                    app.get_webview_window(&label(&device)).and_then(|w|w.hwnd().ok())
+                        ==Some(foreground) ||
+                    app.get_webview_window(&toolbar_label(&device)).and_then(|w|w.hwnd().ok())
+                        ==Some(foreground)
+            });
+            if focused.is_none() {
+                let _=set_presentation_mode(&app,&device,"off").await;
+                break;
+            }
+            // Do not take new screenshots while the user works elsewhere.
+            if focused==Some(false) {continue;}
+            let result=crate::commands::refresh_presenter_image(&app,&device,None).await;
+            if !is_live_zoom_current(&device,token) {break;}
+            if let Err(error)=result {
+                let _=app.emit("scrcpy-log",
+                    format!("[PRESENTER] Continuous lens stopped: {error}"));
+                if set_presentation_mode(&app,&device,"off").await.is_err() {
+                    if let Some(overlay)=app.get_webview_window(&label(&device)) {
+                        let _=overlay.set_ignore_cursor_events(true);
+                        let _=overlay.eval("window.scrcpyPresent?.setMode('off')");
+                    }
+                    update_presentation_mode(&app,&device,"off");
+                }
+                break;
+            }
+        }
+        if let Ok(mut sessions)=live_zoom_sessions().lock() {
+            if sessions.get(&device)==Some(&token) {sessions.remove(&device);}
+        }
+    });
+}
+
 pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<bool, String> {
     let device = device_for_controls(app, caller)?;
     let pid = app.state::<ScrcpyState>().processes.lock()
@@ -1738,6 +1842,28 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
     if action == "present_status" { return Ok(is_present_panel_open(&device)); }
     if action == "present_is_spotlight" { return Ok(presentation_mode(&device) == "spotlight"); }
     if action == "present_is_magnifier" { return Ok(presentation_mode(&device) == "magnifier"); }
+    if action == "present_is_live" { return Ok(presentation_mode(&device) == "live"); }
+    if action == "creator_click_status" { return Ok(is_creator_click_enabled(&device)); }
+    if action == "creator_click_toggle" {
+        if !is_present_panel_open(&device) {
+            return Err("Open MirroPresent tools before enabling click effects".into());
+        }
+        let target = !is_creator_click_enabled(&device);
+        let overlay=app.get_webview_window(&label(&device))
+            .ok_or("Phone frame is unavailable")?;
+        if !ready_to_ink(&device) {
+            return Err("Phone overlay is not ready".into());
+        }
+        let code = if target {
+            "return window.scrcpyCreator?.setClickEnabled(true) === true;"
+        } else {
+            "return window.scrcpyCreator?.setClickEnabled(false) === false;"
+        };
+        evaluate_ink(&overlay,code).await?;
+        let mut enabled=creator_clicks().lock().map_err(|e|e.to_string())?;
+        if target {enabled.insert(device);} else {enabled.remove(&device);}
+        return Ok(target);
+    }
     if action == "present_toggle" {
         if is_present_panel_open(&device) {
             if presentation_mode(&device) != "off" {
@@ -1780,6 +1906,20 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
                         }
                         return Err(format!("Magnifier snapshot failed and presenter was exited: {error}"));
                     }
+                    Ok(true)
+                }
+            },
+            "present_live" => {
+                if presentation_mode(&device)=="live" {
+                    set_presentation_mode(app,&device,"off").await?;
+                    Ok(false)
+                } else {
+                    set_presentation_mode(app,&device,"live").await?;
+                    if let Err(error)=crate::commands::refresh_presenter_image(app,&device,None).await {
+                        let _=set_presentation_mode(app,&device,"off").await;
+                        return Err(format!("Live lens could not get a fresh frame: {error}"));
+                    }
+                    start_live_zoom_sampling(app.clone(),device.clone());
                     Ok(true)
                 }
             },
@@ -1969,6 +2109,8 @@ pub fn start(
     }
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
     if let Ok(mut present) = presenter_panels().lock() { present.remove(device); }
+    if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(device);}
+    cancel_live_zoom(device);
     if let Ok(mut states) = topmost_requests().lock() {
         states.insert(device.to_string(), always_on_top);
     }
@@ -1989,6 +2131,9 @@ pub fn start(
                     // JS mode resets on reload; never keep native cursor
                     // capture or presentation status referring to old state.
                     update_presentation_mode(view.app_handle(), &page_device, "off");
+                    cancel_live_zoom(&page_device);
+                    if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(&page_device);}
+
                     // On navigation/reload never leave an opaque input-capturing
                     // overlay ahead of native scrcpy when its canvas script resets.
                     let _ = view.set_ignore_cursor_events(true);
@@ -2076,7 +2221,8 @@ mod tests {
         assert_eq!(known_present_mode("off"), Some("off"));
         assert_eq!(known_present_mode("spotlight"), Some("spotlight"));
         assert_eq!(known_present_mode("magnifier"), Some("magnifier"));
-        for value in ["", "snapshot", "live", "magnifier();alert(1)", "../run",
+        assert_eq!(known_present_mode("live"), Some("live"));
+        for value in ["", "snapshot", "magnifier();alert(1)", "../run",
             "Off", "spotlight\n", "ink_toggle"] {
             assert_eq!(known_present_mode(value), None, "{value}");
         }
@@ -2095,6 +2241,10 @@ mod tests {
     fn annotation_scripts_allow_only_fixed_palette_and_edit_commands() {
         assert_eq!(ink_action_script("ink_color_red"), Some("window.scrcpyInk?.setColor('#ff5252')"));
         assert!(ink_action_script("ink_clear").is_some());
+        assert!(ink_action_script("ink_arrow").is_some());
+        assert!(ink_action_script("ink_rect").is_some());
+        assert!(ink_action_script("ink_step").is_some());
+        assert!(ink_action_script("ink_mask").is_some());
         assert!(ink_action_script("ink_size_9").is_some());
         assert!(ink_action_script("ink_color_' + alert(1)").is_none());
         assert!(ink_action_script("exit").is_none());

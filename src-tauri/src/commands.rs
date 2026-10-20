@@ -1057,8 +1057,9 @@ pub(crate) async fn refresh_presenter_image(
     app: &tauri::AppHandle, device: &str, custom_path: Option<String>,
 ) -> Result<(), String> {
     validate_capture_device(device)?;
-    if crate::device_frame::presentation_mode(device) != "magnifier" {
-        return Err("Enable MirroPresent frozen magnifier before refreshing".into());
+    if !matches!(crate::device_frame::presentation_mode(device).as_str(),
+        "magnifier" | "live") {
+        return Err("Enable a MirroPresent magnifier before capturing".into());
     }
     // ADB captures a screenshot at a different instant from the SDL video
     // size and the WebView frame's CSS orientation. During rotation all three
@@ -1067,7 +1068,8 @@ pub(crate) async fn refresh_presenter_image(
     let capture = async {
         let mut last_orientation_error = String::new();
         for attempt in 0..5 {
-            if crate::device_frame::presentation_mode(device) != "magnifier" {
+            if !matches!(crate::device_frame::presentation_mode(device).as_str(),
+                "magnifier" | "live") {
                 return Err("Magnifier was closed while waiting for orientation".into());
             }
             let png = capture_device_png(device, custom_path.clone()).await?;
@@ -1102,6 +1104,13 @@ pub async fn presentation_set_mode(
 ) -> Result<String, String> {
     require_main_window(&window)?;
     validate_capture_device(&device)?;
+    // Continuous magnification must use the toolbar's guarded startup:
+    // it validates the first fresh ADB frame and starts a bounded sampler.
+    // Setting just the overlay mode would silently intercept Android touches
+    // without ever delivering actual live frames.
+    if mode == "live" {
+        return Err("Start continuous lens from the phone's MirroCreator toolbar".into());
+    }
     #[cfg(target_os = "windows")]
     {
         crate::device_frame::set_presentation_mode(&app_handle, &device, &mode).await

@@ -31,6 +31,16 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.2.0 · MirroCreator 创作者演示工具（Windows 预发布测试版）
+
+在 v5.1.4 稳定版基础上新增四项自愿开启的教程功能，复用手机投屏的透明原生外框、画笔与 MirroPresent 悬浮控制栏。
+
+- **点击特效**：在「MirroPresent 演示工具」启用电脑鼠标点击光圈。通过 native SDL 窗口范围与鼠标左键按下事件绘制独立的鼠标穿透动画，不拦截 Android 点击；切换窗口、手机失联或绘图模式不记录无关点击。
+- **步骤标注**：打开「画笔 → 创作者」，可选箭头、矩形、①～⑨ 步骤编号以及实心遮挡矩形，沿用已有笔迹撤销、清空与方向改变后重置逻辑；「保存含画笔截图」可包含该标注图层。
+- **隐私遮挡（仅视觉演示层）**：手动绘制不透明矩形。**scrcpy 原始录像、普通截图和 OBS 单窗口采集可能不包含遮挡；请勿用它来保护敏感账号、密码或密钥。** 画笔页提供明确提示，首次启用遮挡弹窗提醒。
+- **持续画面放大**：除了「定格放大镜」外可选「实时放大」，持续读取新的手机 ADB PNG 截图更新局部放大，采样频率因性能及连接方式而异，典型只有约 1–3 帧/秒，**不是 60FPS 视频实时缩放**。仅用户开启时采集；切换模式、投屏最小化或获取截图失败会停止采样并恢复手机触控。
+- **发布与验收**：v5.2.0 是测试候选，v5.1.4 仍是 GitHub Latest 正式版。Windows 真机点击视觉、横屏悬浮栏尺寸及不同 Android ROM 截图性能必须实测后再决定提升为正式版。
+
 ## 🧪 v5.1.4 · 无线端口恢复与设备配置隔离（Windows 预发布测试版）
 
 - **无线端口变化提醒**：Android 11+ 无线调试的连接端口可能变化。当原选中端口离线，且同 IP 上只有一个已连接的新端口时，在设备面板提供显式切换入口。用户必须先核对手机身份，再点击切换；同 IP 并不能证明是同一部手机，程序绝不自动改变选择。
@@ -231,11 +241,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.1.4_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.1.4_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.1.4_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.2.0_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.2.0_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.2.0_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.1.4 测试版请到 [GitHub Pre-release](https://github.com/slobys/MirroLeap/releases/tag/v5.1.4) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 保持 v5.0.20 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**v5.2.0 测试候选需等 CI 与签名验收后再提供 Pre-release 安装包。正式版仍请到 [GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 保持 v5.0.20 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 
