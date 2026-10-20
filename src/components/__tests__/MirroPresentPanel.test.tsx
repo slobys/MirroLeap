@@ -68,6 +68,17 @@ describe('MirroPresent opt-in tools in settings',()=>{
     expect(screen.getByText(/This is not live video/)).toBeInTheDocument();
   });
 
+  it('keeps the requested 2.35x live zoom while acknowledging desktop pixel limits',async()=>{
+    invokeMock.mockImplementation(async(command)=>{
+      if (command==='presentation_get_mode') return 'live';
+      return undefined;
+    });
+    render(<MirroPresentPanel device="emulator-5554" running onRecenter={vi.fn()}/>);
+    expect(await screen.findByText(/Default zoom stays at 2.35×/)).toBeInTheDocument();
+    expect(screen.getByText(/Genuine sharp 2.35× live zoom requires decoded/)).toBeInTheDocument();
+    expect(screen.getByText(/cannot recover lost high-resolution phone details/)).toBeInTheDocument();
+  });
+
   it('reports native failure instead of visually pretending the tool activated',async()=>{
     invokeMock.mockImplementation(async(command)=>{
       if (command==='presentation_get_mode') return 'off';

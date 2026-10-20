@@ -29,11 +29,12 @@ const STYLE_VISIBLE: u32 = 0x1000_0000;
 const LWA_ALPHA: u32 = 2;
 const POSITION_SHOW: u32 = 0x0040 | 0x0010;
 const POSITION_CHILD: u32 = 0x0004 | 0x0010;
-// 2.35× made ordinary 1080p mirroring look blocky, because Windows
-// Magnification magnifies *displayed* pixels, not undecoded phone pixels.
-// A modest default has visibly higher source-pixel density. Ctrl+wheel
-// deliberately allows stronger zoom at the user's discretion.
-const DEFAULT_FACTOR: f32 = 1.25;
+// Creator-preferred zoom is 2.35×. Keep this ratio stable; reducing zoom
+// is not a fix for the genuine information loss caused by magnifying an
+// already downscaled SDL desktop window. Ctrl+wheel remains an explicit user
+// choice. True 2.35× high-definition must read decoded AVFrame video BEFORE
+// scrcpy downsamples to SDL (see MIRROCREATOR_HQ_RENDERING_CN.md).
+const DEFAULT_FACTOR: f32 = 2.35;
 const FACTOR_MIN: f32 = 1.05;
 const FACTOR_MAX: f32 = 3.0;
 const DEFAULT_DIAMETER_RATIO: f32 = 0.50;
@@ -508,6 +509,14 @@ mod tests {
         assert!(!inside_active_phone_rect(120,800,100,100,360,700));
         assert!(!inside_active_phone_rect(120,160,100,100,0,700));
     }
+    #[test]
+    fn creator_prefers_real_235_zoom_instead_of_hiding_blur_by_reducing_zoom() {
+        let preset=LensSettings::default();
+        assert!((preset.zoom-2.35).abs()<0.00001);
+        assert!(preset.zoom>2.0);
+        assert!((preset.diameter_ratio-0.50).abs()<0.00001);
+    }
+
     #[test]
     fn wheel_changes_diameter_separately_from_optical_zoom() {
         let view=ViewUpdate{x:10,y:20,width:430,height:920,cursor_x:200,cursor_y:400,

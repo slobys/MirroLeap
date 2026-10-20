@@ -195,7 +195,9 @@ assert 'lens_geometry' in native_lens and 'fn stop(' in native_lens
 assert 'SetWindowsHookExW' in native_lens and 'UnhookWindowsHookEx' in native_lens
 assert 'WH_MOUSE_LL' in native_lens and 'CallNextHookEx' in native_lens
 assert 'WHEEL_SIZE_DELTA' in native_lens and 'WHEEL_ZOOM_DELTA' in native_lens
-assert 'adjust_wheel' in native_lens and 'DEFAULT_FACTOR: f32 = 1.25' in native_lens
+assert 'adjust_wheel' in native_lens and 'DEFAULT_FACTOR: f32 = 2.35' in native_lens
+assert 'creator_prefers_real_235_zoom_instead_of_hiding_blur_by_reducing_zoom' in native_lens
+assert (root / 'MIRROCREATOR_HQ_RENDERING_CN.md').is_file(), 'HQ decoded-frame plan must remain tracked'
 assert 'wheel_target_contains' in native_lens and 'return 1;' in native_lens
 assert 'FACTOR_MAX: f32 = 3.0' in native_lens
 assert 'struct ScopedWheelHook' in native_lens

@@ -181,8 +181,8 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
     </p>}
     {mode==='live' && <p role="note" className="ml-muted text-xs">
       {zh
-        ? '实时放大来自 Windows 原生视频画面。鼠标停留手机内，滚轮调节放大圆圈范围，Ctrl＋滚轮单独调节内容倍率。清晰度优先：默认倍率约 1.25 倍，可手动调高；放大的是 Windows 已渲染的画面，过高倍率仍会模糊。想获得更多真实细节，请提高投屏窗口实际显示尺寸及合适的手机视频分辨率。'
-        : 'The live lens follows the Windows-rendered SDL video. Wheel changes circle size; Ctrl+wheel changes magnification separately. Default zoom is about 1.25× to reduce visible scaling blur. Higher zoom cannot recover detail absent from the Windows-rendered source; a larger phone window may help.'}
+        ? '实时放大来自 Windows 原生视频画面。鼠标停留手机内，滚轮调节放大圆圈范围，Ctrl＋滚轮单独调节内容倍率。默认保留 2.35 倍。当前 Windows 镜头只能放大已显示的桌面像素，无法凭空还原手机原始视频细节。可以适当放大投屏窗口以改善源像素密度；真正的高清实时放大需要后续直接接入 scrcpy 解码后的原始高分辨率帧。'
+        : 'The live lens follows the Windows-rendered SDL video. Wheel changes circle size; Ctrl+wheel changes magnification separately. Default zoom stays at 2.35×. The current Windows lens scales pixels already rendered by SDL; it cannot recover lost high-resolution phone details. Enlarging the mirror window may improve the source pixel density. Genuine sharp 2.35× live zoom requires decoded high-resolution scrcpy frames.'}
     </p>}
     {mode==='spotlight' && <p role="note" className="ml-muted text-xs">
       {zh ? '在手机画面内滚动鼠标滚轮即可放大或缩小聚光灯范围。' :
