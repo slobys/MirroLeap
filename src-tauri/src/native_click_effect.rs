@@ -6,8 +6,8 @@
 #![cfg(target_os = "windows")]
 
 use std::{
-    collections::HashMap, ffi::c_void, ptr::{null, null_mut},
-    sync::{mpsc::{sync_channel, Receiver, SyncSender, TrySendError}, Mutex, OnceLock},
+    collections::HashMap, ffi::c_void, ptr::null_mut,
+    sync::{mpsc::{sync_channel, Receiver, SyncSender}, Mutex, OnceLock},
     thread::{self, JoinHandle}, time::{Duration, Instant},
 };
 
@@ -92,7 +92,7 @@ fn ring_pixel(x:f32,y:f32,progress:f32)->[u8;4] {
     let thickness=4.2-progress*1.4;
     let main=(1.-((distance-radius)/thickness).abs()).clamp(0.,1.);
     let secondary=(1.-((distance-radius*0.86)/(thickness*0.9)).abs()).clamp(0.,1.);
-    let core=if progress < .28 {
+    let core=if progress < 0.28 {
         (1.-progress/0.28)*((6.-distance)/2.).clamp(0.,1.)
     } else {0.};
     let fade=(1.-progress).powf(0.70);

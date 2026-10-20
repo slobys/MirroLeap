@@ -1854,7 +1854,7 @@ fn start_creator_click_sampler(app: AppHandle, device: String) {
             was_held = held;
             if !down || last_emit.elapsed() < Duration::from_millis(120) { continue; }
 
-            let coords = (|| -> Option<(f64,f64)> {
+            let coords = (|| -> Option<(f64,f64,i32,i32)> {
                 if is_inking(&device) || is_dragging(&device) ||
                     !matches!(presentation_mode(&device).as_str(), "off" | "live") {
                     return None;
@@ -1884,9 +1884,10 @@ fn start_creator_click_sampler(app: AppHandle, device: String) {
                 Some((
                     (px-actual.screen.x) as f64/actual.screen.width.max(1) as f64,
                     (py-actual.screen.y) as f64/actual.screen.height.max(1) as f64,
+                    px,py,
                 ))
             })();
-            if let (Some((x,y)),Some(overlay)) =
+            if let (Some((x,y,px,py)),Some(overlay)) =
                 (coords,app.get_webview_window(&label(&device))) {
                 // Native premultiplied-alpha HWND is the visible indicator:
                 // Windows reports actual layered paint + z-order success.
