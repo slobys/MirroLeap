@@ -1,5 +1,11 @@
 mod commands;
 mod transfer_progress;
+// Experimental decoded-frame IPC parser; not enabled in production mirroring.
+#[allow(dead_code)]
+mod hq_protocol;
+#[cfg(target_os = "windows")]
+#[allow(dead_code)]
+mod hq_bridge_windows;
 mod app_update;
 mod android_rotation;
 mod capture_compositor;

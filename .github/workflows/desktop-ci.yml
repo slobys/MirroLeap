@@ -49,8 +49,19 @@ jobs:
       - run: python3 scripts/check_video_decoder.py
       - run: python3 scripts/check_mirropresent.py
       - run: python3 scripts/check_v5_integration.py
+      # HQ is experimental and opt-in: validate decoded-frame data safety
+      # without starting Android or replacing the official scrcpy binary.
+      - run: python3 scripts/check_hq_bridge.py
+      - name: Experimental C HQ sink packed-frame tests (Linux API stubs only)
+        run: |
+          gcc -std=c11 -D_WIN32 -Wall -Wextra -Werror \
+            -Ihq/tests/stubs -Ihq/include hq/tests/test_sink.c -o /tmp/mirroleap-hq-sink-test
+          /tmp/mirroleap-hq-sink-test /tmp/mirroleap-hq-c-fixture.bin
       - run: python3 scripts/check_repository_migration.py
-      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Rust tests including C-to-Rust HQ frame fixture
+        env:
+          MIRROLEAP_HQ_C_FIXTURE: /tmp/mirroleap-hq-c-fixture.bin
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
   windows:
     runs-on: windows-latest
@@ -82,6 +93,10 @@ jobs:
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_live_lens::tests
       - name: Windows native MirroCreator click ripple pixel tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_click_effect::tests
+      - name: Windows HQ decoded-frame shared-memory owner and protocol tests
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_protocol::tests
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_bridge_windows::tests
       - name: Stage extract-and-run portable version
         shell: pwsh
         run: ./scripts/windows-stage-portable.ps1

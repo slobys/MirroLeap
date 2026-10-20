@@ -1,0 +1,55 @@
+name: Experimental scrcpy HQ Frame Sink (manual only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upstream-windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Clone pinned upstream scrcpy v4.0
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch v4.0 https://github.com/Genymobile/scrcpy.git hq/upstream-src
+          $head = (git -C hq/upstream-src rev-parse HEAD).Trim()
+          if ($head -ne "2322868e9e256eb5fce0b3d659ab2a409f29bae1") {
+            throw "scrcpy v4.0 source revision is not the reviewed commit"
+          }
+      - name: Apply opt-in decoded-frame sink
+        shell: pwsh
+        run: |
+          python hq/apply_scrcpy_v4.py hq/upstream-src
+          python scripts/check_hq_bridge.py
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-SDL3
+      - name: Build upstream scrcpy client with opt-in HQ sink (NO Android server)
+        shell: msys2 {0}
+        run: |
+          meson setup hq/upstream-build hq/upstream-src \
+            --buildtype=release -Dcompile_server=false \
+            -Dcompile_app=true -Dusb=false -Dv4l2=false -Dportable=true
+          meson compile -C hq/upstream-build
+      - name: Verify experimental client starts (without connecting to Android)
+        shell: msys2 {0}
+        run: |
+          ./hq/upstream-build/app/scrcpy.exe --version
+      # This deliberately does not publish an unsigned patched core,
+      # modify the active version, or install HQ into a user's system.
