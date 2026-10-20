@@ -64,6 +64,15 @@ fn live_zoom_sessions() -> &'static Mutex<HashMap<String,u64>> {
 fn is_creator_click_enabled(device:&str) -> bool {
     creator_clicks().lock().map(|set|set.contains(device)).unwrap_or(false)
 }
+fn disable_creator_clicks(app:&AppHandle,device:&str) {
+    if let Ok(mut clicks)=creator_clicks().lock() {clicks.remove(device);}
+    if let Some(overlay)=app.get_webview_window(&label(device)) {
+        // Native state is the authority: even if the JS view was replaced,
+        // subsequent SDL clicks will not emit a ripple.
+        let _=overlay.eval("window.scrcpyCreator?.reset()");
+    }
+}
+
 fn cancel_live_zoom(device:&str) {
     if let Ok(mut map)=live_zoom_sessions().lock() { map.remove(device); }
 }
@@ -1518,6 +1527,8 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
     if action == "ink_toggle" {
         let _guard = InkTransitionGuard::begin(device)?;
         let turn_on = !is_inking(device);
+        if turn_on {disable_creator_clicks(app,device);}
+
 
         if turn_on {
             if !ready_to_ink(device) {
@@ -1869,6 +1880,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             if presentation_mode(&device) != "off" {
                 set_presentation_mode(app, &device, "off").await?;
             }
+            disable_creator_clicks(app,&device);
             presenter_panels().lock().map_err(|e|e.to_string())?.remove(&device);
             return Ok(false);
         }
@@ -1949,6 +1961,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         if !is_quick_open(&device) && presentation_mode(&device) != "off" {
             set_presentation_mode(app, &device, "off").await?;
         }
+        disable_creator_clicks(app,&device);
         presenter_panels().lock().map_err(|e| e.to_string())?.remove(&device);
         if !is_quick_open(&device) && is_inking(&device) {
             control_ink(app, &device, "ink_toggle").await?;

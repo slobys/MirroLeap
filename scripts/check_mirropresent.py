@@ -25,17 +25,17 @@ assert "present-overlay.js" in html and '<canvas id="presentation"' in html
 assert "body.presenting #presentation { pointer-events: auto; }" in html
 assert 'body.inking #annotation { pointer-events: auto; }' in html
 assert "window.scrcpyPresent = Object.freeze" in present
-assert "new Set(['off', 'spotlight', 'magnifier'])" in present
+assert "new Set(['off', 'spotlight', 'magnifier', 'live'])" in present
 assert "MutationObserver" in present and "snapshot = null" in present
 assert "pointermove" in present and "destination-out" in present
-assert "This overlay contains NO live scrcpy pixels" in present
+assert "It never contains the scrcpy video stream" in present
 assert "await new Promise" in present
 assert "window.scrcpyInk = Object.freeze" in html, "Drawing preserved"
 assert "presentation_set_mode" in lib and "presentation_get_mode" in lib
 assert "presentation_refresh_snapshot" in lib
 assert "require_main_window(&window)?;" in commands
 assert "validate_capture_device(&device)?;" in commands
-assert "presentation_mode(device) != \"magnifier\"" in commands
+assert '"magnifier" | "live"' in commands, "Both still and continuous lens require verified mode"
 assert "capture_device_png(device, custom_path.clone()).await?" in commands
 assert "retryable_presenter_orientation_error" in commands
 assert "Duration::from_secs(24)" in commands
@@ -58,7 +58,8 @@ assert "<MirroPresentPanel device={activeDevice}" not in main, "Avoid duplicated
 assert 'id="present-toggle"' in (root / "public/phone-controls.html").read_text(), (
     "MirroPresent must remain available on the floating phone rail"
 )
-assert "MirroCapture saves phone pixels and optional pen ink" in panel
+assert "Creator masks only cover the visible overlay" in panel
+assert "Continuous lens uses low-FPS fresh ADB screenshots" in panel
 assert "presentations" not in cfg.get("identifier", "")
 assert (root / "src/test/mirroPresent.test.mjs").exists()
 assert (root / "src/components/__tests__/MirroPresentPanel.test.tsx").exists()
