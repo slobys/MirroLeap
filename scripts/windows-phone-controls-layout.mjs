@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Verify the Windows hover toolbar with actual Chromium/Edge box geometry:
- * all eight quick actions and four presenter actions must be visible,
+ * all quick actions and all six presenter actions must be visible,
  * unobstructed and never crop the
  * neighboring close/minimize, ink and emergency reset controls. Browser-only
  * mock is inert; native IPC is verified separately by the Rust/Windows build.
@@ -23,7 +23,7 @@ const layouts = [
 ];
 const file = pathToFileURL(resolve('public/phone-controls.html')).href;
 const names = ['fullscreen','home','back','recents','power','rotate','paste','top','remember'];
-const presenterActions = ['spotlight','magnifier','refresh','off'];
+const presenterActions = ['spotlight','magnifier','live','creator-click','refresh','off'];
 const browser = await chromium.launch({
   channel: process.env.MIRROLEAP_LAYOUT_BROWSER === 'chromium' ? undefined : 'msedge',
   headless: true, args:['--no-first-run', '--disable-extensions'],
@@ -116,7 +116,7 @@ try {
             p.bottom<=r.top+1 || p.top>=r.bottom-1),
           overflow:panel.scrollWidth-panel.clientWidth>1 || panel.scrollHeight-panel.clientHeight>1,
           controls:actions.map(name=>{
-            const el=document.getElementById('present-'+name);
+            const el=document.getElementById(name==='creator-click' ? name : 'present-'+name);
             const b=el.getBoundingClientRect();
             const hit=document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);
             return {name,ok:b.width>=34&&b.height>=34&&b.left>=p.left-1&&b.right<=p.right+1&&
@@ -129,7 +129,7 @@ try {
       for(const item of presenterGeometry.controls){
         assert(item.ok,`Presenter ${item.name} obscured: ${entry.layout} ${dpi} ${JSON.stringify(presenterGeometry)}`);
       }
-      console.log('PASS',entry.layout,`${dpi*100}% DPI, eight quick + four presenter controls reachable`);
+      console.log('PASS',entry.layout,`${dpi*100}% DPI, all quick + six presenter controls reachable`);
       await page.close();
     }
     await context.close();

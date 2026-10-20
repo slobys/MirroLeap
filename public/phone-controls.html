@@ -182,6 +182,21 @@
     #present-live.active,#creator-click.active {background:rgba(18,185,151,.34);color:#a6fff0;}
     .present-grid button svg {width:19px;height:19px;}
     .present-hint {font-size:11px;line-height:16px;color:#98a9bb;}
+    /* Stack mode has only 168x202 physical CSS pixels. A 3x2 palette
+       cannot fit six 51px buttons plus a long explanation and title. Keep
+       every action tappable; abbreviate the supporting copy instead. */
+    body[data-layout^="stack"] #present-tools {padding:7px;gap:4px;}
+    body[data-layout^="stack"] .present-grid {gap:4px;}
+    body[data-layout^="stack"] .present-grid button {
+      height:43px;min-height:43px;font-size:9px;gap:0;
+    }
+    body[data-layout^="stack"] #present-feedback {
+      font-size:10px;line-height:13px;min-height:13px;
+    }
+    body[data-layout^="stack"] .present-hint {
+      font-size:10px;line-height:13px;max-height:26px;overflow:hidden;
+    }
+
     body[data-layout^="tight-ink"] .present-grid button {
       height:44px;min-height:44px;font-size:9px;
     }
