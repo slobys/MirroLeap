@@ -31,6 +31,16 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.2.4 · 视频清晰度优先与原生点击光圈（Windows 预发布测试版）
+
+这次根据 v5.2.3 的实机反馈修复「打开实时放大后仍然刷到下一条抖音」「鼠标滚轮不改变镜头」「点击按钮是绿色却从未出现光圈」「放大画面模糊」等问题，默认不改变常规投屏模式。
+
+- **实时放大独占本手机滚轮**：只有当用户主动开启实时放大、投屏在前台且指针位于本手机画面内时，Windows 原生鼠标钩子消费滚轮以调整镜头直径；按住 Ctrl＋滚轮调整内容倍率。这样滚轮不再同时传给抖音切换视频。离开手机窗口、关闭放大或窗口失焦后，普通滚动行为不受影响。不存在后台全局吞鼠标滚轮行为。
+- **默认清晰度优先**：默认放大倍率下调至约 **1.25×**（最小 1.05×），减少放大已经渲染出来的低分辨率桌面像素时的模糊。要显示更多真实细节，建议让手机投屏窗口显示得更大，并使用合适的解码与 1080P/2K 设置；Windows 桌面放大无法凭空重建原始未显示的手机像素。
+- **独立的原生点击光圈**：不再仅依赖可能被 SDL 遮住的 WebView 画布。新增 Windows 原生 BGRA 逐像素透明点击动画窗口，白色中心亮点加青绿色扩散双环，置顶但不会接管 Android 触控。点击画面时按实际显示结果计数，不把 WebView 的 ACK 当作原生光圈显示成功。两个通路的次数会分别显示在悬浮栏，便于排障。
+- **可验证与清理**：点击特效仅用户主动开启时创建原生窗口，退出/断开/重载立即停止线程。Windows CI 专项新增原生光圈透明度与滚轮仅作用于手机画面内的回归测试。
+- **预览版约束**：Windows 原生编译、布局、单测、WebView2 启动、安装包哈希与更新签名验收通过后才提供 v5.2.4 供真实电脑测试，不影响 v5.1.4 Latest 正式版或 main 分支。显卡驱动/受保护视频可能仍限制桌面放大效果。
+
 ## 🧪 v5.2.3 · 原生镜头滚轮缩放与可确认的点击光圈（Windows 预发布测试版）
 
 根据实际视频教程反馈，进一步完善 Windows 原生 MirroCreator：
@@ -270,11 +280,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.2.3_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.2.3_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.2.3_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.2.4_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.2.4_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.2.4_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.2.3 预览版通过 GitHub CI 后提供下载；正式版请到 [GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍为 v5.1.4 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**v5.2.4 预览版等待完整 CI/签名验证后提供下载；正式版请到 [GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍为 v5.1.4 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

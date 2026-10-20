@@ -164,11 +164,18 @@ assert 'creator_click_toggle' in frame_native and 'creator-click' in phone_toolb
 assert 'start_creator_click_sampler' in frame_native
 assert 'Duration::from_millis(12)' in frame_native
 assert 'WindowFromPoint' in frame_native
-assert 'promote_drawing_windows(&app,&device,&overlay)' in frame_native
-assert 'evaluate_ink(&overlay,&command).await.is_ok()' in frame_native
-assert 'window.mirroCreatorNativeClick?.()' in frame_native
-assert 'window.mirroCreatorNativeClick = () =>' in phone_toolbar
+assert 'promote_drawing_windows(app,&device,&overlay)' in frame_native
+assert 'evaluate_ink(&verify_overlay,&command).await.is_ok()' in frame_native
+assert 'window.mirroCreatorNativeClick?.(\'native\')' in frame_native
+assert 'window.mirroCreatorNativeClick = (stage=' in phone_toolbar
 assert 'creatorNativeClicks+=1' in phone_toolbar
+native_click=read("src-tauri/src/native_click_effect.rs")
+assert "UpdateLayeredWindow" in native_click and "EX_TRANSPARENT" in native_click
+assert "native_click_effect::flash" in frame_native
+assert "native_click_effect::stop" in frame_native
+assert "ring_pixel" in native_click
+assert "creatorCanvasClicks+=1" in phone_toolbar
+
 
 for name in ("arrow", "rect", "step", "mask"):
     assert "ink_" + name in frame_native, name
@@ -188,7 +195,8 @@ assert 'lens_geometry' in native_lens and 'fn stop(' in native_lens
 assert 'SetWindowsHookExW' in native_lens and 'UnhookWindowsHookEx' in native_lens
 assert 'WH_MOUSE_LL' in native_lens and 'CallNextHookEx' in native_lens
 assert 'WHEEL_SIZE_DELTA' in native_lens and 'WHEEL_ZOOM_DELTA' in native_lens
-assert 'adjust_wheel' in native_lens and 'DEFAULT_FACTOR: f32 = 1.55' in native_lens
+assert 'adjust_wheel' in native_lens and 'DEFAULT_FACTOR: f32 = 1.25' in native_lens
+assert 'wheel_target_contains' in native_lens and 'return 1;' in native_lens
 assert 'FACTOR_MAX: f32 = 3.0' in native_lens
 assert 'struct ScopedWheelHook' in native_lens
 

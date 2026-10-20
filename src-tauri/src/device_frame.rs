@@ -76,6 +76,7 @@ fn is_creator_click_enabled(device:&str) -> bool {
 fn disable_creator_clicks(app:&AppHandle,device:&str) {
     if let Ok(mut clicks)=creator_clicks().lock() {clicks.remove(device);}
     cancel_creator_sampler(device);
+    crate::native_click_effect::stop(device);
     if let Some(overlay)=app.get_webview_window(&label(device)) {
         // Native state is the authority: even if the JS view was replaced,
         // subsequent SDL clicks will not emit a ripple.
@@ -1887,24 +1888,29 @@ fn start_creator_click_sampler(app: AppHandle, device: String) {
             })();
             if let (Some((x,y)),Some(overlay)) =
                 (coords,app.get_webview_window(&label(&device))) {
-                // The SDL window can rise above its visual companion after
-                // taking focus on a click. Re-stack without activating the
-                // WebView so the ripple remains visible and Android receives
-                // the original tap.
-                let _=promote_drawing_windows(&app,&device,&overlay);
-                // WebviewWindow::eval() reports only that the command was
-                // QUEUED. Require a real acknowledgement from the ink canvas
-                // before counting a click; otherwise a stale or occluded
-                // WebView can misleadingly claim the effect worked.
+                // Native premultiplied-alpha HWND is the visible indicator:
+                // Windows reports actual layered paint + z-order success.
+                // It is mouse-through and never synthesizes an Android tap.
+                if crate::native_click_effect::flash(&device,px,py) {
+                    last_emit=Instant::now();
+                    if let Some(bar)=app.get_webview_window(&toolbar_label(&device)) {
+                        let _=bar.eval("window.mirroCreatorNativeClick?.('native')");
+                    }
+                }
+                // WebView ink is supplementary. Do not let a delayed/missing
+                // Chromium ACK block subsequent native-click observations.
                 let command=format!(
                     "return window.scrcpyCreator?.flashClick({x:.6},{y:.6}) === true;"
                 );
-                if evaluate_ink(&overlay,&command).await.is_ok() {
-                    last_emit=Instant::now();
-                    if let Some(bar)=app.get_webview_window(&toolbar_label(&device)) {
-                        let _=bar.eval("window.mirroCreatorNativeClick?.()");
+                let verify_overlay=overlay.clone();
+                let verify_bar=app.get_webview_window(&toolbar_label(&device));
+                tauri::async_runtime::spawn(async move {
+                    if evaluate_ink(&verify_overlay,&command).await.is_ok() {
+                        if let Some(bar)=verify_bar {
+                            let _=bar.eval("window.mirroCreatorNativeClick?.('canvas')");
+                        }
                     }
-                }
+                });
             }
         }
         if let Ok(mut sessions)=creator_samplers().lock() {
@@ -1956,8 +1962,15 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         };
         evaluate_ink(&overlay,code).await?;
         if target {
+            // This OS-drawn ring is independent of Chromium/SDL window
+            // stacking. Fail visibly if Windows cannot create its canvas.
+            if let Err(error)=crate::native_click_effect::start(&device) {
+                let _=overlay.eval("window.scrcpyCreator?.reset()");
+                return Err(format!("原生点击光圈无法启动: {error}"));
+            }
             if let Err(error)=promote_drawing_windows(app,&device,&overlay) {
                 let _=overlay.eval("window.scrcpyCreator?.reset()");
+                crate::native_click_effect::stop(&device);
                 return Err(error);
             }
             // The preview ring at the center immediately verifies the canvas
@@ -1966,7 +1979,19 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
                 "return window.scrcpyCreator?.flashClick(0.5,0.5) === true;"
             ).await {
                 let _=overlay.eval("window.scrcpyCreator?.reset()");
+                crate::native_click_effect::stop(&device);
                 return Err(error);
+            }
+            // Only a successful native UpdateLayeredWindow + topmost placement
+            // counts as the preview, never a merely queued WebView eval.
+            if let Some(actual)=capture_screen(pid) {
+                let center_x=actual.screen.x+actual.screen.width/2;
+                let center_y=actual.screen.y+actual.screen.height/2;
+                if !crate::native_click_effect::flash(&device,center_x,center_y) {
+                    crate::native_click_effect::stop(&device);
+                    let _=overlay.eval("window.scrcpyCreator?.reset()");
+                    return Err("Windows 无法显示原生光圈，请检查桌面合成与透明窗口支持".into());
+                }
             }
         }
         {
@@ -1974,7 +1999,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             if target {enabled.insert(device.clone());} else {enabled.remove(&device);}
         }
         if target { start_creator_click_sampler(app.clone(),device.clone()); }
-        else { cancel_creator_sampler(&device); }
+        else { cancel_creator_sampler(&device); crate::native_click_effect::stop(&device); }
         return Ok(target);
     }
     if action == "present_toggle" {
@@ -2228,7 +2253,8 @@ pub fn start(
     if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(device);}
     cancel_live_zoom(device);
     cancel_creator_sampler(device);
-    if let Ok(mut states) = topmost_requests().lock() {
+    if let Ok(mut states) = topmost_requests().lock() {        crate::native_click_effect::stop(device);
+
         states.insert(device.to_string(), always_on_top);
     }
     let shell_name = label(device);
@@ -2251,6 +2277,7 @@ pub fn start(
                     cancel_live_zoom(&page_device);
                     if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(&page_device);}
                     cancel_creator_sampler(&page_device);
+                    crate::native_click_effect::stop(&page_device);
 
                     // On navigation/reload never leave an opaque input-capturing
                     // overlay ahead of native scrcpy when its canvas script resets.

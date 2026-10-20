@@ -494,18 +494,22 @@
           presenterTimer = null;
         }, state === 'error' ? 5500 : 2800);
       }
-      // A real native-to-WebView acknowledgement updates this counter after
-      // a phone click. If the counter advances but the glow is invisible,
-      // the remaining problem is the visual window stack, not mouse input.
+      // Two independent diagnostics distinguish a real native Windows
+      // composited click ripple from a secondary WebView canvas ACK.
       let creatorNativeClicks=0;
-      window.mirroCreatorNativeClick = () => {
+      let creatorCanvasClicks=0;
+      window.mirroCreatorNativeClick = (stage='native') => {
         const button=document.getElementById('creator-click');
         if (button.getAttribute('aria-pressed')!=='true') return false;
-        creatorNativeClicks+=1;
-        button.dataset.nativeClicks=String(creatorNativeClicks);
-        button.title='画布已收到 '+creatorNativeClicks+' 次点击；若未看见光圈请反馈截图';
-        presentFeedback('sent',
-          '已识别 '+creatorNativeClicks+' 次点击 · 绘图已确认');
+        if (stage==='native') {
+          creatorNativeClicks+=1;
+          button.dataset.nativeClicks=String(creatorNativeClicks);
+        } else if (stage==='canvas') {
+          creatorCanvasClicks+=1;
+        } else { return false; }
+        button.title='Windows 原生光圈 '+creatorNativeClicks+' 次 · WebView '+creatorCanvasClicks+' 次';
+        presentFeedback('sent','原生光圈 '+creatorNativeClicks+
+          ' 次 · WebView 画布 '+creatorCanvasClicks+' 次');
         return true;
       };
       function displayPresentState(open, spotlight, magnifier, live = false) {
@@ -801,10 +805,11 @@
         try {
           const active=await invoke('creator_click_toggle');
           creatorNativeClicks=0;
+          creatorCanvasClicks=0;
           delete button.dataset.nativeClicks;
           button.classList.toggle('active',active);
           button.setAttribute('aria-pressed',String(active));
-          presentFeedback('sent',active ? '已开启光圈并显示中心预览，点击手机后会显示检测次数' : '已关闭点击光圈');
+          presentFeedback('sent',active ? '已开启 Windows 原生光圈：点击手机后角标显示实际绘制次数' : '已关闭点击光圈');
         } catch(error) {
           report(error);
           presentFeedback('error','点击特效未开启 · '+String(error));

@@ -33,8 +33,8 @@ const POSITION_CHILD: u32 = 0x0004 | 0x0010;
 // Magnification magnifies *displayed* pixels, not undecoded phone pixels.
 // A modest default has visibly higher source-pixel density. Ctrl+wheel
 // deliberately allows stronger zoom at the user's discretion.
-const DEFAULT_FACTOR: f32 = 1.55;
-const FACTOR_MIN: f32 = 1.15;
+const DEFAULT_FACTOR: f32 = 1.25;
+const FACTOR_MIN: f32 = 1.05;
 const FACTOR_MAX: f32 = 3.0;
 const DEFAULT_DIAMETER_RATIO: f32 = 0.50;
 const DIAMETER_MIN: f32 = 0.28;
@@ -49,6 +49,35 @@ static WHEEL_SIZE_DELTA:AtomicI32=AtomicI32::new(0);
 static WHEEL_ZOOM_DELTA:AtomicI32=AtomicI32::new(0);
 static WHEEL_LAST_X:AtomicI32=AtomicI32::new(i32::MIN);
 static WHEEL_LAST_Y:AtomicI32=AtomicI32::new(i32::MIN);
+static WHEEL_ACTIVE:AtomicI32=AtomicI32::new(0);
+static WHEEL_PHONE_X:AtomicI32=AtomicI32::new(0);
+static WHEEL_PHONE_Y:AtomicI32=AtomicI32::new(0);
+static WHEEL_PHONE_W:AtomicI32=AtomicI32::new(0);
+static WHEEL_PHONE_H:AtomicI32=AtomicI32::new(0);
+
+fn inside_active_phone_rect(px:i32,py:i32,x:i32,y:i32,w:i32,h:i32)->bool {
+    w>0 && h>0 && px>=x && py>=y &&
+        px.saturating_sub(x)<w && py.saturating_sub(y)<h
+}
+fn wheel_target_contains(px:i32,py:i32)->bool {
+    if WHEEL_ACTIVE.load(Ordering::Relaxed)!=1 {return false;}
+    let x=WHEEL_PHONE_X.load(Ordering::Relaxed);
+    let y=WHEEL_PHONE_Y.load(Ordering::Relaxed);
+    let w=WHEEL_PHONE_W.load(Ordering::Relaxed);
+    let h=WHEEL_PHONE_H.load(Ordering::Relaxed);
+    inside_active_phone_rect(px,py,x,y,w,h)
+}
+fn set_wheel_target(view:ViewUpdate) {
+    // The low-level hook must run fast: only atomic snapshots, never locks
+    // or IPC on its hot path.
+    WHEEL_ACTIVE.store(0,Ordering::SeqCst);
+    WHEEL_PHONE_X.store(view.x,Ordering::Relaxed);
+    WHEEL_PHONE_Y.store(view.y,Ordering::Relaxed);
+    WHEEL_PHONE_W.store(view.width,Ordering::Relaxed);
+    WHEEL_PHONE_H.store(view.height,Ordering::Relaxed);
+    WHEEL_ACTIVE.store(i32::from(view.active && view.inside()),Ordering::SeqCst);
+}
+
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, Debug)]
@@ -82,7 +111,7 @@ unsafe extern "system" fn mouse_wheel_hook(code:i32,message:usize,data:isize)->i
     if code>=0 && message==WM_MOUSEWHEEL && data!=0 {
         let wheel=&*(data as *const LowLevelMouse);
         let delta=(wheel.mouse_data>>16) as i16 as i32;
-        if delta!=0 {
+        if delta!=0 && wheel_target_contains(wheel.point.x,wheel.point.y) {
             WHEEL_LAST_X.store(wheel.point.x,Ordering::Relaxed);
             WHEEL_LAST_Y.store(wheel.point.y,Ordering::Relaxed);
             let ctrl=(GetAsyncKeyState(VK_CONTROL) as u16 & 0x8000)!=0;
@@ -91,6 +120,10 @@ unsafe extern "system" fn mouse_wheel_hook(code:i32,message:usize,data:isize)->i
             } else {
                 WHEEL_SIZE_DELTA.fetch_add(delta,Ordering::Relaxed);
             }
+            // Consume ONLY wheel events on this foreground phone while the
+            // real-time lens is active. Otherwise swipe-driven apps advance
+            // videos rather than modifying the magnifier.
+            return 1;
         }
     }
     CallNextHookEx(null_mut(),code,message,data)
@@ -112,6 +145,7 @@ impl ScopedWheelHook {
 }
 impl Drop for ScopedWheelHook {
     fn drop(&mut self) {
+        WHEEL_ACTIVE.store(0,Ordering::SeqCst);
         unsafe {UnhookWindowsHookEx(self.0);}
         WHEEL_SIZE_DELTA.store(0,Ordering::Relaxed);
         WHEEL_ZOOM_DELTA.store(0,Ordering::Relaxed);
@@ -278,6 +312,7 @@ impl Lens {
         self.size=size;
     }
     fn set_visible(&mut self,value:bool) {
+        if !value { WHEEL_ACTIVE.store(0,Ordering::SeqCst); }
         if self.visible==value {return;}
         if !value {unsafe {ShowWindow(self.host,0);}}
         self.visible=value;
@@ -307,6 +342,9 @@ impl Lens {
                 return;
             }
             self.visible=true;
+            // Publish the exact active phone rect only after the magnifier
+            // successfully updated and showed its window.
+            set_wheel_target(view);
         }
     }
     fn apply_wheel(&mut self) {
@@ -461,6 +499,14 @@ mod tests {
                 assert!(cy.abs_diff(view.cursor_y)<=1);
             }
         }
+    }
+    #[test]
+    fn live_wheel_is_consumed_only_inside_foreground_phone_geometry() {
+        assert!(inside_active_phone_rect(120,160,100,100,360,700));
+        assert!(!inside_active_phone_rect(99,160,100,100,360,700));
+        assert!(!inside_active_phone_rect(460,160,100,100,360,700));
+        assert!(!inside_active_phone_rect(120,800,100,100,360,700));
+        assert!(!inside_active_phone_rect(120,160,100,100,0,700));
     }
     #[test]
     fn wheel_changes_diameter_separately_from_optical_zoom() {

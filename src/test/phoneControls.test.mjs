@@ -142,13 +142,16 @@ describe('real Tauri phone-controls HTML', () => {
     await nextTask();await nextTask();
     expect(actions).toContain('creator_click_toggle');
     expect(document.getElementById('creator-click').getAttribute('aria-pressed')).toBe('true');
-    // A native callback is emitted ONLY after the WebView canvas confirms it
-    // processed the actual click. The count distinguishes missing input from
-    // missing visual compositing.
-    expect(dom.window.mirroCreatorNativeClick()).toBe(true);
-    expect(dom.window.mirroCreatorNativeClick()).toBe(true);
+    // Native painting and optional Chromium canvas acknowledgement are
+    // separate signals. Only successfully painted native rings increment
+    // the persistent green counter on the creator button.
+    expect(dom.window.mirroCreatorNativeClick('native')).toBe(true);
+    expect(dom.window.mirroCreatorNativeClick('native')).toBe(true);
+    expect(dom.window.mirroCreatorNativeClick('canvas')).toBe(true);
+    expect(dom.window.mirroCreatorNativeClick('invalid')).toBe(false);
     expect(document.getElementById('creator-click').dataset.nativeClicks).toBe('2');
-    expect(document.getElementById('present-feedback')).toHaveTextContent('已识别 2 次点击');
+    expect(document.getElementById('present-feedback')).toHaveTextContent('原生光圈 2 次');
+    expect(document.getElementById('present-feedback')).toHaveTextContent('WebView 画布 1 次');
     document.getElementById('present-live').click();
     await nextTask();await nextTask();
     expect(actions).toContain('present_live');
