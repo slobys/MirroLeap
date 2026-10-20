@@ -3,6 +3,10 @@ mod transfer_progress;
 // Experimental decoded-frame IPC parser; not enabled in production mirroring.
 #[allow(dead_code)]
 mod hq_protocol;
+#[allow(dead_code)]
+mod hq_geometry;
+#[allow(dead_code)]
+mod hq_reference_render;
 #[cfg(target_os = "windows")]
 #[allow(dead_code)]
 mod hq_bridge_windows;

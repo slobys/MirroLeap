@@ -66,7 +66,8 @@ mlhq_frame_supported(const AVFrame *frame) {
     if (!frame || frame->width<2 || frame->height<2 ||
         frame->width>(int)MLHQ_MAX_WIDTH ||
         frame->height>(int)MLHQ_MAX_HEIGHT ||
-        (frame->width&1) || (frame->height&1)) {
+        (frame->width&1) || (frame->height&1) ||
+        (uint64_t)frame->width*(uint64_t)frame->height>MLHQ_MAX_PIXELS) {
         return false;
     }
     const int w=frame->width;

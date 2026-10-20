@@ -23,9 +23,11 @@
 #define MLHQ_SLOT_BYTES     80u
 #define MLHQ_SLOT_COUNT     2u
 #define MLHQ_MAX_WIDTH      3840u
-#define MLHQ_MAX_HEIGHT     2160u
+#define MLHQ_MAX_HEIGHT     3840u
+/* Either orientation is allowed, but at most 3840x2160 total pixels. */
+#define MLHQ_MAX_PIXELS     (3840u * 2160u)
 /* Packed even-dimension 4:2:0: Y plane + (U,V) quarter planes. */
-#define MLHQ_SLOT_CAPACITY  (MLHQ_MAX_WIDTH * MLHQ_MAX_HEIGHT * 3u / 2u)
+#define MLHQ_SLOT_CAPACITY  (MLHQ_MAX_PIXELS * 3u / 2u)
 #define MLHQ_MAPPING_BYTES  (MLHQ_HEADER_BYTES + MLHQ_SLOT_COUNT * (MLHQ_SLOT_BYTES + MLHQ_SLOT_CAPACITY))
 #define MLHQ_FORMAT_YUV420P 1u
 #define MLHQ_FORMAT_NV12    2u

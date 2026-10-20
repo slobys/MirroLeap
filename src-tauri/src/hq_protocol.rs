@@ -10,8 +10,9 @@ pub const HEADER_BYTES: usize = 64;
 pub const SLOT_HEADER_BYTES: usize = 80;
 pub const SLOT_COUNT: usize = 2;
 pub const MAX_WIDTH: u32 = 3840;
-pub const MAX_HEIGHT: u32 = 2160;
-pub const SLOT_CAPACITY: usize = MAX_WIDTH as usize * MAX_HEIGHT as usize * 3 / 2;
+pub const MAX_HEIGHT: u32 = 3840;
+pub const MAX_PIXELS: usize = 3840 * 2160;
+pub const SLOT_CAPACITY: usize = MAX_PIXELS * 3 / 2;
 pub const MAPPING_BYTES: usize =
     HEADER_BYTES + SLOT_COUNT * (SLOT_HEADER_BYTES + SLOT_CAPACITY);
 pub const NO_FRAME: u32 = u32::MAX;
@@ -79,7 +80,8 @@ pub fn validate_frame_header(slot:&[u8])->Result<FrameMetadata,&'static str> {
     let width=read_u32(slot,8)?;
     let height=read_u32(slot,12)?;
     if width<2 || height<2 || width>MAX_WIDTH || height>MAX_HEIGHT
-        || width&1!=0 || height&1!=0 {
+        || width&1!=0 || height&1!=0
+        || (width as u64)*(height as u64)>MAX_PIXELS as u64 {
         return Err("unsupported HQ decoded frame dimensions");
     }
     let y=(width as usize).checked_mul(height as usize)
@@ -242,6 +244,16 @@ mod tests {
         let expected_uv:Vec<u8>=(220u8..=227).collect();
         assert_eq!(&frame.data[..16],expected_y.as_slice());
         assert_eq!(&frame.data[16..],expected_uv.as_slice());
+    }
+
+    #[test]
+    fn tall_phone_frames_are_accepted_without_increasing_mapping_capacity() {
+        let tall=build(PixelFormat::Nv12,1440,2560);
+        assert!(read_latest_snapshot(&tall).is_ok());
+        let four_k_portrait=build(PixelFormat::Yuv420p,2160,3840);
+        assert!(read_latest_snapshot(&four_k_portrait).is_ok());
+        let too_large=build(PixelFormat::Nv12,3840,3840);
+        assert!(read_latest_snapshot(&too_large).is_err());
     }
 
     #[test]

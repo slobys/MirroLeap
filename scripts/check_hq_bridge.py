@@ -39,7 +39,9 @@ assert numeric_macro(header, "MLHQ_HEADER_BYTES") == 64
 assert numeric_macro(header, "MLHQ_SLOT_BYTES") == 80
 assert numeric_macro(header, "MLHQ_SLOT_COUNT") == 2
 assert numeric_macro(header, "MLHQ_MAX_WIDTH") == 3840
-assert numeric_macro(header, "MLHQ_MAX_HEIGHT") == 2160
+assert numeric_macro(header, "MLHQ_MAX_HEIGHT") == 3840
+assert "MLHQ_MAX_PIXELS" in header
+assert "MAX_PIXELS: usize = 3840 * 2160" in rust
 for prefix, fragment in [
     ("MLHQ_G_LATEST_SLOT", "20"),
     ("MLHQ_S_SEQUENCE", "0"),
@@ -62,7 +64,7 @@ for prefix, fragment in [
     assert numeric_macro(header, prefix) == int(fragment), prefix
 
 assert "MAX_WIDTH: u32 = 3840" in rust
-assert "MAX_HEIGHT: u32 = 2160" in rust
+assert "MAX_HEIGHT: u32 = 3840" in rust
 assert "SLOT_HEADER_BYTES: usize = 80" in rust
 assert "SLOT_CAPACITY" in rust and "MAPPING_BYTES" in rust
 assert "validate_frame_header" in rust and "read_latest_snapshot" in rust
@@ -86,6 +88,19 @@ assert "Try" not in sink_header or "frame_sink" in sink_header
 assert "try_latest" in bridge and "Ordering::Acquire" in bridge
 assert "first!=second" in bridge and "validate_frame_header" in bridge
 assert "mod hq_protocol" in lib and "mod hq_bridge_windows" in lib
+# Stage 2 CPU reference crop proves source-resolution math before any GPU
+# presentation is exposed. It must NOT become a hidden duplicate capture stream.
+geometry = read("src-tauri/src/hq_geometry.rs")
+raster = read("src-tauri/src/hq_reference_render.rs")
+assert "mod hq_geometry" in lib and "mod hq_reference_render" in lib
+assert "map_lens_to_decoded_frame" in geometry
+assert "source_width" in geometry and "source_center_x" in geometry
+assert "render_decoded_reference" in raster
+assert "PixelFormat::Yuv420p" in raster and "PixelFormat::Nv12" in raster
+assert "BGRA_BACKGROUND" in raster and "bilinear_plane" in raster
+assert "MAX_REFERENCE_DIAMETER: u32 = 720" in raster
+assert "render_decoded_reference" not in app, "reference path must stay disabled in production"
+
 
 # The client binary is still official by default; this source patch must not
 # auto-enable any second video stream or user-visible HQ status.
