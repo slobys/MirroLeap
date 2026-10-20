@@ -45,7 +45,7 @@ jobs:
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-ffmpeg
-            mingw-w64-ucrt-x86_64-SDL3
+            mingw-w64-ucrt-x86_64-sdl3
       - name: Build upstream scrcpy client with opt-in HQ sink (NO Android server)
         shell: msys2 {0}
         run: |

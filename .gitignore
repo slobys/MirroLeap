@@ -5,6 +5,11 @@ dist-ssr
 *.local
 .npm
 .eslintcache
+# Python helper caches and disposable pinned upstream HQ source worktrees
+__pycache__/
+*.pyc
+hq/upstream-src/
+hq/upstream-build/
 
 # Logs
 logs
