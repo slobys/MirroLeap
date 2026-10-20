@@ -31,6 +31,15 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.2.1 · 放大镜防裁切与点击特效修复（Windows 预发布测试版）
+
+- **左右/上下边缘完整显示**：放大镜圆圈会自动留在手机画面内部，不再被屏幕边缘截断；内容采样仍以鼠标实际位置为中心，靠近截图边缘时填充画布空白，不强行把边缘 App 图标压到放大镜边缘。
+- **实时放大可以继续操作手机**：将连续放大改为原生鼠标穿透模式；电脑点击/拖动手机时仍可正常操作 Android，焦点通过 Win32 投屏矩形同步给镜头。聚光灯和定格放大镜仍按原设计接管触控。
+- **实时刷新可确认**：实时放大显示成功收到的新截图帧数与实际采样间隔；桌面没有画面变化时也能判断它是否持续更新，后台暂停时提示。ADB 采样仍不是 scrcpy 60FPS 解码画面，弱 Wi-Fi 可能只有很低的刷新率。
+- **点击特效可见性与检测**：点击特效启用时先在手机画面中心闪现一圈预览；检测从 50ms 的窗口健康轮询拆分成仅在启用时运行的 12ms 鼠标采样，并核对当前点击是否真的落在该手机投屏区域。光圈加强对比，保留鼠标穿透。
+- **稳定性边界**：恢复投屏窗口时只有画笔、聚光灯、定格放大镜允许拦截鼠标；退出、新旧设备切换、窗口重载都会关闭对应采样，避免重复线程与误触。
+- **验收方式**：先经 100%/125%/150% Windows UI、Linux/Rust、Windows 原生与安装包签名测试，再作为 Pre-release 提供 ZIP/EXE/MSI 供实机验证；v5.1.4 继续保持 GitHub Latest 正式版。
+
 ## 🧪 v5.2.0 · MirroCreator 创作者演示工具（Windows 预发布测试版）
 
 在 v5.1.4 稳定版基础上新增四项自愿开启的教程功能，复用手机投屏的透明原生外框、画笔与 MirroPresent 悬浮控制栏。
@@ -241,11 +250,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.2.0_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.2.0_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.2.0_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.2.1_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.2.1_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.2.1_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.2.0 测试候选需等 CI 与签名验收后再提供 Pre-release 安装包。正式版仍请到 [GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 保持 v5.0.20 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**v5.2.1 修复版待 CI 验收通过后发布 Pre-release；正式版请到 [GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍为 v5.1.4 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

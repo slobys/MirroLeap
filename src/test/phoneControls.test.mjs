@@ -146,9 +146,11 @@ describe('real Tauri phone-controls HTML', () => {
     await nextTask();await nextTask();
     expect(actions).toContain('present_live');
     expect(document.getElementById('present-live').getAttribute('aria-pressed')).toBe('true');
+    expect(document.getElementById('present-hint')).toHaveTextContent('可以直接点击和滑动手机');
     document.getElementById('present-off').click();
     await nextTask();await nextTask();
     expect(document.getElementById('present-live').getAttribute('aria-pressed')).toBe('false');
+    expect(document.getElementById('present-hint')).toHaveTextContent('定格和聚光灯暂停触控');
     dom.window.close();
   });
 

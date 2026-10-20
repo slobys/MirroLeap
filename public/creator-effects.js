@@ -8,7 +8,7 @@
   let enabled = false;
   let active = [];
   let pending = false;
-  const lifeMs = 580;
+  const lifeMs = 840;
   function fit() {
     const box = canvas.getBoundingClientRect();
     const dpi = Math.min(3,Math.max(1,window.devicePixelRatio||1));
@@ -27,11 +27,25 @@
     for (const item of active) {
       const progress=(now-item.start)/lifeMs;
       const scale=Math.min(canvas.width,canvas.height);
-      const radius=scale*(.022+progress*.075);
+      const radius=scale*(.04+progress*.10);
+      const px=item.x*canvas.width, py=item.y*canvas.height;
+      // Bright center + dual expanding rings stay legible over dark AND
+      // white app backgrounds; neither layer captures Android input.
+      if (progress < .40) {
+        ctx.beginPath();
+        ctx.arc(px,py,scale*.015*(1-progress),0,Math.PI*2);
+        ctx.fillStyle='rgba(255,255,255,'+(1-progress/.40).toFixed(3)+')';
+        ctx.fill();
+      }
       ctx.beginPath();
-      ctx.arc(item.x*canvas.width,item.y*canvas.height,radius,0,Math.PI*2);
-      ctx.strokeStyle='rgba(45,220,182,'+(1-progress).toFixed(3)+')';
-      ctx.lineWidth=Math.max(2,scale*.009*(1-progress*.65));
+      ctx.arc(px,py,radius,0,Math.PI*2);
+      ctx.strokeStyle='rgba(5,20,35,'+(1-progress).toFixed(3)+')';
+      ctx.lineWidth=Math.max(3,scale*.014*(1-progress*.6));
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(px,py,radius*.88,0,Math.PI*2);
+      ctx.strokeStyle='rgba(37,240,201,'+(1-progress).toFixed(3)+')';
+      ctx.lineWidth=Math.max(3,scale*.011*(1-progress*.65));
       ctx.stroke();
     }
     if (active.length) redraw();

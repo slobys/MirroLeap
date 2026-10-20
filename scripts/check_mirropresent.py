@@ -48,6 +48,12 @@ assert "known_present_mode(" in native and "PresentationTransitionGuard::begin" 
 assert "overlay.set_ignore_cursor_events(true)" in native
 assert "overlay.set_ignore_cursor_events(false)" in native
 assert "promote_drawing_windows(app, device, &overlay)" in native
+assert 'set_ignore_cursor_events(mode == "live")' in native
+assert 'window.scrcpyPresent?.setFocus' in native
+assert 'WindowFromPoint' in native
+assert 'start_creator_click_sampler' in native
+assert 'liveStats()' in present
+
 assert "update_presentation_mode(app, device, \"off\")" in native
 assert "set_presentation_snapshot(" in native
 assert "Screenshot is not" not in native

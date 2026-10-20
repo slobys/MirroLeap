@@ -15,6 +15,15 @@
   let point = {x: .5, y: .5};
   let snapshot = null;
   let snapshotToken = 0;
+  let liveFrames = 0;
+  let liveFrameTime = 0;
+  let liveFrameInterval = 0;
+  let liveStatusTimer = null;
+  const stopLiveStatusTimer = () => {
+    if (liveStatusTimer !== null) clearInterval(liveStatusTimer);
+    liveStatusTimer = null;
+  };
+
   let drawPending = false;
   const minRadiusRatio = .11;
   const maxRadiusRatio = .43;
@@ -32,6 +41,13 @@
     const x = point.x * w;
     const y = point.y * h;
     const radius = Math.max(12, Math.min(w, h) * radiusRatio);
+    // The focus stays at the Android coordinate under the pointer, but the
+    // *visible circle* moves inward when an edge icon is selected.
+    const margin = Math.max(6, Math.min(w, h) * .012);
+    const lensX = (mode === 'magnifier' || mode === 'live')
+      ? adjustable(x, radius + margin, w - radius - margin) : x;
+    const lensY = (mode === 'magnifier' || mode === 'live')
+      ? adjustable(y, radius + margin, h - radius - margin) : y;
     ctx.save();
     if (mode === 'spotlight') {
       ctx.fillStyle = 'rgba(5,9,20,.73)';
@@ -42,18 +58,30 @@
       ctx.fill();
       ctx.globalCompositeOperation = 'source-over';
     } else if ((mode === 'magnifier' || mode === 'live') && snapshot) {
-      const zoom = zoomFactor;
-      const sampleW = (radius * 2 / zoom / w) * snapshot.width;
-      const sampleH = (radius * 2 / zoom / h) * snapshot.height;
-      const srcX = Math.max(0, Math.min(snapshot.width - sampleW,
-        point.x * snapshot.width - sampleW / 2));
-      const srcY = Math.max(0, Math.min(snapshot.height - sampleH,
-        point.y * snapshot.height - sampleH / 2));
+      const sampleW = (radius * 2 / zoomFactor / w) * snapshot.width;
+      const sampleH = (radius * 2 / zoomFactor / h) * snapshot.height;
+      // Do not clamp the requested source center to the image edge: that
+      // pushes rightmost icons onto the lens rim and clips them a second time.
+      // Instead fill out-of-image areas and map the valid PNG pixels into
+      // the interior, keeping the selected icon close to the lens center.
+      const left = point.x * snapshot.width - sampleW / 2;
+      const top = point.y * snapshot.height - sampleH / 2;
+      const sx = Math.max(0, left);
+      const sy = Math.max(0, top);
+      const sw = Math.max(0, Math.min(snapshot.width, left + sampleW) - sx);
+      const sh = Math.max(0, Math.min(snapshot.height, top + sampleH) - sy);
       ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.arc(lensX, lensY, radius, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(snapshot, srcX, srcY, sampleW, sampleH,
-        x - radius, y - radius, radius * 2, radius * 2);
+      ctx.fillStyle = '#09111d';
+      ctx.fillRect(lensX - radius, lensY - radius, radius * 2, radius * 2);
+      if (sw > 0 && sh > 0) {
+        ctx.drawImage(snapshot, sx, sy, sw, sh,
+          lensX - radius + (sx - left) / sampleW * radius * 2,
+          lensY - radius + (sy - top) / sampleH * radius * 2,
+          sw / sampleW * radius * 2,
+          sh / sampleH * radius * 2);
+      }
       ctx.restore();
       ctx.save();
     }
@@ -62,7 +90,7 @@
     ctx.shadowColor = 'rgba(0,0,0,.7)';
     ctx.shadowBlur = 6;
     ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.arc(lensX, lensY, radius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
     if (mode === 'magnifier' || mode === 'live') {
@@ -72,12 +100,16 @@
       ctx.fillStyle = '#fff';
       ctx.strokeStyle = '#07121b';
       ctx.lineWidth = 3;
+      const age = performance.now() - liveFrameTime;
       const label = mode === 'live'
-        ? (snapshot ? '连续画面放大 · ADB 低帧率' : '读取实时采样中…')
+        ? (liveFrames === 0 ? '实时放大 · 等待首帧' :
+          age > 3500 ? '实时放大已暂停 · 切回投屏窗口' :
+          '实时放大 · ' + liveFrames + '帧已更新 · ' +
+          (liveFrameInterval > 0 ? (1000 / liveFrameInterval).toFixed(1) : '—') + '帧/秒')
         : (snapshot ? '定格放大 · 非实时' : '请刷新放大快照');
-      const yText = Math.min(h - 12, Math.max(18, y + radius + 18));
-      ctx.strokeText(label, x, yText);
-      ctx.fillText(label, x, yText);
+      const yText = lensY + radius + 24 < h ? lensY + radius + 18 : lensY - radius - 12;
+      ctx.strokeText(label, lensX, yText, Math.max(60,w - 20));
+      ctx.fillText(label, lensX, yText, Math.max(60,w - 20));
       ctx.restore();
     }
   }
@@ -152,6 +184,18 @@
     ready: true,
     mode() { return mode; },
     focusPoint() { return {...point}; },
+    /** Coordinates come from the native SDL client, not an overlay intercept. */
+    setFocus(x, y) {
+      if (mode !== 'live' || !Number.isFinite(x) || !Number.isFinite(y) ||
+          x < 0 || x > 1 || y < 0 || y > 1) return false;
+      point = {x, y};
+      redraw();
+      return true;
+    },
+    liveStats() {
+      return {frames:liveFrames,lastUpdate:liveFrameTime,frameInterval:liveFrameInterval};
+    },
+
     size() { return radiusRatio; },
     zoom() { return zoomFactor; },
     resetSize() {
@@ -165,8 +209,17 @@
       if (value !== mode) {
         snapshot = null;
         snapshotToken++;
+        liveFrames = 0;
+        liveFrameTime = 0;
+        liveFrameInterval = 0;
       }
       mode = value;
+      stopLiveStatusTimer();
+      if (value === 'live') {
+        // A changing timestamp makes actual refreshes observable. Static
+        // home-screen content alone cannot prove that ADB is still sampling.
+        liveStatusTimer = setInterval(redraw, 900);
+      }
       document.body.classList.toggle('presenting', value !== 'off');
       fit();
       return mode;
@@ -202,6 +255,12 @@
         throw new Error('Video aspect ratio changed; refresh after rotation settles');
       }
       snapshot = photo;
+      if (mode === 'live') {
+        const now = performance.now();
+        liveFrameInterval = liveFrameTime > 0 ? now - liveFrameTime : 0;
+        liveFrameTime = now;
+        liveFrames += 1;
+      }
       redraw();
       return true;
     },

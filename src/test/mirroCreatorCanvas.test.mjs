@@ -109,18 +109,61 @@ describe('actual MirroCreator transparent phone overlay',()=>{
     dom.window.close();
   });
 
-  it('uses a separate live mode with real incoming fresh frames, not repainting a frozen shot',async()=>{
-    const {dom}=createFrame();
+  it('uses genuine fresh-frame updates and native mouse-through focus in live mode',async()=>{
+    const {dom,draw,getFrame}=createFrame();
     const view=dom.window.scrcpyPresent;
     expect(view.mode()).toBe('off');
     expect(view.setMode('live')).toBe('live');
-    const frame='data:image/png;base64,eA==';
-    expect(await view.loadSnapshot(frame,'portrait')).toBe(true);
-    // Each new frame loads and replaces the prior image, rather than reusing
-    // an old frozen snapshot forever.
-    expect(await view.loadSnapshot(frame,'portrait')).toBe(true);
+    expect(view.setFocus(.98,.6)).toBe(true);
+    expect(view.setFocus(-.5,.6)).toBe(false);
+    const png='data:image/png;base64,eA==';
+    expect(await view.loadSnapshot(png,'portrait')).toBe(true);
+    expect(view.liveStats().frames).toBe(1);
+    expect(await view.loadSnapshot(png,'portrait')).toBe(true);
+    expect(view.liveStats().frames).toBe(2);
+    // Counter and measured update timestamp are visible even when the home
+    // screen pixels themselves are unchanged.
+    getFrame()(dom.window.performance.now());
+    expect(draw.some(call=>call.method==='fillText'&&
+      String(call.args[0]).includes('2帧已更新'))).toBe(true);
     expect(view.setMode('off')).toBe('off');
-    await expect(view.loadSnapshot(frame,'portrait')).rejects.toThrow('Enable a magnifier');
+    expect(view.liveStats().frames).toBe(0);
+    expect(view.setFocus(.5,.5)).toBe(false);
+    await expect(view.loadSnapshot(png,'portrait')).rejects.toThrow('Enable a magnifier');
+    dom.window.close();
+  });
+
+  it('keeps both sides of a zoom lens inside the phone while focusing edge icons',async()=>{
+    const {dom,draw,getFrame}=createFrame();
+    const view=dom.window.scrcpyPresent;
+    const canvas=dom.window.document.getElementById('presentation');
+    view.setMode('magnifier');
+    expect(await view.loadSnapshot('data:image/png;base64,eA==','portrait')).toBe(true);
+    for (const [px,py] of [[1,1],[1,200],[199,100],[199,399],[100,399]]) {
+      draw.length=0;
+      canvas.dispatchEvent(new dom.window.MouseEvent('pointermove',{
+        bubbles:true,clientX:px,clientY:py
+      }));
+      getFrame()(dom.window.performance.now());
+      const calls=draw.filter(call=>call.method==='drawImage');
+      expect(calls).toHaveLength(1);
+      const circle=draw.filter(call=>call.method==='arc').at(-1).args;
+      const [cx,cy,radius]=circle;
+      expect(cx-radius).toBeGreaterThanOrEqual(0);
+      expect(cy-radius).toBeGreaterThanOrEqual(0);
+      expect(cx+radius).toBeLessThanOrEqual(canvas.width);
+      expect(cy+radius).toBeLessThanOrEqual(canvas.height);
+      const [source,sx,sy,sw,sh,dx,dy,dw,dh]=calls[0].args;
+      expect(source.width).toBe(200);
+      expect(sx).toBeGreaterThanOrEqual(0);
+      expect(sy).toBeGreaterThanOrEqual(0);
+      expect(sx+sw).toBeLessThanOrEqual(source.width);
+      expect(sy+sh).toBeLessThanOrEqual(source.height);
+      expect(dx).toBeGreaterThanOrEqual(cx-radius-0.01);
+      expect(dy).toBeGreaterThanOrEqual(cy-radius-0.01);
+      expect(dx+dw).toBeLessThanOrEqual(cx+radius+0.01);
+      expect(dy+dh).toBeLessThanOrEqual(cy+radius+0.01);
+    }
     dom.window.close();
   });
 });

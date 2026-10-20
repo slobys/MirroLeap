@@ -417,7 +417,7 @@
         <button id="present-magnifier" aria-pressed="false" aria-label="定格放大镜" title="自动读取手机静态截图 · 滚轮调大小">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="10" cy="10" r="6"/><path d="m14 14 7 7M8 10h4m-2-2v4"/></svg>放大镜
         </button>
-        <button id="present-live" aria-pressed="false" aria-label="连续实时放大" title="持续读取 ADB 新截图，约1–3帧/秒，可能占用性能">
+        <button id="present-live" aria-pressed="false" aria-label="连续实时放大" title="持续读取 Android 新画面，可直接点击、滑动手机；低帧率，可能占用性能">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6M10 7v6M18 3v5"/></svg>实时放大
         </button>
         <button id="creator-click" aria-pressed="false" aria-label="点击特效" title="显示电脑鼠标点击位置，不阻挡手机触控">
@@ -430,7 +430,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="m8 8 8 8M16 8l-8 8"/></svg>退出演示
         </button>
       </div>
-      <div class="present-hint">实时放大需持续取图；演示状态下触控将暂停</div>
+      <div class="present-hint" id="present-hint">实时放大可正常点击手机；定格放大和聚光灯暂停触控</div>
     </div>
   </div>
   <div id="status" role="status" aria-live="assertive" title=""></div>
@@ -480,6 +480,9 @@
           button.setAttribute('aria-pressed', String(pressed));
         }
         document.getElementById('present-refresh').disabled = !open || !magnifier;
+        document.getElementById('present-hint').textContent = live
+          ? '实时采样中 · 可以直接点击和滑动手机'
+          : '实时模式可操作手机；定格和聚光灯暂停触控';
       }
       async function syncPresentState() {
         if (presenterSwitching) return;
@@ -759,7 +762,7 @@
           const active=await invoke('creator_click_toggle');
           button.classList.toggle('active',active);
           button.setAttribute('aria-pressed',String(active));
-          presentFeedback('sent',active ? '已启用点击光圈 · 不影响手机点击' : '已关闭点击光圈');
+          presentFeedback('sent',active ? '点击光圈已开启 · 手机中心会显示预览' : '已关闭点击光圈');
         } catch(error) {
           report(error);
           presentFeedback('error','点击特效未开启 · '+String(error));

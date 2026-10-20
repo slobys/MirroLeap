@@ -200,8 +200,8 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
       <summary>{zh ? '使用说明与安全提示' : 'How it works & safety'}</summary>
       <p>
         {zh ?
-          '聚光灯或放大镜开启时暂时接管手机触控；退出演示恢复。创作者的遮挡框只覆盖可见图层，不保护 scrcpy 原始录像、OBS 单窗口捕捉或普通截图，请勿据此处理敏感信息。连续放大采用低帧率 ADB 新截图，不是 60FPS 视频放大。右侧悬浮栏“一键恢复”可紧急退出并清空标注。' :
-          'Presenter modes temporarily intercept taps; exit to restore touch. Creator masks only cover the visible overlay, NOT raw scrcpy recordings, OBS single-window capture or unannotated screenshots. Do not rely on masks to hide sensitive content. Continuous lens uses low-FPS fresh ADB screenshots, not 60fps video. One-click restore exits and clears annotations.'}
+          '聚光灯和定格放大镜会暂时接管手机触控；实时放大允许正常点击和滑动手机，退出演示即可关闭。创作者的遮挡框只覆盖可见图层，不保护 scrcpy 原始录像、OBS 单窗口捕捉或普通截图，请勿据此处理敏感信息。连续放大采用低帧率 ADB 新截图，不是 60FPS 视频放大。右侧悬浮栏“一键恢复”可紧急退出并清空标注。' :
+          'Spotlight and frozen magnifier intercept phone taps; the continuous live lens remains mouse-through so you can tap and swipe Android. Creator masks only cover the visible overlay, NOT raw scrcpy recordings, OBS single-window capture or unannotated screenshots. Do not rely on masks to hide sensitive content. Continuous lens uses low-FPS fresh ADB screenshots, not 60fps video. One-click restore exits and clears annotations.'}
       </p>
     </details>
   </section>;

@@ -158,6 +158,14 @@ assert 'pointer-events:none' in frame_page
 assert 'window.scrcpyCreator=Object.freeze' in creator_click
 assert 'GetAsyncKeyState(VK_LBUTTON' in frame_native and 'is_creator_click_enabled' in frame_native
 assert 'creator_click_toggle' in frame_native and 'creator-click' in phone_toolbar
+# v5.2.1: 50ms geometry polling can miss quick clicks, so only the
+# opt-in high-frequency sampler may dispatch them. The native WindowFromPoint
+# guard ensures clicks in unrelated foreground windows are ignored.
+assert 'start_creator_click_sampler' in frame_native
+assert 'Duration::from_millis(12)' in frame_native
+assert 'WindowFromPoint' in frame_native
+assert 'promote_drawing_windows(&app,&device,&overlay)' in frame_native
+
 for name in ("arrow", "rect", "step", "mask"):
     assert "ink_" + name in frame_native, name
     assert "creator-" + name in phone_toolbar, name
@@ -166,6 +174,14 @@ assert 'scrcpy 原始录像' in read("README.md")
 assert '原始录屏/OBS' in phone_toolbar
 assert 'refresh_presenter_image(&app,&device,None)' in frame_native
 assert 'start_live_zoom_sampling' in frame_native and 'present_is_live' in frame_native
+# Live magnification must not steal Android taps and its focus must come
+# from the SDL pointer, while still/focus modes intentionally intercept.
+assert 'set_ignore_cursor_events(mode == "live")' in frame_native
+assert 'window.scrcpyPresent?.setFocus' in frame_native
+assert 'setFocus(x, y)' in present and 'liveStats()' in present
+assert 'lensX' in present and 'lensY' in present
+assert 'Math.max(0, left)' in present and 'Math.max(0, top)' in present
+
 assert '"live" => Some("live")' in frame_native and 'mode === \'live\'' in present
 assert 'mode == "live"' in commands, "Main IPC must not enable a non-started sampler"
 assert "set_ignore_cursor_events(true)" in frame_native, "Release Android touch on failures"

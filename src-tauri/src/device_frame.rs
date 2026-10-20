@@ -32,7 +32,7 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos,
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
-    GetWindowRect, GW_HWNDPREV, GetWindowThreadProcessId,
+    GetWindowRect, GW_HWNDPREV, GetWindowThreadProcessId, WindowFromPoint,
     IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow,
     GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST, HWND_TOPMOST, HWND_NOTOPMOST,
     HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
@@ -53,6 +53,19 @@ static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static QUICK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static PRESENT_TOOL_OPEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static CREATOR_CLICKS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static CREATOR_SAMPLE_SEQ: AtomicU64 = AtomicU64::new(1);
+static CREATOR_SAMPLERS: OnceLock<Mutex<HashMap<String,u64>>> = OnceLock::new();
+fn creator_samplers() -> &'static Mutex<HashMap<String,u64>> {
+    CREATOR_SAMPLERS.get_or_init(||Mutex::new(HashMap::new()))
+}
+fn cancel_creator_sampler(device:&str) {
+    if let Ok(mut sessions)=creator_samplers().lock() {sessions.remove(device);}
+}
+fn creator_sampler_is_current(device:&str,token:u64)->bool {
+    is_creator_click_enabled(device) && creator_samplers().lock()
+        .map(|sessions|sessions.get(device)==Some(&token)).unwrap_or(false)
+}
+
 static LIVE_ZOOM_GENERATION: AtomicU64 = AtomicU64::new(1);
 static LIVE_ZOOM_SESSIONS: OnceLock<Mutex<HashMap<String,u64>>> = OnceLock::new();
 fn creator_clicks() -> &'static Mutex<HashSet<String>> {
@@ -66,6 +79,7 @@ fn is_creator_click_enabled(device:&str) -> bool {
 }
 fn disable_creator_clicks(app:&AppHandle,device:&str) {
     if let Ok(mut clicks)=creator_clicks().lock() {clicks.remove(device);}
+    cancel_creator_sampler(device);
     if let Some(overlay)=app.get_webview_window(&label(device)) {
         // Native state is the authority: even if the JS view was replaced,
         // subsequent SDL clicks will not emit a ripple.
@@ -734,8 +748,8 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut layout_synced_at: Option<Instant> = None;
     let mut topmost_checked_at: Option<Instant> = None;
     let mut clip_retry_reported = false;
-    let mut last_left_held = false;
-    let mut last_click_effect_at = Instant::now() - Duration::from_secs(2);
+    let mut last_live_focus: Option<(i32,i32)> = None;
+    let mut last_live_focus_at = Instant::now() - Duration::from_secs(2);
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -757,7 +771,6 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let Some(pid) = pid else { break };
 
         let Some(captured) = capture_screen(pid) else {
-            last_left_held = false;
             // The underlying video is temporarily minimized or unavailable.
             // Don't terminate the follow task: it must reattach when the user
             // restores scrcpy via taskbar/Alt+Tab, even after several minutes.
@@ -936,9 +949,12 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         if needs_restore {
             if overlay.show().is_ok() {
                 // Tauri/WebView2 may reset HWND hit-testing across hide/show.
-                // Presenter and ink are the only modes allowed to intercept
-                // Android mouse events after the SDL window is restored.
-                let _ = overlay.set_ignore_cursor_events(!(inking || presenting));
+                // A flyout being open does NOT authorize the overlay to steal
+                // Android taps. Only pen, spotlight and frozen magnifier need
+                // interception; live magnification is strictly mouse-through.
+                let intercept = is_inking(&device) ||
+                    matches!(presentation_mode(&device).as_str(), "spotlight" | "magnifier");
+                let _ = overlay.set_ignore_cursor_events(!intercept);
                 shell_visible = true;
                 previous_frame = None;
                 // Re-establish HWND z-order AFTER making WebView visible.
@@ -1076,25 +1092,24 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // until a narrow desktop margin requires a compact stacked layout.
         let cursor = pointer();
         let dragging = is_dragging(&device);
-        // Click ripples observe the real SDL mouse edge while the visual
-        // overlay stays click-through. Do not route or synthesize Android input.
-        let held=(unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } as u16 & 0x8000)!=0;
-        if held && !last_left_held && foreground==hwnd &&
-            !is_inking(&device) && presentation_mode(&device)=="off" &&
-            is_creator_click_enabled(&device) &&
-            last_click_effect_at.elapsed()>=Duration::from_millis(130)
-        {
-            if let Some((px,py))=cursor.filter(|&(x,y)|inside(x,y,screen,0)) {
-                let x=(px-screen.x) as f64 / screen.width.max(1) as f64;
-                let y=(py-screen.y) as f64 / screen.height.max(1) as f64;
-                if overlay.eval(format!(
-                    "window.scrcpyCreator?.flashClick({x:.6},{y:.6})"
-                )).is_ok() {
-                    last_click_effect_at=Instant::now();
+        // LIVE lens tracks the REAL phone cursor through Win32 while the
+        // transparent presenter window remains mouse-through. Users can
+        // continue tapping and swiping Android as the lens gets new frames.
+        if presentation_mode(&device) == "live" && !dragging {
+            if let Some((px,py)) = cursor.filter(|&(x,y)| inside(x,y,screen,0)) {
+                if last_live_focus != Some((px,py)) &&
+                    last_live_focus_at.elapsed() >= Duration::from_millis(60) {
+                    let nx = (px-screen.x) as f64 / screen.width.max(1) as f64;
+                    let ny = (py-screen.y) as f64 / screen.height.max(1) as f64;
+                    if overlay.eval(format!(
+                        "window.scrcpyPresent?.setFocus({nx:.6},{ny:.6})"
+                    )).is_ok() {
+                        last_live_focus=Some((px,py));
+                        last_live_focus_at=Instant::now();
+                    }
                 }
             }
-        }
-        last_left_held=held;
+        } else { last_live_focus=None; }
         let close_to_edge = cursor.map(|(x,y)| is_frame_edge_hover(x,y,frame)).unwrap_or(false);
         let inside_controls = match (cursor, controls_rect) {
             (Some((x,y)), Some(r)) => inside(x,y,r,12),
@@ -1384,10 +1399,13 @@ pub(crate) async fn set_presentation_mode(
         update_presentation_mode(app, device, "off");
         return Err(error);
     }
-    if let Err(error) = overlay.set_ignore_cursor_events(false) {
+    // Unlike frozen magnification and spotlight, LIVE magnification must
+    // leave Android input on the real scrcpy SDL video. Its focus point is
+    // tracked by the native follower and rendered in a mouse-through canvas.
+    if let Err(error) = overlay.set_ignore_cursor_events(mode == "live") {
         let _ = overlay.eval("window.scrcpyPresent?.setMode('off')");
         update_presentation_mode(app, device, "off");
-        return Err(format!("Could not enable presenter focus pointer: {error}"));
+        return Err(format!("Could not apply presenter pointer routing: {error}"));
     }
     if let Err(error) = promote_drawing_windows(app, device, &overlay) {
         let _ = overlay.set_ignore_cursor_events(true);
@@ -1793,6 +1811,82 @@ fn toggle_video_topmost(app: &AppHandle, device: &str, hwnd: HWND) -> Result<boo
     Ok(desired)
 }
 
+fn mouse_click_edge(was_held:bool, bits:u16)->bool {
+    let held=bits & 0x8000 != 0;
+    (held && !was_held) || (!held && !was_held && bits & 1 != 0)
+}
+
+/// Only observe clicks over the actual SDL window. The overlay stays
+/// click-through: no synthetic taps, hooks or additional Android permissions.
+fn start_creator_click_sampler(app: AppHandle, device: String) {
+    let token = CREATOR_SAMPLE_SEQ.fetch_add(1, Ordering::Relaxed);
+    if let Ok(mut sessions) = creator_samplers().lock() {
+        sessions.insert(device.clone(), token);
+    } else { return; }
+
+    tauri::async_runtime::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_millis(12));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut was_held = false;
+        let mut last_emit = Instant::now() - Duration::from_secs(1);
+        loop {
+            ticker.tick().await;
+            if !creator_sampler_is_current(&device, token) { break; }
+
+            let bits = unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } as u16;
+            let held = bits & 0x8000 != 0;
+            // The low bit can preserve a very short press between polls,
+            // although Windows does not guarantee it if another app reads it.
+            let down = mouse_click_edge(was_held,bits);
+            was_held = held;
+            if !down || last_emit.elapsed() < Duration::from_millis(120) { continue; }
+
+            let coords = (|| -> Option<(f64,f64)> {
+                if is_inking(&device) || is_dragging(&device) ||
+                    !matches!(presentation_mode(&device).as_str(), "off" | "live") {
+                    return None;
+                }
+                let pid = app.state::<ScrcpyState>().processes.lock().ok()?
+                    .get(&device)?.id()?;
+                let actual = capture_screen(pid)?;
+                let (px,py) = pointer()?;
+                if !inside(px,py,actual.screen,0) { return None; }
+
+                // Do not react to a click on an unrelated window that merely
+                // overlaps the phone's old screen coordinates.
+                let hovered = unsafe { WindowFromPoint(POINT { x:px, y:py }) };
+                let mut hovered_pid = 0u32;
+                unsafe { GetWindowThreadProcessId(hovered, Some(&mut hovered_pid)); }
+                let overlay_hwnd = app.get_webview_window(&label(&device))
+                    .and_then(|w|w.hwnd().ok());
+                if hovered_pid != pid && overlay_hwnd != Some(hovered) {
+                    return None;
+                }
+                Some((
+                    (px-actual.screen.x) as f64/actual.screen.width.max(1) as f64,
+                    (py-actual.screen.y) as f64/actual.screen.height.max(1) as f64,
+                ))
+            })();
+            if let (Some((x,y)),Some(overlay)) =
+                (coords,app.get_webview_window(&label(&device))) {
+                // The SDL window can rise above its visual companion after
+                // taking focus on a click. Re-stack without activating the
+                // WebView so the ripple remains visible and Android receives
+                // the original tap.
+                let _=promote_drawing_windows(&app,&device,&overlay);
+                if overlay.eval(format!(
+                    "window.scrcpyCreator?.flashClick({x:.6},{y:.6})"
+                )).is_ok() {
+                    last_emit = Instant::now();
+                }
+            }
+        }
+        if let Ok(mut sessions)=creator_samplers().lock() {
+            if sessions.get(&device)==Some(&token) { sessions.remove(&device); }
+        }
+    });
+}
+
 /// Opt-in bounded cadence of NEW Android screencaps, not a frozen replay.
 /// Never stores pixels or increases scrcpy's codec/bitrate settings.
 fn start_live_zoom_sampling(app: AppHandle, device: String) {
@@ -1860,6 +1954,12 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             return Err("Open MirroPresent tools before enabling click effects".into());
         }
         let target = !is_creator_click_enabled(&device);
+        // A snapshot lens or spotlight intercepts taps, so activating click
+        // effects switches to normal Android input first. Live lens is
+        // mouse-through and can coexist with click highlights.
+        if target && !matches!(presentation_mode(&device).as_str(),"off" | "live") {
+            set_presentation_mode(app,&device,"off").await?;
+        }
         let overlay=app.get_webview_window(&label(&device))
             .ok_or("Phone frame is unavailable")?;
         if !ready_to_ink(&device) {
@@ -1871,8 +1971,26 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             "return window.scrcpyCreator?.setClickEnabled(false) === false;"
         };
         evaluate_ink(&overlay,code).await?;
-        let mut enabled=creator_clicks().lock().map_err(|e|e.to_string())?;
-        if target {enabled.insert(device);} else {enabled.remove(&device);}
+        if target {
+            if let Err(error)=promote_drawing_windows(app,&device,&overlay) {
+                let _=overlay.eval("window.scrcpyCreator?.reset()");
+                return Err(error);
+            }
+            // The preview ring at the center immediately verifies the canvas
+            // is visible. It is not a synthetic Android tap.
+            if let Err(error)=evaluate_ink(&overlay,
+                "return window.scrcpyCreator?.flashClick(0.5,0.5) === true;"
+            ).await {
+                let _=overlay.eval("window.scrcpyCreator?.reset()");
+                return Err(error);
+            }
+        }
+        {
+            let mut enabled=creator_clicks().lock().map_err(|e|e.to_string())?;
+            if target {enabled.insert(device.clone());} else {enabled.remove(&device);}
+        }
+        if target { start_creator_click_sampler(app.clone(),device.clone()); }
+        else { cancel_creator_sampler(&device); }
         return Ok(target);
     }
     if action == "present_toggle" {
@@ -2124,6 +2242,7 @@ pub fn start(
     if let Ok(mut present) = presenter_panels().lock() { present.remove(device); }
     if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(device);}
     cancel_live_zoom(device);
+    cancel_creator_sampler(device);
     if let Ok(mut states) = topmost_requests().lock() {
         states.insert(device.to_string(), always_on_top);
     }
@@ -2146,6 +2265,7 @@ pub fn start(
                     update_presentation_mode(view.app_handle(), &page_device, "off");
                     cancel_live_zoom(&page_device);
                     if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(&page_device);}
+                    cancel_creator_sampler(&page_device);
 
                     // On navigation/reload never leave an opaque input-capturing
                     // overlay ahead of native scrcpy when its canvas script resets.
@@ -2227,6 +2347,16 @@ mod tests {
         assert!(!real_video_orientation_changed((440,960),(440,960)));
         assert!(!real_video_orientation_changed((440,960),(440,440)));
         assert!(!real_video_orientation_changed((0,960),(960,440)));
+    }
+
+    #[test]
+    fn dedicated_click_sampler_detects_short_press_edges() {
+        assert!(mouse_click_edge(false, 0x8000));
+        assert!(!mouse_click_edge(true, 0x8000));
+        assert!(!mouse_click_edge(true, 0));
+        assert!(mouse_click_edge(false, 0x0001));
+        assert!(!mouse_click_edge(true, 0x0001));
+        assert!(!mouse_click_edge(false, 0));
     }
 
     #[test]
