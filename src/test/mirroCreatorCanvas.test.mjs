@@ -109,27 +109,22 @@ describe('actual MirroCreator transparent phone overlay',()=>{
     dom.window.close();
   });
 
-  it('uses genuine fresh-frame updates and native mouse-through focus in live mode',async()=>{
+  it('does not falsely paint or capture still PNGs as Windows native live video',async()=>{
     const {dom,draw,getFrame}=createFrame();
     const view=dom.window.scrcpyPresent;
     expect(view.mode()).toBe('off');
     expect(view.setMode('live')).toBe('live');
-    expect(view.setFocus(.98,.6)).toBe(true);
-    expect(view.setFocus(-.5,.6)).toBe(false);
-    const png='data:image/png;base64,eA==';
-    expect(await view.loadSnapshot(png,'portrait')).toBe(true);
-    expect(view.liveStats().frames).toBe(1);
-    expect(await view.loadSnapshot(png,'portrait')).toBe(true);
-    expect(view.liveStats().frames).toBe(2);
-    // Counter and measured update timestamp are visible even when the home
-    // screen pixels themselves are unchanged.
+    expect(dom.window.document.body.classList.contains('presenting')).toBe(false);
+    draw.length=0;
     getFrame()(dom.window.performance.now());
-    expect(draw.some(call=>call.method==='fillText'&&
-      String(call.args[0]).includes('2帧已更新'))).toBe(true);
+    expect(draw.filter(call=>call.method==='drawImage')).toHaveLength(0);
+    expect(draw.filter(call=>call.method==='arc')).toHaveLength(0);
+    await expect(view.loadSnapshot('data:image/png;base64,eA==','portrait'))
+      .rejects.toThrow('Enable snapshot magnifier first');
     expect(view.setMode('off')).toBe('off');
-    expect(view.liveStats().frames).toBe(0);
-    expect(view.setFocus(.5,.5)).toBe(false);
-    await expect(view.loadSnapshot(png,'portrait')).rejects.toThrow('Enable a magnifier');
+    expect(view.setMode('magnifier')).toBe('magnifier');
+    expect(dom.window.document.body.classList.contains('presenting')).toBe(true);
+    expect(await view.loadSnapshot('data:image/png;base64,eA==','portrait')).toBe(true);
     dom.window.close();
   });
 

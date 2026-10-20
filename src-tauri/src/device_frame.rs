@@ -31,7 +31,7 @@ use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos,
-    GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow,
+    GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow, GetAncestor, GA_ROOT,
     GetWindowRect, GW_HWNDPREV, GetWindowThreadProcessId, WindowFromPoint,
     IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow,
     GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST, HWND_TOPMOST, HWND_NOTOPMOST,
@@ -66,13 +66,9 @@ fn creator_sampler_is_current(device:&str,token:u64)->bool {
         .map(|sessions|sessions.get(device)==Some(&token)).unwrap_or(false)
 }
 
-static LIVE_ZOOM_GENERATION: AtomicU64 = AtomicU64::new(1);
-static LIVE_ZOOM_SESSIONS: OnceLock<Mutex<HashMap<String,u64>>> = OnceLock::new();
+
 fn creator_clicks() -> &'static Mutex<HashSet<String>> {
     CREATOR_CLICKS.get_or_init(||Mutex::new(HashSet::new()))
-}
-fn live_zoom_sessions() -> &'static Mutex<HashMap<String,u64>> {
-    LIVE_ZOOM_SESSIONS.get_or_init(||Mutex::new(HashMap::new()))
 }
 fn is_creator_click_enabled(device:&str) -> bool {
     creator_clicks().lock().map(|set|set.contains(device)).unwrap_or(false)
@@ -88,11 +84,7 @@ fn disable_creator_clicks(app:&AppHandle,device:&str) {
 }
 
 fn cancel_live_zoom(device:&str) {
-    if let Ok(mut map)=live_zoom_sessions().lock() { map.remove(device); }
-}
-fn is_live_zoom_current(device:&str, token:u64)->bool {
-    presentation_mode(device)=="live" && live_zoom_sessions().lock()
-        .map(|map|map.get(device)==Some(&token)).unwrap_or(false)
+    crate::native_live_lens::stop(device);
 }
 
 fn presenter_panels() -> &'static Mutex<HashSet<String>> {
@@ -748,8 +740,6 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut layout_synced_at: Option<Instant> = None;
     let mut topmost_checked_at: Option<Instant> = None;
     let mut clip_retry_reported = false;
-    let mut last_live_focus: Option<(i32,i32)> = None;
-    let mut last_live_focus_at = Instant::now() - Duration::from_secs(2);
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -771,6 +761,15 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let Some(pid) = pid else { break };
 
         let Some(captured) = capture_screen(pid) else {
+            if presentation_mode(&device)=="live" {
+                // Minimize, disconnect and old HWND replacement must never
+                // leave a topmost native magnifier above other applications.
+                cancel_live_zoom(&device);
+                update_presentation_mode(&app,&device,"off");
+                let _=overlay.set_ignore_cursor_events(true);
+                let _=overlay.eval("window.scrcpyPresent?.setMode('off')");
+            }
+
             // The underlying video is temporarily minimized or unavailable.
             // Don't terminate the follow task: it must reattach when the user
             // restores scrcpy via taskbar/Alt+Tab, even after several minutes.
@@ -815,6 +814,15 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // parallel, which previously caused jitter and visible separation.
         if is_dragging(&device) {
             previous_frame = None;
+            if presentation_mode(&device)=="live" {
+                crate::native_live_lens::update(&device,
+                    crate::native_live_lens::ViewUpdate {
+                        x:screen.x,y:screen.y,width:screen.width,height:screen.height,
+                        cursor_x:i32::MIN/2,cursor_y:i32::MIN/2,active:false,
+                        frame_hwnd:0,controls_hwnd:0,
+                    });
+            }
+
             controls_rect = None;
             shell_position_checked_at = None;
             toolbar_position_checked_at = None;
@@ -1092,24 +1100,22 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // until a narrow desktop margin requires a compact stacked layout.
         let cursor = pointer();
         let dragging = is_dragging(&device);
-        // LIVE lens tracks the REAL phone cursor through Win32 while the
-        // transparent presenter window remains mouse-through. Users can
-        // continue tapping and swiping Android as the lens gets new frames.
-        if presentation_mode(&device) == "live" && !dragging {
-            if let Some((px,py)) = cursor.filter(|&(x,y)| inside(x,y,screen,0)) {
-                if last_live_focus != Some((px,py)) &&
-                    last_live_focus_at.elapsed() >= Duration::from_millis(60) {
-                    let nx = (px-screen.x) as f64 / screen.width.max(1) as f64;
-                    let ny = (py-screen.y) as f64 / screen.height.max(1) as f64;
-                    if overlay.eval(format!(
-                        "window.scrcpyPresent?.setFocus({nx:.6},{ny:.6})"
-                    )).is_ok() {
-                        last_live_focus=Some((px,py));
-                        last_live_focus_at=Instant::now();
-                    }
-                }
-            }
-        } else { last_live_focus=None; }
+        // This circular native HWND tracks the SDL screen; Windows' desktop
+        // compositor refreshes the magnified movie frames independently
+        // of pointer movement. Android never receives synthesized input.
+        if presentation_mode(&device) == "live" {
+            let focused = foreground == hwnd ||
+                overlay.hwnd().ok() == Some(foreground) ||
+                toolbar.hwnd().ok() == Some(foreground);
+            let (cursor_x,cursor_y) = cursor.unwrap_or((i32::MIN/2,i32::MIN/2));
+            crate::native_live_lens::update(&device,
+                crate::native_live_lens::ViewUpdate {
+                    x:screen.x,y:screen.y,width:screen.width,height:screen.height,
+                    cursor_x,cursor_y,active:focused && !dragging,
+                    frame_hwnd:overlay.hwnd().ok().map(|h|h.0 as usize).unwrap_or(0),
+                    controls_hwnd:toolbar.hwnd().ok().map(|h|h.0 as usize).unwrap_or(0),
+                });
+        }
         let close_to_edge = cursor.map(|(x,y)| is_frame_edge_hover(x,y,frame)).unwrap_or(false);
         let inside_controls = match (cursor, controls_rect) {
             (Some((x,y)), Some(r)) => inside(x,y,r,12),
@@ -1323,15 +1329,21 @@ fn promote_drawing_windows(
     overlay: &WebviewWindow,
 ) -> Result<(), String> {
     let shell = overlay.hwnd().map_err(|e| e.to_string())?;
+    let video = app.state::<ScrcpyState>().processes.lock().ok()
+        .and_then(|map|map.get(device).and_then(|process|process.id()))
+        .and_then(|pid|capture_screen(pid).map(|capture|capture.hwnd));
+    // Ensure a pinned SDL video cannot obscure a click ripple merely because
+    // HWND_TOP was interpreted in the *normal* window tier.
+    let tier = if video.is_some_and(video_is_topmost) {HWND_TOPMOST} else {HWND_TOP};
     unsafe {
-        SetWindowPos(shell, Some(HWND_TOP), 0, 0, 0, 0,
+        SetWindowPos(shell, Some(tier), 0, 0, 0, 0,
                      SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)
     }.map_err(|e| format!("无法将画笔放到实时画面上方: {e}"))?;
     // Promoting the shell must not cover pen/close/minimize buttons.
     if let Some(toolbar) = app.get_webview_window(&toolbar_label(device)) {
         let handle = toolbar.hwnd().map_err(|e| e.to_string())?;
         unsafe {
-            SetWindowPos(handle, Some(HWND_TOP), 0, 0, 0, 0,
+            SetWindowPos(handle, Some(tier), 0, 0, 0, 0,
                          SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)
         }.map_err(|e| format!("无法保持画笔工具栏在前景: {e}"))?;
     }
@@ -1857,9 +1869,15 @@ fn start_creator_click_sampler(app: AppHandle, device: String) {
                 let hovered = unsafe { WindowFromPoint(POINT { x:px, y:py }) };
                 let mut hovered_pid = 0u32;
                 unsafe { GetWindowThreadProcessId(hovered, Some(&mut hovered_pid)); }
-                let overlay_hwnd = app.get_webview_window(&label(&device))
+                // WebView2 returns a nested Chromium child HWND from
+                // WindowFromPoint. Comparing only against the top-level
+                // Tauri HWND incorrectly discarded all real Android clicks.
+                let root=unsafe {GetAncestor(hovered,GA_ROOT)};
+                let frame=app.get_webview_window(&label(&device))
                     .and_then(|w|w.hwnd().ok());
-                if hovered_pid != pid && overlay_hwnd != Some(hovered) {
+                let foreground=unsafe {GetForegroundWindow()};
+                if hovered_pid!=pid && Some(root)!=frame &&
+                    foreground!=actual.hwnd {
                     return None;
                 }
                 Some((
@@ -1887,52 +1905,10 @@ fn start_creator_click_sampler(app: AppHandle, device: String) {
     });
 }
 
-/// Opt-in bounded cadence of NEW Android screencaps, not a frozen replay.
-/// Never stores pixels or increases scrcpy's codec/bitrate settings.
-fn start_live_zoom_sampling(app: AppHandle, device: String) {
-    let token=LIVE_ZOOM_GENERATION.fetch_add(1,Ordering::Relaxed);
-    if let Ok(mut sessions)=live_zoom_sessions().lock() {
-        sessions.insert(device.clone(),token);
-    } else {return;}
-    tauri::async_runtime::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_millis(650)).await;
-            if !is_live_zoom_current(&device,token) {break;}
-            let pid=app.state::<ScrcpyState>().processes.lock().ok()
-                .and_then(|processes|processes.get(&device).and_then(|child|child.id()));
-            let focused=pid.and_then(capture_screen).map(|screen| {
-                let foreground=unsafe { GetForegroundWindow() };
-                foreground==screen.hwnd ||
-                    app.get_webview_window(&label(&device)).and_then(|w|w.hwnd().ok())
-                        ==Some(foreground) ||
-                    app.get_webview_window(&toolbar_label(&device)).and_then(|w|w.hwnd().ok())
-                        ==Some(foreground)
-            });
-            if focused.is_none() {
-                let _=set_presentation_mode(&app,&device,"off").await;
-                break;
-            }
-            // Do not take new screenshots while the user works elsewhere.
-            if focused==Some(false) {continue;}
-            let result=crate::commands::refresh_presenter_image(&app,&device,None).await;
-            if !is_live_zoom_current(&device,token) {break;}
-            if let Err(error)=result {
-                let _=app.emit("scrcpy-log",
-                    format!("[PRESENTER] Continuous lens stopped: {error}"));
-                if set_presentation_mode(&app,&device,"off").await.is_err() {
-                    if let Some(overlay)=app.get_webview_window(&label(&device)) {
-                        let _=overlay.set_ignore_cursor_events(true);
-                        let _=overlay.eval("window.scrcpyPresent?.setMode('off')");
-                    }
-                    update_presentation_mode(&app,&device,"off");
-                }
-                break;
-            }
-        }
-        if let Ok(mut sessions)=live_zoom_sessions().lock() {
-            if sessions.get(&device)==Some(&token) {sessions.remove(&device);}
-        }
-    });
+/// The real Windows Magnification control composites *every video frame*
+/// without Android screenshot polling. Returns an error if unsupported.
+fn start_native_video_magnifier(device:&str)->Result<(),String> {
+    crate::native_live_lens::start(device)
 }
 
 pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<bool, String> {
@@ -2045,12 +2021,13 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
                     Ok(false)
                 } else {
                     set_presentation_mode(app,&device,"live").await?;
-                    if let Err(error)=crate::commands::refresh_presenter_image(app,&device,None).await {
-                        let _=set_presentation_mode(app,&device,"off").await;
-                        return Err(format!("Live lens could not get a fresh frame: {error}"));
+                    match start_native_video_magnifier(&device) {
+                        Ok(()) => Ok(true),
+                        Err(error) => {
+                            let _=set_presentation_mode(app,&device,"off").await;
+                            Err(format!("Windows native video magnifier unavailable: {error}. The static screenshot magnifier remains available."))
+                        },
                     }
-                    start_live_zoom_sampling(app.clone(),device.clone());
-                    Ok(true)
                 }
             },
             "present_refresh" => {

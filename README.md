@@ -31,6 +31,16 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## 🧪 v5.2.2 · Windows 原生视频实时放大和点击特效修复（预览版）
+
+针对 YouTube 视频教程中的「视频放大卡帧」和「点击看不到光圈」实际反馈，重新处理底层机制，而不是继续提高 Android 截图轮询频率。
+
+- **系统级实时放大**：主动开启后通过 Windows Magnification.dll 对正在更新的 scrcpy SDL 桌面画面进行实时放大，不再调用 ADB 截图轮询；桌面视频变化时，操作系统负责持续合成。圆形放大窗口不会超出手机可见区域，放大目标与鼠标位置保持一致。
+- **鼠标穿透与退场清理**：原生放大窗口设为 click-through、no-activate，仅在当前投屏处于前台且鼠标位于视频内时显示；退出、最小化、失联或重载后销毁放大窗口及线程，不劫持 Android 点击。
+- **点击特效的真实窗口识别**：修复 WebView2 子 HWND 与顶层 HWND 比对错误；画面置顶时，点击光圈图层会主动匹配 SDL 所在的置顶层级，避免光圈被视频窗口遮住。快捷检测仅在用户主动启用后运行，不截屏、不发送按键。
+- **严格回退**：Windows Magnification API 无法初始化时明确报错并恢复触控，可使用原有静态放大镜；不伪装成实时放大，不使用低帧率 PNG 代替。
+- **兼容限制**：受 DRM/受保护视频、远程桌面、系统合成器、显卡驱动或安全桌面限制，原生放大镜不保证每个视频都可显示；测试版须经过 Windows 实机验收后再考虑稳定版。
+
 ## 🧪 v5.2.1 · 放大镜防裁切与点击特效修复（Windows 预发布测试版）
 
 - **左右/上下边缘完整显示**：放大镜圆圈会自动留在手机画面内部，不再被屏幕边缘截断；内容采样仍以鼠标实际位置为中心，靠近截图边缘时填充画布空白，不强行把边缘 App 图标压到放大镜边缘。
@@ -250,11 +260,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.2.1_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.2.1_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.2.1_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.2.2_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.2.2_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.2.2_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.2.1 修复版待 CI 验收通过后发布 Pre-release；正式版请到 [GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍为 v5.1.4 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**v5.2.2 测试版需通过完整 CI 验证后才能在 GitHub Pre-release 下载；正式版请到 [GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍为 v5.1.4 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

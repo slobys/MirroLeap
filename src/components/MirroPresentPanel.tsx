@@ -181,8 +181,8 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
     </p>}
     {mode==='live' && <p role="note" className="ml-muted text-xs">
       {zh
-        ? '连续放大正在使用新的 ADB 截图更新画面（通常只有每秒约 1–3 帧，可能影响无线投屏流畅度）。可通过悬浮栏或退出演示停止采样。'
-        : 'Continuous lens uses fresh ADB screenshots at roughly 1–3 fps and may impact Wi-Fi mirroring. Exit presenter to stop sampling.'}
+        ? '实时放大改由 Windows 系统直接放大当前投屏视频画面，不再通过 ADB 反复截图。允许继续操作手机，刷新效果由 Windows 合成器与显卡决定。点击悬浮栏“退出演示”即可关闭。'
+        : 'The live lens uses native Windows Magnification over the changing SDL video, not ADB screenshots. Taps and swipes remain available; rendering depends on GPU and desktop compositor.'}
     </p>}
     {mode==='spotlight' && <p role="note" className="ml-muted text-xs">
       {zh ? '在手机画面内滚动鼠标滚轮即可放大或缩小聚光灯范围。' :
@@ -200,8 +200,8 @@ export default function MirroPresentPanel({device,running,customPath,onRecenter}
       <summary>{zh ? '使用说明与安全提示' : 'How it works & safety'}</summary>
       <p>
         {zh ?
-          '聚光灯和定格放大镜会暂时接管手机触控；实时放大允许正常点击和滑动手机，退出演示即可关闭。创作者的遮挡框只覆盖可见图层，不保护 scrcpy 原始录像、OBS 单窗口捕捉或普通截图，请勿据此处理敏感信息。连续放大采用低帧率 ADB 新截图，不是 60FPS 视频放大。右侧悬浮栏“一键恢复”可紧急退出并清空标注。' :
-          'Spotlight and frozen magnifier intercept phone taps; the continuous live lens remains mouse-through so you can tap and swipe Android. Creator masks only cover the visible overlay, NOT raw scrcpy recordings, OBS single-window capture or unannotated screenshots. Do not rely on masks to hide sensitive content. Continuous lens uses low-FPS fresh ADB screenshots, not 60fps video. One-click restore exits and clears annotations.'}
+          '聚光灯和定格放大镜会暂时接管手机触控；实时放大允许正常点击和滑动手机，退出演示即可关闭。创作者的遮挡框只覆盖可见图层，不保护 scrcpy 原始录像、OBS 单窗口捕捉或普通截图，请勿据此处理敏感信息。实时放大由 Windows 原生画面合成，不需要 Android 截图；受系统显卡、受保护视频和远程桌面限制，无法保证所有环境都可显示。右侧悬浮栏“一键恢复”可紧急退出并清空标注。' :
+          'Spotlight and frozen magnifier intercept phone taps; the continuous live lens remains mouse-through so you can tap and swipe Android. Creator masks only cover the visible overlay, NOT raw scrcpy recordings, OBS single-window capture or unannotated screenshots. Do not rely on masks to hide sensitive content. Live lens uses the Windows desktop compositor over SDL video, not ADB PNG snapshots. DRM-protected video, remote desktops and some GPUs may restrict it. One-click restore exits and clears annotations.'}
       </p>
     </details>
   </section>;

@@ -172,13 +172,19 @@ for name in ("arrow", "rect", "step", "mask"):
     assert "stroke.tool === '" + name + "'" in frame_page, name
 assert 'scrcpy 原始录像' in read("README.md")
 assert '原始录屏/OBS' in phone_toolbar
-assert 'refresh_presenter_image(&app,&device,None)' in frame_native
-assert 'start_live_zoom_sampling' in frame_native and 'present_is_live' in frame_native
-# Live magnification must not steal Android taps and its focus must come
-# from the SDL pointer, while still/focus modes intentionally intercept.
+assert 'refresh_presenter_image(app, &device, None)' in frame_native, 'Snapshot mode must still refresh ADB stills'
+# Screen video must be magnified natively by Windows instead of polling
+# Android PNG screenshots, and never intercept taps or capture in background.
+native_lens = read("src-tauri/src/native_live_lens.rs")
+assert 'start_native_video_magnifier' in frame_native and 'present_is_live' in frame_native
+assert 'native_live_lens::update' in frame_native
+assert 'MagInitialize' in native_lens and 'MagSetWindowSource' in native_lens
+assert 'MagSetWindowFilterList' in native_lens and 'EX_TRANSPARENT' in native_lens
+assert 'lens_geometry' in native_lens and 'fn stop(' in native_lens
 assert 'set_ignore_cursor_events(mode == "live")' in frame_native
-assert 'window.scrcpyPresent?.setFocus' in frame_native
-assert 'setFocus(x, y)' in present and 'liveStats()' in present
+assert 'start_live_zoom_sampling' not in frame_native
+assert "mode === 'live'" in present and "mode === 'off' || mode === 'live'" in present
+assert "document.body.classList.toggle('presenting', value === 'spotlight' || value === 'magnifier')" in present
 assert 'lensX' in present and 'lensY' in present
 assert 'Math.max(0, left)' in present and 'Math.max(0, top)' in present
 

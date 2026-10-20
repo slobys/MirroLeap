@@ -28,7 +28,7 @@ assert "window.scrcpyPresent = Object.freeze" in present
 assert "new Set(['off', 'spotlight', 'magnifier', 'live'])" in present
 assert "MutationObserver" in present and "snapshot = null" in present
 assert "pointermove" in present and "destination-out" in present
-assert "It never contains the scrcpy video stream" in present
+assert "Magnification control over the SDL video" in present
 assert "await new Promise" in present
 assert "window.scrcpyInk = Object.freeze" in html, "Drawing preserved"
 assert "presentation_set_mode" in lib and "presentation_get_mode" in lib
@@ -49,10 +49,11 @@ assert "overlay.set_ignore_cursor_events(true)" in native
 assert "overlay.set_ignore_cursor_events(false)" in native
 assert "promote_drawing_windows(app, device, &overlay)" in native
 assert 'set_ignore_cursor_events(mode == "live")' in native
-assert 'window.scrcpyPresent?.setFocus' in native
-assert 'WindowFromPoint' in native
+assert 'native_live_lens::update' in native
+assert 'WindowFromPoint' in native and 'GetAncestor(hovered,GA_ROOT)' in native
 assert 'start_creator_click_sampler' in native
-assert 'liveStats()' in present
+assert 'MagSetWindowSource' in (root / "src-tauri/src/native_live_lens.rs").read_text()
+assert "mode === 'off' || mode === 'live'" in present
 
 assert "update_presentation_mode(app, device, \"off\")" in native
 assert "set_presentation_snapshot(" in native
@@ -65,7 +66,7 @@ assert 'id="present-toggle"' in (root / "public/phone-controls.html").read_text(
     "MirroPresent must remain available on the floating phone rail"
 )
 assert "Creator masks only cover the visible overlay" in panel
-assert "Continuous lens uses low-FPS fresh ADB screenshots" in panel
+assert "Live lens uses the Windows desktop compositor over SDL video" in panel
 assert "presentations" not in cfg.get("identifier", "")
 assert (root / "src/test/mirroPresent.test.mjs").exists()
 assert (root / "src/components/__tests__/MirroPresentPanel.test.tsx").exists()

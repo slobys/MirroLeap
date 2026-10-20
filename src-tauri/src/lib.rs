@@ -9,6 +9,8 @@ mod frame_layout;
 #[cfg(target_os = "windows")]
 mod device_frame;
 #[cfg(target_os = "windows")]
+mod native_live_lens;
+#[cfg(target_os = "windows")]
 mod win_chrome;
 // Windows-only: drag the borderless scrcpy window with the mouse
 // (Ctrl+Alt+Shift+W).
