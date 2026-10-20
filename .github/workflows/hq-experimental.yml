@@ -1,6 +1,12 @@
-name: Experimental scrcpy HQ Frame Sink (manual only)
+name: Experimental scrcpy HQ Frame Sink (dev branch)
 
 on:
+  push:
+    branches:
+      - feat/mirrocreator-hq-lens-235
+    paths:
+      - 'hq/**'
+      - '.github/workflows/hq-experimental.yml'
   workflow_dispatch:
 
 permissions:
