@@ -91,17 +91,17 @@ fn ring_pixel(x:f32,y:f32,progress:f32)->[u8;4] {
     let radius=17.+66.*progress;
     let thickness=4.2-progress*1.4;
     let main=(1.-((distance-radius)/thickness).abs()).clamp(0.,1.);
-    let secondary=(1.-((distance-radius*.86)/(thickness*.9)).abs()).clamp(0.,1.);
+    let secondary=(1.-((distance-radius*0.86)/(thickness*0.9)).abs()).clamp(0.,1.);
     let core=if progress < .28 {
-        (1.-progress/.28)*((6.-distance)/2.).clamp(0.,1.)
+        (1.-progress/0.28)*((6.-distance)/2.).clamp(0.,1.)
     } else {0.};
-    let fade=(1.-progress).powf(.70);
+    let fade=(1.-progress).powf(0.70);
     if core>=main && core>=secondary {
         blended(core*fade,255,255,255)
     } else if main>secondary {
-        blended(main*fade*.98,10,242,191)
+        blended(main*fade*0.98,10,242,191)
     } else {
-        blended(secondary*fade*.85,255,255,255)
+        blended(secondary*fade*0.85,255,255,255)
     }
 }
 
@@ -261,12 +261,12 @@ mod tests {
     fn alpha_ring_is_transparent_outside_and_visible_during_a_click(){
         assert_eq!(ring_pixel(0.,0.,0.)[3],0);
         assert!(ring_pixel(SIDE as f32/2.+17.,SIDE as f32/2.,0.)[3]>200);
-        assert!(ring_pixel(SIDE as f32/2.+42.,SIDE as f32/2.,.4)[3]>50);
+        assert!(ring_pixel(SIDE as f32/2.+42.,SIDE as f32/2.,0.4)[3]>50);
         assert_eq!(ring_pixel(SIDE as f32/2.,SIDE as f32/2.,1.)[3],0);
     }
     #[test]
     fn stored_pixels_are_premultiplied_alpha(){
-        let px=blended(.3,10,240,180);
+        let px=blended(0.3,10,240,180);
         assert!(px[3]>0 && px[3]<255);
         assert!(px[0]<=px[3] && px[1]<=px[3] && px[2]<=px[3]);
     }
