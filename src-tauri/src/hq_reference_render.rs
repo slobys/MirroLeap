@@ -92,6 +92,9 @@ pub fn render_decoded_reference(
     if out_size<1 || out_size>MAX_REFERENCE_DIAMETER {
         return Err("HQ reference lens diameter outside bounds");
     }
+    if area.lens_diameter_px!=out_size {
+        return Err("HQ reference output diameter must match source crop");
+    }
     if source.width!=frame.metadata.width || source.height!=frame.metadata.height
         || source.rotation!=frame.metadata.rotation_degrees {
         return Err("HQ reference source/metadata mismatch");
@@ -157,9 +160,8 @@ mod tests {
     fn crop(frame:&OwnedFrame,lens:u32)->SourceSample {
         map_lens_to_decoded_frame(SourceFrame{
             width:frame.metadata.width,height:frame.metadata.height,rotation:0,
-        },ScreenViewport{x:0,y:0,width:frame.metadata.width,
-            height:frame.metadata.height},(
-                frame.metadata.width as i32/2,frame.metadata.height as i32/2),
+        },ScreenViewport{x:0,y:0,width:128,
+            height:128},(64,64),
             lens,2.35).unwrap()
     }
     #[test]
@@ -168,8 +170,8 @@ mod tests {
             let f=sample_frame(format,8,8);
             let img=render_decoded_reference(&f,SourceFrame{
                 width:8,height:8,rotation:0,
-            },&crop(&f,8),8).unwrap();
-            assert_eq!(img.len(),8*8*4);
+            },&crop(&f,40),40).unwrap();
+            assert_eq!(img.len(),40*40*4);
             for pixel in img.chunks_exact(4) {
                 assert_eq!(pixel,&[0,0,0,255]);
             }
@@ -182,10 +184,10 @@ mod tests {
         // if the 16px video was first downscaled into a 4px SDL window.
         f.data[8*16+7]=235;
         f.data[8*16+8]=235;
-        let sample=crop(&f,8);
+        let sample=crop(&f,40);
         let img=render_decoded_reference(&f,SourceFrame{
             width:16,height:16,rotation:0,
-        },&sample,8).unwrap();
+        },&sample,40).unwrap();
         assert!(img.chunks_exact(4).any(|p|p[2]>=180),
                 "expected original bright center detail to remain visible");
         assert!(img.chunks_exact(4).any(|p|p[2]<30),
@@ -194,27 +196,27 @@ mod tests {
     #[test]
     fn edges_are_filled_without_repeating_clipped_app_pixels() {
         let f=sample_frame(PixelFormat::Yuv420p,16,16);
-        let mut area=crop(&f,12);
-        area.source_left=-4.0;
-        area.source_top=-4.0;
+        let mut area=crop(&f,40);
+        area.source_left=-2.0;
+        area.source_top=-2.0;
         let img=render_decoded_reference(&f,SourceFrame{
             width:16,height:16,rotation:0,
-        },&area,12).unwrap();
+        },&area,40).unwrap();
         assert_eq!(&img[..4],&BGRA_BACKGROUND);
-        assert_eq!(&img[(11*12+11)*4..(11*12+11)*4+4],&[0,0,0,255]);
+        assert_eq!(&img[(40*40-1)*4..(40*40)*4],&[0,0,0,255]);
     }
     #[test]
     fn reject_truncated_and_mismatched_or_oversize_frames() {
         let mut f=sample_frame(PixelFormat::Nv12,8,8);
-        let sample=crop(&f,8);
+        let sample=crop(&f,40);
         f.data.pop();
         assert!(render_decoded_reference(&f,SourceFrame{
             width:8,height:8,rotation:0,
-        },&sample,8).is_err());
+        },&sample,40).is_err());
         f.data.push(128);
         assert!(render_decoded_reference(&f,SourceFrame{
             width:8,height:8,rotation:90,
-        },&sample,8).is_err());
+        },&sample,40).is_err());
         assert!(render_decoded_reference(&f,SourceFrame{
             width:8,height:8,rotation:0,
         },&sample,MAX_REFERENCE_DIAMETER+1).is_err());
@@ -226,9 +228,9 @@ mod tests {
         let source=SourceFrame{width:8,height:16,rotation:90};
         let area=map_lens_to_decoded_frame(source,
             ScreenViewport{x:-100,y:50,width:160,height:80},
-            (-20,90),32,2.35).unwrap();
-        let rgba=render_decoded_reference(&f,source,&area,32).unwrap();
-        assert_eq!(rgba.len(),32*32*4);
+            (-20,90),64,2.35).unwrap();
+        let rgba=render_decoded_reference(&f,source,&area,64).unwrap();
+        assert_eq!(rgba.len(),64*64*4);
         assert!(rgba.chunks_exact(4).any(|p|p==[0,0,0,255]));
     }
 }
