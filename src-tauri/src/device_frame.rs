@@ -1234,7 +1234,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     if let Ok(mut set) = ink_ready().lock() { set.remove(&device); }
     update_presentation_mode(&app, &device, "off");
     cancel_live_zoom(&device);
-    if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(&device);}
+    disable_creator_clicks(&app,&device);
 
     let _ = overlay.set_ignore_cursor_events(true);
     if let Some(pid) = clipped_pid {
@@ -1525,8 +1525,7 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
         let _guard = InkTransitionGuard::begin(device)?;
         // One-click restore is deliberately allowed with pen mode ON or OFF.
         cancel_live_zoom(device);
-        if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(device);}
-        let _=overlay.eval("window.scrcpyCreator?.reset()");
+        disable_creator_clicks(app,device);
 
         // Recover Android input first even if the canvas has reloaded.
         overlay.set_ignore_cursor_events(true)
@@ -2254,8 +2253,8 @@ pub fn start(
     if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(device);}
     cancel_live_zoom(device);
     cancel_creator_sampler(device);
-    if let Ok(mut states) = topmost_requests().lock() {        crate::native_click_effect::stop(device);
-
+    crate::native_click_effect::stop(device);
+    if let Ok(mut states) = topmost_requests().lock() {
         states.insert(device.to_string(), always_on_top);
     }
     let shell_name = label(device);
