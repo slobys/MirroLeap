@@ -20,6 +20,7 @@ scrcpy 客户端在 libavcodec 解码后使用 frame_source 向 screen.frame_sin
 - `../src-tauri/src/hq_bridge_windows.rs`：Windows BCrypt 随机会话 token 与映射 owner、按原子序列号检查读取最新帧；未与默认投屏生命周期相连。
 - `../src-tauri/src/hq_geometry.rs`：根据真实 Windows 视频矩形（物理像素）、鼠标坐标与源 AVFrame 分辨率，以 **2.35×** 映射竖屏、横屏和 90°/180°/270° 旋转；圆圈在靠边 App 处不会选错源像素。
 - `../src-tauri/src/hq_reference_render.rs`：采用 YUV420P/NV12 原始解码像素、CPU 双线性插值输出限定尺寸 BGRA 局部镜头，作为将来 GPU 镜头的**对照基准**，默认应用绝不调用。颜色转换暂按 BT.709 limited-range 估算，不能在尚未获取真实 frame colorspace 元数据时当作颜色精准渲染。
+- `../src-tauri/src/hq_pipeline.rs`：贯通“校验过的解码帧 → 源帧位置映射 → 2.35× 原始像素取样 → 限定尺寸 BGRA 画面”的**实验性参考管线**；从 C 生产者实际写出的 NV12 二进制帧进行跨语言测试，不通过已经被 SDL 缩放的桌面像素。尚未产生 Windows GPU 窗口，也不在默认投屏中运行。
 
 - `apply_scrcpy_v4.py`：仅接受固定 git 提交，安全改动 app/meson.build 和 app/src/scrcpy.c，再安装新增 sink 源文件。重复执行不插入两次，拒绝未知上游版本。
 - `tests/test_sink.c`：Linux CI 利用 Windows/FFmpeg API stubs 运行 YUV420P/NV12 打包、stride、PTS、双槽提交、无效格式回退，并把 C 写出的二进制帧交给 Rust 跨语言解析；**stubs 不能代替 Windows 真机渲染测试**。上游 scrcpy v4.0 已在 [Windows MSYS2 CI](https://github.com/slobys/MirroLeap/actions/runs/39473209338) 完成 FFmpeg/SDL3 真正编译及 `scrcpy.exe --version` 启动验证，但尚未连接真实 Android 设备传帧。

@@ -100,6 +100,14 @@ assert "PixelFormat::Yuv420p" in raster and "PixelFormat::Nv12" in raster
 assert "BGRA_BACKGROUND" in raster and "bilinear_plane" in raster
 assert "MAX_REFERENCE_DIAMETER: u32 = 720" in raster
 assert "render_decoded_reference" not in app, "reference path must stay disabled in production"
+pipeline = read("src-tauri/src/hq_pipeline.rs")
+assert "mod hq_pipeline" in lib
+assert "render_decoded_hq_preview" in pipeline
+assert "map_lens_to_decoded_frame" in pipeline
+assert "render_decoded_reference" in pipeline
+assert "synthetic_c_packed_nv12_mapping_flows_into_bgra_pixels" in pipeline
+assert "render_decoded_hq_preview" not in app, "experimental pixels must never run implicitly"
+
 
 
 # The client binary is still official by default; this source patch must not

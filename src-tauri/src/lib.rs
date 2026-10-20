@@ -7,6 +7,8 @@ mod hq_protocol;
 mod hq_geometry;
 #[allow(dead_code)]
 mod hq_reference_render;
+#[allow(dead_code)]
+mod hq_pipeline;
 #[cfg(target_os = "windows")]
 #[allow(dead_code)]
 mod hq_bridge_windows;
