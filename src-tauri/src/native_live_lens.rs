@@ -100,7 +100,7 @@ impl ViewUpdate {
 struct Geometry { x:i32, y:i32, size:i32, source:Rect }
 fn lens_geometry(view:ViewUpdate)->Option<Geometry> {
     if !view.active || !view.inside() { return None; }
-    let size=((view.width.min(view.height) as f32)*.50).round() as i32;
+    let size=((view.width.min(view.height) as f32)*0.50).round() as i32;
     let size=size.clamp(PREVIEW_MIN,PREVIEW_MAX)
         .min(view.width.saturating_sub(8))
         .min(view.height.saturating_sub(8));
