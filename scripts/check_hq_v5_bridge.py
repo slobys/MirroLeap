@@ -52,7 +52,7 @@ assert 'MirroLeap.HQ.Core_v3_x64.zip' in read(".github/workflows/mirroleap-conti
 # Original user application MUST NOT be affected by a lab-only branch.
 conf=read("src-tauri/tauri.conf.json")
 command=read("src-tauri/src/commands.rs")
-assert '"version": "5.3.6"' in conf
+assert '"version": "5.3.7"' in conf
 assert 'const HQ_VERSION_MARKER:&str="MirroLeap HQ scrcpy5 raw-frame v3 (experimental)";' in command
 assert 'experimental_hq_selected' in command
 print("PASS: pinned scrcpy5 lab remains isolated, D3D11 refs bounded and v5 push result truthful")

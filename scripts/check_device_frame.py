@@ -201,4 +201,25 @@ assert 'stroke="#d3d5d6"' not in svg.read_text(encoding="utf-8"), (
     "Bright white perimeter outline must not be reintroduced"
 )
 
+# Native WebView2 transparent first paint must be validated BEFORE reveal.
+# PageLoadEvent::Finished alone was insufficient: the initial opaque HWND
+# could cover the SDL video while the frozen magnifier stayed visible.
+first_paint = (root / "public/frame-ready.js").read_text(encoding="utf-8")
+commands = (root / "src-tauri/src/commands.rs").read_text(encoding="utf-8")
+assert '<script src="/frame-ready.js"></script>' in page
+assert "frame.decode()" in first_paint and "paintedOrHidden()" in first_paint
+assert "requestAnimationFrame(() => requestAnimationFrame(finish))" in first_paint
+assert "setTimeout(finish, 240)" in first_paint, "A hidden WebView may throttle rAF"
+assert "document.documentElement,document.body,annotation,presentation" in first_paint
+assert "device_frame_page_ready" in first_paint and "device_frame_page_ready" in commands
+assert "commands::device_frame_page_ready" in lib
+assert "acknowledge_frame_first_paint" in backend
+assert "caller.hwnd()" in backend and "current.hwnd()" in backend
+assert "frame_first_paints().lock()" in backend
+assert "PageLoadEvent::Started" in backend and "PageLoadEvent::Finished" in backend
+assert "if !frame_presentation_ready(&device)" in backend
+assert backend.index("if !frame_presentation_ready(&device)") < backend.index("if overlay.show().is_ok()")
+assert ".background_color(tauri::window::Color(0,0,0,0))" in backend
+assert "overlay.set_decorations(false)" in backend
+
 print("Phone frame: no square matte, overscanned native clip and narrow anti-aliased gasket verified")

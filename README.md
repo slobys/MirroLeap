@@ -31,6 +31,12 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## ✨ MirroLeap v5.3.7 · 启动透明边框白屏修复（Windows 预览候选）
+
+- 首次投屏时，透明手机框不再只凭页面载入完成就显示：等候 SVG 解码、Canvas 初始化和首帧就绪确认；Win32/WebView2 统一显式设置透明背景并保持无标题栏，避免出现数秒白色 `Device frame` 画面遮住手机视频。
+- 切换设备、WebView2 重新加载时清除就绪状态；即使隐藏窗口的浏览器暂停 rAF，也可经有限时间回退安全完成首帧准备。保持普通投屏、鼠标穿透、静态放大镜与三档防窥不变。
+- **仍需 Windows + 安卓手机真机验收**：尤其首次打开、旋转、最小化恢复、D3D11/HQ 视频。视觉遮罩不是原始视频的数据保护。
+
 ## ✨ MirroLeap v5.3.6 · MirroPresent 放大镜防窥模式（Windows 预览版）
 
 - **悬浮栏新增防窥按钮**：先开启「放大镜」（静态截图）或「实时放大」，然后重复点击「防窥」按 **关闭 → 暗化 → 全黑 → 关闭** 切换；聚光灯或普通投屏不启用防窥遮罩。
@@ -80,11 +86,11 @@
 此前已修复 HQ 圆形窗口可能被手机视频或透明真机边框遮挡的问题，本轮保留它的实时置顶与失败回退。
 
 
-**名称仍为 MirroLeap，不再建立“MirroLeap HQ Preview”独立应用。** 保留 v5.2.3 的 Windows 安装标识、原有配置和签名更新公钥；继续使用 v5.3.6 这种正常版本标签。已安装 v5.2.3 的 NSIS EXE 用户可以通过原来的启动检查与确认弹窗发现并安装此版本；便携 ZIP 和 MSI 仍使用手动更新。
+**名称仍为 MirroLeap，不再建立“MirroLeap HQ Preview”独立应用。** 保留 v5.2.3 的 Windows 安装标识、原有配置和签名更新公钥；继续使用 v5.3.7 这种正常版本标签。已安装 v5.2.3 的 NSIS EXE 用户可以通过原来的启动检查与确认弹窗发现并安装此版本；便携 ZIP 和 MSI 仍使用手动更新。
 
 安装包保持约 5 MB 的轻量级，USB/Wi-Fi 投屏、画笔、点击特效和实时放大都在主应用中。原始帧 2.35× 高清镜头依旧是 **主动勾选才下载** 的可选组件，独立 scrcpy 5.0.1 HQ 及其 FFmpeg/SDL 运行库不随主 EXE/MSI 安装。画质路径提示可区分「原始帧」与「桌面回退」，尚未完成真实 Android GPU D3D11 高清端到端验收。
 
-这是同一 MirroLeap 更新频道里的 GitHub 测试版（Pre-release），不强制自动安装，也不替换 v5.1.4 在 GitHub 上的 Latest 标记。详见 [v5.3.6 发布说明](hq/MIRROLEAP_RELEASE_NOTES.md)。
+这是同一 MirroLeap 更新频道里的 GitHub 测试版（Pre-release），不强制自动安装，也不替换 v5.1.4 在 GitHub 上的 Latest 标记。详见 [v5.3.7 发布说明](hq/MIRROLEAP_RELEASE_NOTES.md)。
 
 本版同时保留 HQ 圆圈的 Windows 置顶/遮挡修复，并对 YUV 取图、CPU 抗锯齿执行按需启停和负载限制，不再让已接收的帧与用户实际可见的放大圈混为一谈。
 
@@ -347,11 +353,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.3.6_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.3.6_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.3.6_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.3.7_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.3.7_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.3.7_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.3.6 沿用原有安装标识与签名更新频道，只有 Windows CI 验证发布文件后才提供本版下载。** [GitHub Releases](https://github.com/slobys/MirroLeap/releases) 中可选择具体版本附件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 暂保持 v5.1.4 正式版。不要把 Tags 页面自动生成的源码 ZIP 当作安装包。
+**v5.3.7 沿用原有安装标识与签名更新频道，只有 Windows CI 验证发布文件后才提供本版下载。** [GitHub Releases](https://github.com/slobys/MirroLeap/releases) 中可选择具体版本附件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 暂保持 v5.1.4 正式版。不要把 Tags 页面自动生成的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

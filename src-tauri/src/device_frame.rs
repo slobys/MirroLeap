@@ -118,6 +118,18 @@ fn is_quick_open(device: &str) -> bool {
     quick_sessions().lock().map(|guard| guard.contains(device)).unwrap_or(false)
 }
 static INK_READY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+// WebView2 PageLoadEvent::Finished is not proof that the hidden transparent
+// child has loaded its SVG, Canvas and first compositing frame. Showing it
+// immediately can flash a white 'Device frame' HWND over the SDL movie.
+static FRAME_FIRST_PAINT_READY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+fn frame_first_paints()->&'static Mutex<HashSet<String>> {
+    FRAME_FIRST_PAINT_READY.get_or_init(||Mutex::new(HashSet::new()))
+}
+fn frame_presentation_ready(device:&str)->bool {
+    ready_to_ink(device) && frame_first_paints().lock()
+        .map(|ready|ready.contains(&label(device))).unwrap_or(false)
+}
+
 static INK_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 // Tauri 2.10.x WebviewWindow.eval() has no eval_with_callback API. Instead
 // frame.html calls a narrow native acknowledgement command after running a
@@ -249,6 +261,32 @@ pub(crate) fn acknowledge_ink(
         acks.remove(&token).map(|(_, tx)| tx)
     }.ok_or("Ink acknowledgement has expired")?;
     let _ = sender.send(success);
+    Ok(())
+}
+
+/// The trusted phone-frame page reports that transparent CSS, the SVG image,
+/// both presentation canvases and an initial browser paint are ready.
+/// The caller supplies no device name or arbitrary HWND/URL. A stale frame
+/// cannot mark a replacement WebView of the same label as ready.
+pub(crate) fn acknowledge_frame_first_paint(
+    app:&AppHandle,caller:&tauri::Window,
+)->Result<(),String> {
+    let name=caller.label();
+    if !name.starts_with("phone-frame-") {
+        return Err("Only the phone frame may acknowledge first paint".into());
+    }
+    let current=app.get_webview_window(name)
+        .ok_or("The corresponding phone frame has already closed")?;
+    if caller.hwnd().map_err(|e|e.to_string())? !=
+       current.hwnd().map_err(|e|e.to_string())? {
+        return Err("Stale phone-frame first-paint acknowledgement".into());
+    }
+    let active=app.state::<ScrcpyState>().processes.lock()
+        .map_err(|e|e.to_string())?.keys()
+        .any(|device|label(device)==name);
+    if !active {return Err("Phone session is no longer active".into());}
+    frame_first_paints().lock().map_err(|e|e.to_string())?
+        .insert(name.to_string());
     Ok(())
 }
 
@@ -973,10 +1011,30 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // minimized then restored. The old code treated an *attempted* show
         // as proof that the overlay was visible forever, and broke the whole
         // follow task on any transient SetWindowPos error.
+        // Do not expose an undecorated WebView2 HWND until its transparent
+        // page has acknowledged SVG decode and an initial compositor tick.
+        // The SDL video remains visible and usable during startup/reloads.
+        if !frame_presentation_ready(&device) {
+            if shell_visible {let _=overlay.hide();shell_visible=false;}
+            if controls_visible {let _=toolbar.hide();controls_visible=false;}
+            previous_frame=None;
+            controls_rect=None;
+            shell_position_checked_at=None;
+            toolbar_position_checked_at=None;
+            continue;
+        }
         let actual_visible = overlay.hwnd().ok()
             .map(|h| unsafe { IsWindowVisible(h).as_bool() }).unwrap_or(false);
         let needs_restore = !shell_visible || !actual_visible;
         if needs_restore {
+            // Tauri requests borderless at construction, but Windows can
+            // briefly paint its native title strip during first activation.
+            // Reassert the style WHILE hidden, never on the moving video HWND.
+            if let Err(error)=overlay.set_decorations(false) {
+                let _=app.emit("scrcpy-log",format!(
+                    "[FRAME] Transparent shell chrome not ready: {error}"));
+                continue;
+            }
             if overlay.show().is_ok() {
                 // Tauri/WebView2 may reset HWND hit-testing across hide/show.
                 // A flyout being open does NOT authorize the overlay to steal
@@ -1277,6 +1335,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
 
     if let Ok(mut set) = ink_sessions().lock() { set.remove(&device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(&device); }
+    if let Ok(mut ready)=frame_first_paints().lock(){ready.remove(&label(&device));}
     update_presentation_mode(&app, &device, "off");
     cancel_live_zoom(&device);
     disable_creator_clicks(&app,&device);
@@ -2328,6 +2387,7 @@ pub fn start(
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
     if let Ok(mut present) = presenter_panels().lock() { present.remove(device); }
     if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(device);}
+    if let Ok(mut ready)=frame_first_paints().lock(){ready.remove(&label(device));}
     cancel_live_zoom(device);
     cancel_creator_sampler(device);
     crate::native_click_effect::stop(device);
@@ -2347,6 +2407,9 @@ pub fn start(
             match payload.event() {
                 PageLoadEvent::Started => {
                     if let Ok(mut ready) = ink_ready().lock() { ready.remove(&page_device); }
+                    if let Ok(mut ready) = frame_first_paints().lock() {
+                        ready.remove(&label(&page_device));
+                    }
                     if let Ok(mut sessions) = ink_sessions().lock() { sessions.remove(&page_device); }
                     // JS mode resets on reload; never keep native cursor
                     // capture or presentation status referring to old state.
@@ -2368,6 +2431,10 @@ pub fn start(
             }
         })
         .title("Device frame")
+        // Without an explicit 0-alpha WEBVIEW background, WebView2 can
+        // briefly present its default opaque white surface over scrcpy,
+        // even though HTML/CSS and the outer Tauri HWND are transparent.
+        .background_color(tauri::window::Color(0,0,0,0))
         .transparent(true)
         .decorations(false)
         .shadow(false)
@@ -2420,6 +2487,7 @@ pub fn close(app: &AppHandle, device: &str) {
     if let Ok(mut present) = presenter_panels().lock() { present.remove(device); }
     if let Ok(mut set) = ink_sessions().lock() { set.remove(device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(device); }
+    if let Ok(mut ready)=frame_first_paints().lock(){ready.remove(&label(device));}
     update_presentation_mode(app, device, "off");
     if let Some(shell) = app.get_webview_window(&label(device)) { let _ = shell.close(); }
     if let Some(toolbar) = app.get_webview_window(&toolbar_label(device)) { let _ = toolbar.close(); }
@@ -2428,6 +2496,20 @@ pub fn close(app: &AppHandle, device: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_remains_hidden_until_native_and_webview_first_paint_are_both_ready() {
+        let device="first-paint-regression-device";
+        let window_label=label(device);
+        assert!(!frame_presentation_ready(device));
+        ink_ready().lock().unwrap().insert(device.to_string());
+        assert!(!frame_presentation_ready(device),"PageLoad Finished cannot expose white WebView");
+        frame_first_paints().lock().unwrap().insert(window_label.clone());
+        assert!(frame_presentation_ready(device));
+        frame_first_paints().lock().unwrap().remove(&window_label);
+        assert!(!frame_presentation_ready(device),"Reload must remove first-paint readiness");
+        ink_ready().lock().unwrap().remove(device);
+    }
 
     #[test]
     fn rotation_is_only_confirmed_after_video_changes_actual_orientation() {

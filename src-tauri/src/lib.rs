@@ -172,6 +172,7 @@ pub fn run() {
             commands::get_app_install_kind,
             commands::open_official_community_link,
             commands::device_frame_ack,
+            commands::device_frame_page_ready,
             commands::device_frame_capture_ack,
             commands::recenter_scrcpy_window,
             commands::set_active_device,
