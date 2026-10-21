@@ -317,7 +317,12 @@ jobs:
             # run sha256sum -c against their actual downloaded files.
             $publishedName = $artifact.Name.Replace(' ', '.')
             $publishedPath = Join-Path $out $publishedName
-            Copy-Item -LiteralPath $artifact.FullName -Destination $publishedPath
+            # The portable ZIP is created DIRECTLY in $out; never attempt to
+            # Copy-Item an asset onto itself (PowerShell treats this as error).
+            if ([IO.Path]::GetFullPath($artifact.FullName) -ine
+                [IO.Path]::GetFullPath($publishedPath)) {
+              Copy-Item -LiteralPath $artifact.FullName -Destination $publishedPath
+            }
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $publishedPath).Hash.ToLowerInvariant()
             $hashes += "$hash *$publishedName"
           }
