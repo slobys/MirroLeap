@@ -136,8 +136,9 @@ assert "start_with_hq(device,owner)" in phone
 assert "video_hwnd:hwnd.0 as usize" in phone
 assert "preview.maintain_visible" in native
 assert "lens.display(view); // immediate working magnifier fallback" in native
-assert "hqLens" in ui and "Optional 2.35× HQ lens" in ui
-assert "CPU/GDI decoded-frame preview, not final D3D11" in ui
+assert "hqLens" in ui and "2.35× live lens (smooth: keep regular scrcpy)" in ui
+assert "Experimental raw-frame HQ" in ui
+assert "Raw-frame mode switches the ENTIRE next mirror" in ui
 assert "hqlens" not in producer.lower()
 
 
@@ -161,7 +162,7 @@ assert "No pixels stored" in probe
 assert "MIRROLEAP_HQ_TOKEN" in app
 assert "if let Some(token)=hq_token" in app
 assert "create_hq_session(&exe_path,&config).await?" in app
-assert "HQ_VERSION_MARKER" in app and "hq_lens.unwrap_or(false)" in app
+assert "HQ_VERSION_MARKER" in app and "experimental_hq_selected" in app
 assert 'MIRROLEAP_HQ_TOKEN' not in read("src/hooks/useScrcpy.ts")
 assert "MirroLeap HQ decoded-frame v2 (experimental)" in patch_script
 # Lite-app invariant: 5MB EXE/MSI, separate SHA256-pinned HQ ZIP downloaded
