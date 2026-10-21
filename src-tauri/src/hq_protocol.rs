@@ -188,9 +188,13 @@ mod tests {
         assert!(validate_header(&b).is_ok());
         b[0]=b'X';
         assert!(validate_header(&b).is_err());
-        b[0]=b'M';set32(&mut b,4,2);
+        b[0]=b'M';set32(&mut b,4,VERSION+1);
         assert!(validate_header(&b).is_err());
-        set32(&mut b,4,1);set32(&mut b,12,1);
+        // A previous v1 HQ core must not be accepted by the demand-driven v2
+        // consumer; it would otherwise keep copying YUV when lens is off.
+        set32(&mut b,4,VERSION-1);
+        assert!(validate_header(&b).is_err());
+        set32(&mut b,4,VERSION);set32(&mut b,12,1);
         assert!(validate_header(&b).is_err());
     }
     #[test]
