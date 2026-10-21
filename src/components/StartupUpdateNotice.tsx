@@ -80,7 +80,9 @@ export default function StartupUpdateNotice({
                     </div>
                     <div>
                         <h2 id="startup-update-heading" className="text-lg font-bold">
-                            {zh?'发现 MirroLeap 新版本':'New MirroLeap version'}
+                            {release.channel==='hq_preview' ?
+                                (zh?'发现 MirroLeap HQ Preview 新版本':'New MirroLeap HQ Preview') :
+                                (zh?'发现 MirroLeap 新版本':'New MirroLeap version')}
                         </h2>
                         <p className="text-sm font-semibold mt-1">
                             v{release.currentVersion} → v{release.latestVersion}

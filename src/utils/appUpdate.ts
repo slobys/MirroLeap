@@ -19,6 +19,8 @@ export interface AppUpdateInfo {
   downloads: ReleaseDownload[];
   /** The newest official signed release may be a public prerelease. */
   prerelease?: boolean;
+  /** Signed channels have different Windows app identities and MUST NOT mix. */
+  channel?: 'stable' | 'hq_preview';
 }
 
 /** Accept only exact canonical GitHub Release paths. This is defense-in-depth
@@ -28,6 +30,15 @@ export interface AppUpdateInfo {
 export function trustedReleaseUrl(info: AppUpdateInfo): string | null {
   const version = info.latestVersion;
   if (!/^\d+(?:\.\d+){2}$/.test(version)) return null;
+  if (info.channel === 'hq_preview') {
+    // Only canonical signed HQ Preview prerelease tags in this repository.
+    // Never treat arbitrary prereleases or stable vX tags as HQ updates.
+    const prefix = `https://github.com/slobys/MirroLeap/releases/tag/hq-preview-v${version}-run`;
+    if (!info.releaseUrl.startsWith(prefix)) return null;
+    const run = info.releaseUrl.slice(prefix.length);
+    return /^[1-9]\d*$/.test(run) ? info.releaseUrl : null;
+  }
+  if (info.channel && info.channel !== 'stable') return null;
   const expected = `https://github.com/slobys/MirroLeap/releases/tag/v${version}`;
   return info.releaseUrl === expected ? expected : null;
 }
@@ -35,17 +46,22 @@ export function trustedReleaseUrl(info: AppUpdateInfo): string | null {
 export function trustedReleaseDownload(info: AppUpdateInfo, asset: ReleaseDownload): string | null {
   if (!trustedReleaseUrl(info)) return null;
   const version = info.latestVersion;
+  const isHq = info.channel === 'hq_preview';
   const allowed: Record<ReleaseDownload['kind'], string> = {
-    portable: `MirroLeap_${version}_x64_Portable.zip`,
-    exe: `MirroLeap_${version}_x64-setup.exe`,
-    msi: `MirroLeap_${version}_x64_en-US.msi`,
+    portable: isHq ? '' : `MirroLeap_${version}_x64_Portable.zip`,
+    exe: isHq ? `MirroLeap.HQ.Preview_${version}_x64-setup.exe` :
+      `MirroLeap_${version}_x64-setup.exe`,
+    msi: isHq ? `MirroLeap.HQ.Preview_${version}_x64_en-US.msi` :
+      `MirroLeap_${version}_x64_en-US.msi`,
     checksums: 'SHA256SUMS.txt',
   };
   if (!allowed[asset.kind] || asset.name !== allowed[asset.kind] ||
       !Number.isFinite(asset.size) || asset.size <= 0 || asset.size > 500 * 1024 * 1024) {
     return null;
   }
-  const canonical = `https://github.com/slobys/MirroLeap/releases/download/v${version}/${asset.name}`;
+  const releasePath = trustedReleaseUrl(info)?.split('/releases/tag/')[1];
+  if (!releasePath) return null;
+  const canonical = `https://github.com/slobys/MirroLeap/releases/download/${releasePath}/${asset.name}`;
   return asset.url === canonical ? canonical : null;
 }
 

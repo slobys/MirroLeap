@@ -1,6 +1,6 @@
 {
   "productName": "MirroLeap HQ Preview",
-  "version": "5.2.5",
+  "version": "5.2.6",
   "identifier": "com.slobys.mirroleap-hq-preview",
   "bundle": {
     "createUpdaterArtifacts": false,

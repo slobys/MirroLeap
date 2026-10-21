@@ -36,6 +36,27 @@ describe('official MirroLeap release-link verification', () => {
     expect(trustedReleaseDownload({...valid, releaseUrl:'https://evil.test'},valid.downloads[0])).toBeNull();
   });
 
+  it('isolates signed HQ Preview update links from stable releases', () => {
+    const preview: AppUpdateInfo = {
+      ...valid,channel:'hq_preview',prerelease:true,latestVersion:'5.2.6',
+      releaseUrl:'https://github.com/slobys/MirroLeap/releases/tag/hq-preview-v5.2.6-run9',
+      downloads:[{
+        kind:'exe',name:'MirroLeap.HQ.Preview_5.2.6_x64-setup.exe',
+        url:'https://github.com/slobys/MirroLeap/releases/download/hq-preview-v5.2.6-run9/MirroLeap.HQ.Preview_5.2.6_x64-setup.exe',
+        size:21000000,sha256:null,
+      }],
+    };
+    expect(trustedReleaseUrl(preview)).toBe(preview.releaseUrl);
+    expect(trustedReleaseDownload(preview,preview.downloads[0])).toBe(preview.downloads[0].url);
+    expect(trustedReleaseUrl({...preview,releaseUrl:valid.releaseUrl})).toBeNull();
+    expect(trustedReleaseUrl({...preview,releaseUrl:preview.releaseUrl.replace('run9','run0')})).toBeNull();
+    expect(trustedReleaseUrl({...preview,releaseUrl:preview.releaseUrl+'?tracking=1'})).toBeNull();
+    expect(trustedReleaseDownload(preview,{...preview.downloads[0],name:'MirroLeap_5.2.6_x64-setup.exe'})).toBeNull();
+    expect(trustedReleaseDownload(preview,{...preview.downloads[0],kind:'portable'})).toBeNull();
+    expect(trustedReleaseDownload(preview,{...preview.downloads[0],url:preview.downloads[0].url.replace('hq-preview-v5.2.6-run9','v5.2.6')})).toBeNull();
+    expect(trustedReleaseUrl({...preview,channel:'stable'})).toBeNull();
+  });
+
   it('offers understandable error guidance in Chinese and English', () => {
     expect(explainUpdateError('rate_limited',true)).toMatch(/请求次数/);
     expect(explainUpdateError('timeout',false)).toMatch(/timed out/i);

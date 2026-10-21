@@ -44,6 +44,8 @@ pub struct AppUpdateInfo {
     pub changelog: String,
     pub downloads: Vec<ReleaseDownload>,
     pub prerelease: bool,
+    /// stable or hq_preview. Only HQ binaries can select the HQ channel.
+    pub channel: String,
 }
 
 fn stable_version(input: &str) -> Option<[u32; 3]> {
@@ -130,6 +132,7 @@ fn interpret_release(current: &str, release: &Value) -> Result<AppUpdateInfo, St
         changelog,
         downloads: official_assets(release, tag, version),
         prerelease: release.get("prerelease").and_then(Value::as_bool).unwrap_or(false),
+        channel:"stable".into(),
     })
 }
 
@@ -179,6 +182,96 @@ fn signed_manifest_url(version: &str) -> Result<reqwest::Url, String> {
     reqwest::Url::parse(&format!(
         "{ASSET_URL_BASE}v{version}/latest.json"
     )).map_err(|e| format!("Invalid official update endpoint: {e}"))
+}
+
+/// Strictly separate the HQ Preview channel from the stable vX.Y.Z
+/// channel. Version numbers compare normally, but tags additionally embed
+/// an Actions run number so repeated experimental builds do not collide.
+const HQ_PREVIEW_TAG_PREFIX:&str="hq-preview-v";
+const HQ_PREVIEW_SETUP_PREFIX:&str="MirroLeap.HQ.Preview_";
+fn parse_hq_preview_tag(tag:&str)->Option<(&str,[u32;3],u64)> {
+    let (version,run)=tag.strip_prefix(HQ_PREVIEW_TAG_PREFIX)?.rsplit_once("-run")?;
+    let numbers=stable_version(version)?;
+    if run.is_empty() || run.starts_with('0') ||
+       !run.bytes().all(|c|c.is_ascii_digit()) {return None;}
+    let run_number=run.parse::<u64>().ok().filter(|n|*n>0)?;
+    Some((version,numbers,run_number))
+}
+
+fn hq_release_asset(release:&Value,tag:&str,kind:&str,name:&str)
+    ->Option<ReleaseDownload> {
+    let url=format!("{ASSET_URL_BASE}{tag}/{name}");
+    let entry=release.get("assets")?.as_array()?.iter().take(40).find(|entry| {
+        entry.get("name").and_then(Value::as_str)==Some(name) &&
+        entry.get("browser_download_url").and_then(Value::as_str)==Some(url.as_str())
+    })?;
+    let size=entry.get("size")?.as_u64()
+        .filter(|n|*n>0 && *n<500*1024*1024)?;
+    let sha256=entry.get("digest").and_then(Value::as_str)
+        .and_then(|s|s.strip_prefix("sha256:"))
+        .filter(|s|s.len()==64 && s.bytes().all(|c|c.is_ascii_hexdigit()))
+        .map(|s|s.to_ascii_lowercase());
+    Some(ReleaseDownload{
+        kind:kind.to_string(),name:name.to_string(),url,size,sha256,
+    })
+}
+fn signed_hq_preview_release(release:&Value)->Option<([u32;3],u64,String)> {
+    if release.get("prerelease").and_then(Value::as_bool)!=Some(true) ||
+       release.get("draft").and_then(Value::as_bool)!=Some(false) {
+        return None;
+    }
+    let tag=release.get("tag_name")?.as_str()?;
+    let (version,numbers,run)=parse_hq_preview_tag(tag)?;
+    let setup=format!("{HQ_PREVIEW_SETUP_PREFIX}{version}_x64-setup.exe");
+    let signature=format!("{setup}.sig");
+    // Both the signed executable and its version-specific manifest must exist
+    // before ANY update notification. An unsigned HQ test build is not eligible.
+    for name in [setup.as_str(),signature.as_str(),"latest.json","SHA256SUMS.txt"] {
+        hq_release_asset(release,tag,"internal",name)?;
+    }
+    Some((numbers,run,tag.to_string()))
+}
+
+fn interpret_hq_preview_releases(current:&str,data:&Value)
+    ->Result<AppUpdateInfo,String> {
+    let installed=stable_version(current).ok_or("invalid_local_version")?;
+    let list=data.as_array().ok_or("invalid_release")?;
+    let (latest,_,tag,release)=list.iter().take(30)
+        .filter_map(|r|{
+            let (version,run,tag)=signed_hq_preview_release(r)?;
+            Some((version,run,tag,r))
+        })
+        .max_by_key(|(version,run,_,_)|(*version,*run))
+        .ok_or("release_unavailable")?;
+    let (version,_,_)=parse_hq_preview_tag(&tag).ok_or("invalid_release")?;
+    let filenames=[
+        ("exe",format!("{HQ_PREVIEW_SETUP_PREFIX}{version}_x64-setup.exe")),
+        ("msi",format!("{HQ_PREVIEW_SETUP_PREFIX}{version}_x64_en-US.msi")),
+        ("checksums","SHA256SUMS.txt".to_string()),
+    ];
+    let downloads=filenames.iter().filter_map(|(kind,name)|
+        hq_release_asset(release,&tag,kind,name)).collect::<Vec<_>>();
+    let published_at=release.get("published_at").and_then(Value::as_str)
+        .filter(|s|s.len()<=40 && s.bytes().all(|c|c.is_ascii_digit() ||
+            matches!(c,b'-'|b':'|b'.'|b'T'|b'Z'|b'+')))
+        .map(String::from);
+    let status=if latest>installed {"update_available"}
+        else if latest==installed {"up_to_date"} else {"ahead"};
+    Ok(AppUpdateInfo{
+        current_version:current.to_string(),latest_version:version.to_string(),
+        status:status.to_string(),release_url:format!("{RELEASE_URL_BASE}{tag}"),
+        published_at,downloads,prerelease:true,channel:"hq_preview".to_string(),
+        changelog:release.get("body").and_then(Value::as_str).unwrap_or("")
+            .chars().take(MAX_CHANGELOG_CHARS).collect(),
+    })
+}
+fn signed_hq_preview_manifest_url(release_url:&str,version:&str)
+    ->Result<reqwest::Url,String> {
+    let tag=release_url.strip_prefix(RELEASE_URL_BASE).ok_or("invalid_hq_url")?;
+    let (tag_version,_,_)=parse_hq_preview_tag(tag).ok_or("invalid_hq_tag")?;
+    if tag_version!=version {return Err("hq_release_version_mismatch".into());}
+    reqwest::Url::parse(&format!("{ASSET_URL_BASE}{tag}/latest.json"))
+        .map_err(|_|"invalid_hq_manifest".into())
 }
 
 /// Explicit opt-in preview channel. The stable check above remains unchanged
@@ -241,21 +334,51 @@ pub async fn check_mirroleap_update(
     app_handle: AppHandle,
 ) -> Result<AppUpdateInfo, String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
-    if isolated_hq_preview() {return Err("HQ preview does not join stable automatic updates".into());}
     let data = fetch_release_json(ALL_RELEASES_API).await?;
     let local = app_handle.package_info().version.to_string();
-    interpret_latest_release(&local, &data)
+    if isolated_hq_preview() {
+        interpret_hq_preview_releases(&local,&data)
+    } else {
+        interpret_latest_release(&local, &data)
+    }
 }
 
 /// Native browser handoff, intentionally restricted to exact official release
 /// assets instead of arbitrary URLs. WebView2 <a target=_blank> alone cannot
 /// reliably open external URLs on Windows.
 #[tauri::command]
-pub fn open_official_release_link(
+pub async fn open_official_release_link(
     window: Window, app_handle: AppHandle, version: String, kind: String,
 ) -> Result<(), String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
-    let path = official_release_browser_url(&version, &kind)?;
+    let path=if isolated_hq_preview() {
+        if kind=="list" {
+            "https://github.com/slobys/MirroLeap/releases".to_string()
+        } else {
+            if stable_version(&version).is_none() {return Err("Invalid HQ Preview version".into());}
+            // Re-query the signed-only HQ channel. No arbitrary browser URLs
+            // or older release aliases are trusted from the WebView.
+            let local=app_handle.package_info().version.to_string();
+            let info=interpret_hq_preview_releases(
+                &local,&fetch_release_json(ALL_RELEASES_API).await?
+            )?;
+            if info.latest_version!=version {
+                return Err("HQ Preview release changed: recheck for updates".into());
+            }
+            let tag=info.release_url.strip_prefix(RELEASE_URL_BASE)
+                .ok_or("Invalid HQ Preview release URL")?;
+            if parse_hq_preview_tag(tag).is_none() {return Err("Invalid HQ Preview tag".into());}
+            match &kind[..] {
+                "page"=>info.release_url.clone(),
+                "exe"|"msi"|"checksums"=>info.downloads.iter()
+                    .find(|a|a.kind==kind).map(|a|a.url.clone())
+                    .ok_or("HQ Preview asset unavailable")?,
+                _=>return Err("Unsupported HQ Preview release asset".into()),
+            }
+        }
+    } else {
+        official_release_browser_url(&version, &kind)?
+    };
     use tauri_plugin_shell::ShellExt;
     #[allow(deprecated)]
     app_handle.shell().open(path, None)
@@ -371,14 +494,16 @@ pub async fn download_official_release_asset(
     window: Window, app_handle: AppHandle, version: String, kind: String,
 ) -> Result<String, String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
-    if isolated_hq_preview() {
-        return Err("HQ preview cannot download stable installers".into());
-    }
     if !release_download_kind(&kind) || stable_version(&version).is_none() ||
         version.starts_with('v') { return Err("Untrusted release download request".into()); }
     let _busy = ManualDownloadGuard::acquire()?;
     let local = app_handle.package_info().version.to_string();
-    let info = interpret_latest_release(&local, &fetch_release_json(ALL_RELEASES_API).await?)?;
+    let releases=fetch_release_json(ALL_RELEASES_API).await?;
+    let info=if isolated_hq_preview() {
+        interpret_hq_preview_releases(&local,&releases)?
+    } else {
+        interpret_latest_release(&local,&releases)?
+    };
     if info.status != "update_available" || info.latest_version != version {
         return Err("Official release changed; check for updates again".into());
     }
@@ -450,7 +575,6 @@ pub async fn download_official_release_asset(
 pub async fn install_signed_update(
     window: Window, app_handle: AppHandle, version: String,
 ) -> Result<(), String> {
-    if isolated_hq_preview() {return Err("HQ preview cannot install stable updates".into());}
     if window.label() != "main" { return Err("main_window_only".into()); }
     #[cfg(not(target_os = "windows"))]
     { let _ = (app_handle, version); return Err("Signed one-click updates currently require Windows NSIS".into()); }
@@ -470,13 +594,22 @@ pub async fn install_signed_update(
         }
         // Re-query GitHub immediately before installation. Never trust a
         // version supplied by WebView2 alone or a GitHub attachment URL.
-        let official = interpret_latest_release(
-            &local_version, &fetch_release_json(ALL_RELEASES_API).await?
-        )?;
+        let releases=fetch_release_json(ALL_RELEASES_API).await?;
+        // An HQ Preview is not allowed to update to an ordinary stable build,
+        // even if the stable release version is numerically newer.
+        let official=if isolated_hq_preview() {
+            interpret_hq_preview_releases(&local_version,&releases)?
+        } else {
+            interpret_latest_release(&local_version,&releases)?
+        };
         if official.latest_version != version || official.status != "update_available" {
             return Err("Official release changed: check for updates again".into());
         }
-        let endpoint = signed_manifest_url(&version)?;
+        let endpoint=if isolated_hq_preview() {
+            signed_hq_preview_manifest_url(&official.release_url,&version)?
+        } else {
+            signed_manifest_url(&version)?
+        };
         let update = app_handle.updater_builder()
             .endpoints(vec![endpoint]).map_err(|e|e.to_string())?
             .build().map_err(|e|e.to_string())?
@@ -512,10 +645,12 @@ pub async fn check_mirroleap_preview_update(
     app_handle: AppHandle,
 ) -> Result<AppUpdateInfo, String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
-    if isolated_hq_preview() {return Err("Use GitHub Releases to update an isolated HQ preview".into());}
-    let data = fetch_release_json(PREVIEW_RELEASES_API).await?;
     let local = app_handle.package_info().version.to_string();
-    interpret_preview_releases(&local, &data)
+    if isolated_hq_preview() {
+        interpret_hq_preview_releases(&local,&fetch_release_json(ALL_RELEASES_API).await?)
+    } else {
+        interpret_preview_releases(&local,&fetch_release_json(PREVIEW_RELEASES_API).await?)
+    }
 }
 
 #[cfg(test)]
@@ -600,6 +735,77 @@ mod tests {
         for bad in ["","page","../../evil","exe.exe","https://evil.invalid"] {
             assert!(!release_download_kind(bad));
         }
+    }
+
+    fn hq_fixture(version:&str,run:u64)->Value {
+        let tag=format!("hq-preview-v{version}-run{run}");
+        let exe=format!("MirroLeap.HQ.Preview_{version}_x64-setup.exe");
+        let msi=format!("MirroLeap.HQ.Preview_{version}_x64_en-US.msi");
+        let asset=|name:&str,size:u64|json!({
+            "name":name,
+            "browser_download_url":format!("{ASSET_URL_BASE}{tag}/{name}"),
+            "size":size,
+        });
+        json!({
+            "tag_name":tag,"draft":false,"prerelease":true,
+            "published_at":"2026-10-21T08:00:00Z","body":"HQ Preview only",
+            "assets":[
+                asset(&exe,20_000_000),asset(&format!("{exe}.sig"),400),
+                asset(&msi,24_000_000),asset("latest.json",900),
+                asset("SHA256SUMS.txt",225)
+            ]
+        })
+    }
+
+    #[test]
+    fn hq_preview_tags_must_be_canonical_and_never_refer_to_stable_releases() {
+        assert!(parse_hq_preview_tag("hq-preview-v5.2.6-run9").is_some());
+        for bad in [
+            "", "v5.2.6","hq-preview-v5.2.6","hq-preview-v5.2.6-run0",
+            "hq-preview-v5.2.6-run01","hq-preview-v5.2.06-run9",
+            "hq-preview-v5.2.6-run9/../../stable",
+            "hq-preview-v5.2.6-run9?download=1",
+            "hq-preview-v5.2.6-run-1"
+        ] { assert!(parse_hq_preview_tag(bad).is_none(),"{bad}"); }
+        assert!(signed_hq_preview_manifest_url(
+            "https://github.com/slobys/MirroLeap/releases/tag/v5.2.6","5.2.6").is_err());
+        assert_eq!(signed_hq_preview_manifest_url(
+            "https://github.com/slobys/MirroLeap/releases/tag/hq-preview-v5.2.6-run9",
+            "5.2.6").unwrap().as_str(),
+            "https://github.com/slobys/MirroLeap/releases/download/hq-preview-v5.2.6-run9/latest.json");
+        assert!(signed_hq_preview_manifest_url(
+            "https://github.com/slobys/MirroLeap/releases/tag/hq-preview-v5.2.6-run9",
+            "5.2.7").is_err());
+    }
+
+    #[test]
+    fn only_newest_completely_signed_hq_release_is_eligible_for_updates() {
+        let good=hq_fixture("5.2.6",9);
+        let next=hq_fixture("5.2.6",10);
+        let mut forged=hq_fixture("5.2.8",11);
+        forged["assets"][1]["browser_download_url"]=
+            json!("https://attacker.invalid/forged.sig");
+        let mut unsigned=hq_fixture("5.2.9",12);
+        unsigned["assets"][3]["size"]=json!(0);
+        let mut draft=hq_fixture("5.3.0",13);
+        draft["draft"]=json!(true);
+        let stable=signed_release("9.0.0",false,false);
+        let info=interpret_hq_preview_releases("5.2.5",
+            &json!([forged,stable,draft,good,next,unsigned])).unwrap();
+        assert_eq!(info.latest_version,"5.2.6");
+        assert_eq!(info.channel,"hq_preview");
+        assert_eq!(info.status,"update_available");
+        assert_eq!(info.release_url,
+            "https://github.com/slobys/MirroLeap/releases/tag/hq-preview-v5.2.6-run10");
+        assert!(info.downloads.iter().any(|d|d.kind=="exe" && d.name.starts_with("MirroLeap.HQ.")));
+        assert!(info.downloads.iter().all(|d|!d.url.contains("/download/v")));
+        assert_eq!(interpret_hq_preview_releases("5.2.6",&json!([next]))
+            .unwrap().status,"up_to_date");
+        let mut old_unsigned=hq_fixture("5.2.5",5);
+        old_unsigned["assets"][1]["size"]=json!(0);
+        assert!(interpret_hq_preview_releases("5.2.4",
+            &json!([old_unsigned])).is_err(),
+            "Unsigned earlier previews must never be offered as signed updates");
     }
 
     fn sample_release() -> Value {

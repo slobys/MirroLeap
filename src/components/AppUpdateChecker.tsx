@@ -189,9 +189,13 @@ export default function AppUpdateChecker({
       <span className="ml-muted text-xs">{zh ? '当前安装版本' : 'Installed version'}：v{version}</span>
     </div>
     <p className="ml-muted text-xs leading-relaxed">
-      {zh
-        ? '一键检查最新官方发布版本（包括测试版）。NSIS EXE 安装版可进行签名验证的一键升级。'
-        : 'One click checks the newest signed official release, including previews. NSIS EXE installs support signature-verified in-app updates.'}
+      {info?.channel === 'hq_preview'
+        ? (zh
+          ? '独立 HQ Preview 更新通道，只识别已签名的 HQ 测试版。NSIS EXE 安装版可一键更新；MSI 仍需手动升级，正式版不受影响。'
+          : 'Isolated HQ Preview channel: only signed HQ preview releases. NSIS EXE supports one-click updates; MSI stays manual and stable installs are untouched.')
+        : (zh
+          ? '一键检查最新官方发布版本（包括测试版）。NSIS EXE 安装版可进行签名验证的一键升级。'
+          : 'One click checks the newest signed official release, including previews. NSIS EXE installs support signature-verified in-app updates.')}
     </p>
     <div className="flex flex-wrap items-center gap-3">
       <button type="button" onClick={() => void check()} disabled={pending}
