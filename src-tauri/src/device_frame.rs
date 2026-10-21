@@ -764,6 +764,16 @@ fn place_toolbar(toolbar: &WebviewWindow, overlay: &WebviewWindow, rect: ScreenR
     position_above(hwnd, shell, rect)
 }
 
+/// The previous frame follower can exit AFTER a decoder/audio fallback has
+/// created a replacement HWND with the same logical device label. It must
+/// never clear the new frame's first-paint handshake or native lens state.
+fn frame_was_replaced(app:&AppHandle,device:&str,former:&WebviewWindow)->bool {
+    app.get_webview_window(&label(device))
+        .and_then(|current|current.hwnd().ok())
+        .map(|current|former.hwnd().ok()!=Some(current))
+        .unwrap_or(false)
+}
+
 async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar: WebviewWindow) {
     let mut shell_visible = false;
     let mut controls_visible = false;
@@ -1333,12 +1343,15 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         }
     }
 
-    if let Ok(mut set) = ink_sessions().lock() { set.remove(&device); }
-    if let Ok(mut set) = ink_ready().lock() { set.remove(&device); }
-    if let Ok(mut ready)=frame_first_paints().lock(){ready.remove(&label(&device));}
-    update_presentation_mode(&app, &device, "off");
-    cancel_live_zoom(&device);
-    disable_creator_clicks(&app,&device);
+    let superseded=frame_was_replaced(&app,&device,&overlay);
+    if !superseded {
+        if let Ok(mut set) = ink_sessions().lock() { set.remove(&device); }
+        if let Ok(mut set) = ink_ready().lock() { set.remove(&device); }
+        if let Ok(mut ready)=frame_first_paints().lock(){ready.remove(&label(&device));}
+        update_presentation_mode(&app, &device, "off");
+        cancel_live_zoom(&device);
+        disable_creator_clicks(&app,&device);
+    }
 
     let _ = overlay.set_ignore_cursor_events(true);
     if let Some(pid) = clipped_pid {
@@ -1346,8 +1359,10 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             reset_native_corner_clip(hwnd);
         }
     }
-    let _ = toolbar.close();
-    let _ = overlay.close();
+    if !superseded {
+        let _ = toolbar.close();
+        let _ = overlay.close();
+    }
 }
 
 fn device_for_controls(app: &AppHandle, caller: &tauri::Window) -> Result<String, String> {
@@ -2404,6 +2419,14 @@ pub fn start(
         app, shell_name, WebviewUrl::App("frame.html".into())
     )
         .on_page_load(move |view, payload| {
+            // An old WebView2 may deliver a late load event after its
+            // replacement has taken over this label. Never reset the new
+            // frame's readiness or its active magnifier from that event.
+            let superseded=view.app_handle().get_webview_window(&label(&page_device))
+                .and_then(|active|active.hwnd().ok())
+                .map(|active|view.hwnd().ok()!=Some(active))
+                .unwrap_or(false);
+            if superseded {return;}
             match payload.event() {
                 PageLoadEvent::Started => {
                     if let Ok(mut ready) = ink_ready().lock() { ready.remove(&page_device); }

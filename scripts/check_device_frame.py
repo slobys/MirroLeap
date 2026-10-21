@@ -219,6 +219,9 @@ assert "frame_first_paints().lock()" in backend
 assert "PageLoadEvent::Started" in backend and "PageLoadEvent::Finished" in backend
 assert "if !frame_presentation_ready(&device)" in backend
 assert backend.index("if !frame_presentation_ready(&device)") < backend.index("if overlay.show().is_ok()")
+assert 'fn frame_was_replaced(' in backend
+assert 'let superseded=frame_was_replaced(&app,&device,&overlay)' in backend
+assert 'if superseded {return;}' in backend
 assert ".background_color(tauri::window::Color(0,0,0,0))" in backend
 assert "overlay.set_decorations(false)" in backend
 
