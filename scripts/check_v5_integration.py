@@ -142,7 +142,7 @@ assert "canApplyMirrorVideo" in hooks
 assert "applyMirrorResolution" in hooks
 assert "restartMirrorVideoStream(previous, launch" in hooks
 assert "stop_scrcpy" in hooks and "run_scrcpy" in hooks
-assert "src/utils/streamRestart.test.ts" in [str(p.relative_to(root)) for p in (root / "src/utils").glob("*.test.ts")]
+assert "src/utils/streamRestart.test.ts" in [p.relative_to(root).as_posix() for p in (root / "src/utils").glob("*.test.ts")]
 assert "recording in progress" in read("src/utils/resolutionSwitch.ts").lower()
 assert "isSwitchingResolution" in home and "isSwitchingResolution" in panel
 
