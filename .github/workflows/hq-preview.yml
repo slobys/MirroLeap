@@ -52,7 +52,7 @@ jobs:
             'hq_protocol::tests','hq_bridge_windows::tests','hq_geometry::tests',
             'hq_reference_render::tests','hq_pipeline::tests',
             'hq_cpu_lens_windows::tests','native_live_lens::tests',
-            'native_click_effect::tests'
+            'native_click_effect::tests','hq_runtime::tests'
           )
           foreach ($test in $tests) {
             cargo test --locked --manifest-path src-tauri/Cargo.toml --lib $test
@@ -217,6 +217,41 @@ jobs:
         run: |
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_cpu_lens_windows::tests
           if ($LASTEXITCODE -ne 0) { throw 'Native BGRA round-window smoke failed' }
+      - name: Make separate opt-in HQ core ZIP with SHA256 PINNED INTO the small app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content src-tauri/tauri.hq-preview.conf.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid HQ Preview version' }
+          $tag = "hq-preview-v${version}-run${{ github.run_number }}"
+          $coreDir = 'src-tauri/hq-preview-core/scrcpy-hq-bin'
+          $archiveDir = 'hq-optional-core'
+          $filename = 'MirroLeap.HQ.Core_v1_x64.zip'
+          New-Item -ItemType Directory -Force $archiveDir | Out-Null
+          $zip = Join-Path $archiveDir $filename
+          Compress-Archive -LiteralPath $coreDir -DestinationPath $zip -CompressionLevel Optimal
+          if (-not (Test-Path $zip)) { throw 'Optional HQ runtime ZIP not produced' }
+          Add-Type -AssemblyName System.IO.Compression
+          $input = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path)
+          try {
+            $names = @($input.Entries | ForEach-Object { $_.FullName.Replace('\','/') })
+            foreach ($required in @('scrcpy-hq-bin/scrcpy.exe','scrcpy-hq-bin/adb.exe','scrcpy-hq-bin/scrcpy-server')) {
+              if ($names -notcontains $required) { throw "Optional HQ ZIP missing $required" }
+            }
+          } finally { $input.Dispose() }
+          $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+          $url = "https://github.com/${{ github.repository }}/releases/download/$tag/$filename"
+          Add-Content -Path $env:GITHUB_ENV -Value "MIRROLEAP_HQ_CORE_SHA256=$sha"
+          Add-Content -Path $env:GITHUB_ENV -Value "MIRROLEAP_HQ_CORE_URL=$url"
+          $mb = [math]::Round((Get-Item $zip).Length / 1MB, 2)
+          Write-Host "Optional HQ ZIP staged as a SEPARATE $mb MiB release asset; SHA256 baked into the app"
+      - name: Verify optional HQ ZIP auth and archive guards in Windows Rust
+        shell: pwsh
+        env:
+          MIRROLEAP_HQ_PREVIEW: '1'
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_runtime::tests
+          if ($LASTEXITCODE -ne 0) { throw 'Optional HQ downloader must pass strict SHA256/path gating' }
       - name: Build the isolated preview executable before bundling
         env:
           MIRROLEAP_HQ_PREVIEW: '1'
@@ -231,7 +266,7 @@ jobs:
         run: |
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_click_effect::tests::layered_click_is_visible_in_real_desktop_capture -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Native click ripple did not appear in an actual composited Windows desktop capture' }
-      - name: Build SIDE-BY-SIDE HQ Preview EXE and MSI (no stable updater)
+      - name: Build LIGHTWEIGHT SIDE-BY-SIDE HQ Preview EXE and MSI
         env:
           MIRROLEAP_HQ_PREVIEW: '1'
         run: npm run tauri build -- --config src-tauri/tauri.hq-preview.conf.json
@@ -241,23 +276,29 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exes = @(Get-ChildItem src-tauri/target/release/bundle/nsis -Filter '*.exe' -File)
           $msis = @(Get-ChildItem src-tauri/target/release/bundle/msi -Filter '*.msi' -File)
-          # Fail closed if the lean build is not measurably smaller than 5.2.5.
-          # Preserve core DLLs; do not claim compression by dropping binaries.
-          $baseExe = 50710368
-          $baseMsi = 70544174
-          if ($exes.Count -eq 1 -and $exes[0].Length -ge $baseExe) {
-            throw 'HQ Preview EXE did not shrink versus 5.2.5; inspect runtime payload before releasing'
+          # v5.2.3 EXE was 4.92 MB. Keep this in the same ~5 MB class:
+          # patched scrcpy/FFmpeg/SDL are always separate optional assets.
+          if ($exes.Count -eq 1 -and $exes[0].Length -gt 9000000) {
+            throw 'Lightweight EXE exceeds 9 MB: HQ runtime leaked into installer'
           }
-          if ($msis.Count -eq 1 -and $msis[0].Length -ge $baseMsi) {
-            throw 'HQ Preview MSI did not shrink versus 5.2.5; inspect runtime payload before releasing'
+          if ($msis.Count -eq 1 -and $msis[0].Length -gt 12000000) {
+            throw 'Lightweight MSI exceeds 12 MB: HQ runtime leaked into installer'
+          }
+          $config = Get-Content src-tauri/tauri.hq-preview.conf.json -Raw | ConvertFrom-Json
+          if ($config.bundle.resources) {
+            throw 'HQ binaries must be optional ZIP assets, NEVER installer resources'
           }
           if ($exes.Count -ne 1 -or $msis.Count -ne 1) {
             throw "Expected one HQ Preview EXE and one MSI, found $($exes.Count) / $($msis.Count)"
           }
           $out = 'hq-preview-release'
           New-Item -ItemType Directory -Force $out | Out-Null
+          $core = Get-Item 'hq-optional-core/MirroLeap.HQ.Core_v1_x64.zip'
+          if (-not $core -or $core.Length -le 1000000) {
+            throw 'Separate verified HQ runtime asset missing'
+          }
           $hashes = @()
-          foreach ($artifact in @($exes[0], $msis[0])) {
+          foreach ($artifact in @($exes[0], $msis[0], $core)) {
             # GitHub Release normalizes spaces in uploaded asset names to dots.
             # Stage using the FINAL published name before hashing so users can
             # run sha256sum -c against their actual downloaded files.

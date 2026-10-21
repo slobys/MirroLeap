@@ -2602,14 +2602,15 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     let mut exe_path = get_binary_path("scrcpy", config.scrcpy_path.clone());
     #[cfg(target_os="windows")]
     if config.hq_lens.unwrap_or(false) {
-        if let Ok(resources)=app_handle.path().resource_dir() {
-            let bundled=resources.join("scrcpy-hq-bin").join("scrcpy.exe");
-            if bundled.is_file() {exe_path=bundled.to_string_lossy().into_owned();}
-        }
+        // HQ needs a private patched binary. It is no longer inside the
+        // light ~5 MB installer; fetch only when explicitly requested. A
+        // previously enabled user setting also authorizes repair/download.
+        // Cached runtime survives signed app updates in LocalAppData.
+        let hq_exe=crate::hq_runtime::ensure(&app_handle).await?;
+        exe_path=hq_exe.to_string_lossy().into_owned();
     }
-    // On packaged HQ Preview, always prefer the deliberately shipped patched
-    // core to the persisted official scrcpyPath. Standalone developers may
-    // choose their own patched folder when no preview core is bundled.
+    // Ordinary mirroring retains the existing configured/official core and
+    // does not allocate HQ memory, download assets or modify any DLL.
     #[cfg(not(target_os="windows"))]
     if config.hq_lens.unwrap_or(false) {
         return Err("HQ decoded-frame preview requires Windows".into());
@@ -3723,6 +3724,20 @@ pub fn device_frame_capture_ack(
         let _ = (window, token, png, orientation, strokes, error);
         Err("Annotated screenshots require a Windows phone frame".into())
     }
+}
+
+/// Explicit HQ opt-in from the main settings panel: only this command may
+/// download the optional pinned scrcpy 4.0 experimental runtime. Ordinary
+/// projection and automatic app update never download this optional module.
+#[tauri::command]
+pub async fn ensure_hq_runtime(
+    window:Window,app_handle:tauri::AppHandle,
+)->Result<bool,String> {
+    require_main_window(&window)?;
+    #[cfg(target_os="windows")]
+    {crate::hq_runtime::ensure(&app_handle).await.map(|_|true)}
+    #[cfg(not(target_os="windows"))]
+    {let _=app_handle;Err("HQ optional decoder requires Windows".into())}
 }
 
 /// Read-only compositor diagnostic, authorised by the active phone toolbar

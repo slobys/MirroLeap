@@ -15,6 +15,8 @@ mod hq_bridge_windows;
 #[cfg(target_os = "windows")]
 #[allow(dead_code)]
 mod hq_cpu_lens_windows;
+#[cfg(target_os = "windows")]
+mod hq_runtime;
 mod app_update;
 mod android_rotation;
 mod capture_compositor;
@@ -166,6 +168,7 @@ pub fn run() {
             commands::stop_scrcpy,
             commands::device_frame_control,
             commands::get_mirrocreator_lens_status,
+            commands::ensure_hq_runtime,
             commands::get_app_install_kind,
             commands::open_official_community_link,
             commands::device_frame_ack,

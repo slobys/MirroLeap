@@ -128,8 +128,8 @@ phone=read("src-tauri/src/device_frame.rs")
 ui=read("src/components/DecoderPerformance.tsx")
 assert "hq_cpu_lens_windows::HqDecodedCpuLens" in native
 assert "start_with_hq(device,owner)" in phone
-assert "hqLens" in ui and "Experimental 2.35× decoded-frame lens" in ui
-assert "CPU/GDI preview, not D3D11 GPU" in ui
+assert "hqLens" in ui and "Optional 2.35× HQ lens" in ui
+assert "CPU/GDI decoded-frame preview, not final D3D11" in ui
 assert "hqlens" not in producer.lower()
 
 
@@ -153,6 +153,20 @@ assert "create_hq_session(&exe_path,&config).await?" in app
 assert "HQ_VERSION_MARKER" in app and "hq_lens.unwrap_or(false)" in app
 assert 'MIRROLEAP_HQ_TOKEN' not in read("src/hooks/useScrcpy.ts")
 assert "MirroLeap HQ decoded-frame v1 (experimental)" in patch_script
+# Lite-app invariant: 5MB EXE/MSI, separate SHA256-pinned HQ ZIP downloaded
+# only on explicit opt-in, never during app startup or ordinary mirroring.
+runtime=read("src-tauri/src/hq_runtime.rs")
+preview_config=read("src-tauri/tauri.hq-preview.conf.json")
+workflow=read(".github/workflows/hq-preview.yml")
+assert 'mod hq_runtime;' in lib
+assert '"hq-preview-core/scrcpy-hq-bin"' not in preview_config
+assert 'MIRROLEAP_HQ_CORE_SHA256' in runtime
+assert 'MIRROLEAP_HQ_CORE_URL' in runtime
+assert 'validated_archive_entry' in runtime and 'MAX_EXTRACT' in runtime
+assert 'ensure_hq_runtime' in app and "crate::hq_runtime::ensure" in app
+assert "mirroleap-hq-core-progress" in runtime
+assert 'MirroLeap.HQ.Core_v1_x64.zip' in workflow
+assert 'Lightweight EXE exceeds 9 MB' in workflow
 assert "start_scrcpy" not in producer
 assert "http://" not in producer and "https://" not in producer
 assert "screencap" not in producer

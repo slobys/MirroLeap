@@ -1,12 +1,9 @@
 {
   "productName": "MirroLeap HQ Preview",
-  "version": "5.2.6",
+  "version": "5.2.7",
   "identifier": "com.slobys.mirroleap-hq-preview",
   "bundle": {
-    "createUpdaterArtifacts": false,
-    "resources": {
-      "hq-preview-core/scrcpy-hq-bin": "scrcpy-hq-bin"
-    }
+    "createUpdaterArtifacts": false
   },
   "plugins": {
     "updater": {

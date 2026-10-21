@@ -1,3 +1,6 @@
+import {useState} from 'react';
+import {invoke} from '@tauri-apps/api/core';
+import {listen} from '@tauri-apps/api/event';
 import { Activity, Cpu, Gauge, ShieldCheck } from 'lucide-react';
 import type { ScrcpyConfig, VideoDecoderSupport } from '../hooks/useScrcpy';
 import { useI18n } from '../i18n';
@@ -23,6 +26,36 @@ const DECODER_LABELS: Record<string, [string, string]> = {
  */
 export default function DecoderPerformance({config, setConfig, support, observedMode, running}: Props) {
   const {locale} = useI18n();
+  const [hqBusy,setHqBusy]=useState(false);
+  const [hqPercent,setHqPercent]=useState<number|null>(null);
+  const [hqError,setHqError]=useState<string|null>(null);
+  const onHqToggle=async (checked:boolean) => {
+    if (!checked) {
+      setHqError(null);
+      setConfig({...config,hqLens:false});
+      return;
+    }
+    // The ordinary ~5 MB installer contains ZERO experimental FFmpeg/SDL
+    // binaries. Network/installation occurs only after this explicit opt-in.
+    setHqBusy(true);
+    setHqError(null);
+    setHqPercent(null);
+    let unlisten:()=>void=()=>{};
+    try {
+      unlisten=await listen<{percent:number;stage:string}>(
+        'mirroleap-hq-core-progress',({payload})=>{
+          if (Number.isFinite(payload?.percent)) setHqPercent(payload.percent);
+        });
+      await invoke('ensure_hq_runtime');
+      setConfig({...config,hqLens:true});
+    } catch(error) {
+      setHqError(String(error));
+    } finally {
+      unlisten();
+      setHqBusy(false);
+      setHqPercent(null);
+    }
+  };
   const zh = locale.startsWith('zh');
   const supported = Boolean(support?.supportsHwdec);
   const modes = supported ? support?.modes || [] : [];
@@ -95,13 +128,21 @@ export default function DecoderPerformance({config, setConfig, support, observed
       <label className="inline-flex items-center gap-2 text-xs">
         <input type="checkbox" className="accent-primary"
           checked={Boolean(config.hqLens)}
-          onChange={(event) => setConfig({...config,hqLens:event.target.checked})}/>
-        {zh ? '实验性 2.35× 原始帧高清放大（启动下次投屏时启用）' :
-          'Experimental 2.35× decoded-frame lens (next session)'}
+          disabled={hqBusy}
+          onChange={(event) => void onHqToggle(event.target.checked)}/>
+        {zh ? '可选 2.35× 高清放大（首次开启才下载独立核心）' :
+          'Optional 2.35× HQ lens (downloads core on first opt-in)'}
       </label>
+      {hqBusy && <p role="status" className="text-xs ml-muted">
+        {zh ? '正在校验并安装可选 HQ 核心' : 'Installing and verifying optional HQ core'}
+        {hqPercent!==null ? ` · ${hqPercent}%` : '…'}
+      </p>}
+      {hqError && <p role="alert" className="text-xs text-red-600">
+        {zh ? '高清核心暂时无法启用：' : 'HQ core not enabled: '}{hqError}
+      </p>}
       {config.hqLens && <p role="note" className="text-xs text-amber-600">
-        {zh ? '仅支持打包的 HQ 预览核心或手动选定的带 HQ 标识 scrcpy 4.0。需要先启动投屏，再从悬浮栏点击实时放大。当前是 CPU/GDI 预览，不是 D3D11 GPU；无有效原始帧时回退旧镜头，未完成真机视频验收。' :
-          'Requires the bundled HQ preview core or an explicitly selected HQ-patched scrcpy 4.0. Start mirroring, then choose live zoom in the hover rail. This is CPU/GDI preview, not D3D11 GPU; it falls back without valid source frames and has not passed Android video acceptance tests.'}
+        {zh ? 'HQ 核心已就绪，普通投屏仍使用轻量默认核心。下次启动投屏后，从悬浮栏开启实时放大。HQ 当前为 CPU/GDI 原始帧预览，并非最终 D3D11 GPU 版本；无有效帧时会回退旧镜头。' :
+          'Optional HQ core ready. Normal mirroring stays lightweight. Start a new mirror and enable live zoom in the hover rail. This is CPU/GDI decoded-frame preview, not final D3D11; it falls back if frames are unavailable.'}
       </p>}
     </>}
     {running && <p className="ml-muted text-xs">
