@@ -184,11 +184,14 @@ assert 'onHqToggle' not in read('src/components/DecoderPerformance.tsx')
 assert '"hq-preview-core/scrcpy-hq-bin"' not in mirroleap_config
 assert '"productName": "MirroLeap"' in mirroleap_config
 assert '"identifier": "com.kb.scrcpy-gui-v3"' in mirroleap_config
-assert '"version": "5.3.4"' in mirroleap_config
+assert '"version": "5.3.5"' in mirroleap_config
 assert 'write-updater-manifest.mjs' in workflow
 assert 'MirroLeap_${version}_x64-setup.exe' in workflow
 assert 'MIRROLEAP_HQ_CORE_SHA256' in runtime
 assert 'MIRROLEAP_HQ_CORE_URL' in runtime
+assert 'cache_folder_name(sha)' in runtime
+assert 'complete(&dir,sha)' in runtime
+assert 'complete(&destination,expected)' in runtime
 assert 'validated_archive_entry' in runtime and 'MAX_EXTRACT' in runtime
 assert 'ensure_hq_runtime' in app and "crate::hq_runtime::ensure" in app
 assert "mirroleap-hq-core-progress" in runtime

@@ -26,6 +26,7 @@ assert '#define MLHQ_ENABLE_D3D11 1' in wrapper
 # scrcpy.c allocates without MLHQ_ENABLE_D3D11, sink_v5.c uses it.
 # Conditional struct fields would overwrite adjacent scrcpy state.
 assert '#ifdef MLHQ_ENABLE_D3D11' not in header
+assert 'test_sink_layout.c' in workflow
 for field in ('last_enqueued_at', 'gpu_interval_ms', 'gpu_slow_count', 'gpu_readback_disabled'):
     assert field in header
 assert 'av_hwframe_transfer_data(cpu, frame, 0)' in producer
@@ -51,7 +52,7 @@ assert 'MirroLeap.HQ.Core_v3_x64.zip' in read(".github/workflows/mirroleap-conti
 # Original user application MUST NOT be affected by a lab-only branch.
 conf=read("src-tauri/tauri.conf.json")
 command=read("src-tauri/src/commands.rs")
-assert '"version": "5.3.4"' in conf
+assert '"version": "5.3.5"' in conf
 assert 'const HQ_VERSION_MARKER:&str="MirroLeap HQ scrcpy5 raw-frame v3 (experimental)";' in command
 assert 'experimental_hq_selected' in command
 print("PASS: pinned scrcpy5 lab remains isolated, D3D11 refs bounded and v5 push result truthful")
