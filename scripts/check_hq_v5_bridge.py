@@ -31,7 +31,9 @@ assert 'MLHQ_PUSH_OK SC_SINK_OK' in producer
 assert 'if (!sink->worker || !mlhq_consumer_active(sink))' in producer
 assert 'last_enqueued_at' in header
 assert 'if (last && (DWORD)(now-last)<interval)' in producer
-assert re.search(r'frame->format==AV_PIX_FMT_D3D11\s*\?\s*125u',producer)
+assert 'mlhq_gpu_capture_interval_ms(readback_ms)' in producer
+assert 'gpu_interval_ms' in producer and 'gpu_interval_ms' in header
+assert 'mlhq_gpu_capture_interval_ms(0)==80' in read('hq/tests/test_sink_v5.c')
 assert '-Dcompile_server=false' in workflow
 assert 'NOT release' in workflow
 assert 'scrcpy-win64-v5.0.1.zip' in workflow
@@ -44,7 +46,7 @@ assert 'MirroLeap.HQ.Core_v3_x64.zip' in read(".github/workflows/mirroleap-conti
 # Original user application MUST NOT be affected by a lab-only branch.
 conf=read("src-tauri/tauri.conf.json")
 command=read("src-tauri/src/commands.rs")
-assert '"version": "5.3.3"' in conf
+assert '"version": "5.3.4"' in conf
 assert 'const HQ_VERSION_MARKER:&str="MirroLeap HQ scrcpy5 raw-frame v3 (experimental)";' in command
 assert 'experimental_hq_selected' in command
 print("PASS: pinned scrcpy5 lab remains isolated, D3D11 refs bounded and v5 push result truthful")

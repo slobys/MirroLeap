@@ -117,6 +117,8 @@ assert "render_decoded_hq_preview" not in app, "experimental pixels must never r
 # production readiness still requires D3D11 and Android-device validation.
 circle=read("src-tauri/src/hq_cpu_lens_windows.rs")
 assert "mod hq_cpu_lens_windows" in lib
+assert "const DURATION_MS:u64=600;" in read("src-tauri/src/native_click_effect.rs")
+assert "HQ_MIN_PAINT_INTERVAL:Duration=Duration::from_millis(32)" in circle
 assert "UpdateLayeredWindow" in circle and "EX_TRANSPARENT" in circle
 assert "circular_premultiplied_bgra" in circle
 assert "render_decoded_hq_preview" in circle
@@ -182,7 +184,7 @@ assert 'onHqToggle' not in read('src/components/DecoderPerformance.tsx')
 assert '"hq-preview-core/scrcpy-hq-bin"' not in mirroleap_config
 assert '"productName": "MirroLeap"' in mirroleap_config
 assert '"identifier": "com.kb.scrcpy-gui-v3"' in mirroleap_config
-assert '"version": "5.3.3"' in mirroleap_config
+assert '"version": "5.3.4"' in mirroleap_config
 assert 'write-updater-manifest.mjs' in workflow
 assert 'MirroLeap_${version}_x64-setup.exe' in workflow
 assert 'MIRROLEAP_HQ_CORE_SHA256' in runtime

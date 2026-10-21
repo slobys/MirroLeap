@@ -1,4 +1,12 @@
-# MirroLeap v5.3.3 · D3D11 硬解 + 原始帧接收实验（真机待验收）
+# MirroLeap v5.3.4 · 高清放大响应优化与 600ms 点击波纹
+
+## v5.3.4 · 真机反馈后的延迟优化
+
+- 点击特效扩散及淡出共 **600ms**（旧版 1800ms），仍为独立 Windows 透明穿透窗口。
+- HQ D3D11VA 原始帧采样由固定 125ms 改成按真实 GPU 下载时间自适应调节，分别为 80/100/140ms；CPU 圆形镜头渲染间隔由 50–160ms 缩为 32–120ms，保留当前 2.35 倍画质。
+- GPU 读回连续两次超过 45ms 时自动回退，正常 scrcpy 5.0.1 显示通路不受源帧限频影响。仍是实验性 CPU/GDI 全帧路径，并非零拷贝 GPU 高清，需要真机验证响应和 FPS。
+
+## v5.3.3 · D3D11 原始帧实验基础
 
 ## v5.3.3 · 解决旧 scrcpy 4.0 核心切换问题
 
@@ -35,7 +43,7 @@
 
 ## 你可以直接从 MirroLeap v5.2.3 更新
 
-- v5.2.3 原程序会检索仓库中的 `vX.Y.Z` 版本，并检查是否有完整的 NSIS 安装包、minisign 签名与 `latest.json`。本次使用正常的 `v5.3.3` 标签和 `MirroLeap_5.3.3_x64-setup.exe` 文件名。
+- v5.2.3 原程序会检索仓库中的 `vX.Y.Z` 版本，并检查是否有完整的 NSIS 安装包、minisign 签名与 `latest.json`。本次使用正常的 `v5.3.4` 标签和 `MirroLeap_5.3.4_x64-setup.exe` 文件名。
 - 已安装的 NSIS EXE：启动时检测新版，弹窗由用户确认后，下载并验证固定公钥签名再安装；不是静默升级。
 - MSI、便携 ZIP：可以收到新版提示，但出于安装方式安全边界，需要自行下载安装对应的新版本，不能被 NSIS 自动覆盖。
 - 注意仅存在于旧 “HQ Preview” 独立程序中的旧标识不自动合并或卸载；原来的 MirroLeap v5.2.3 更新链完全延续。
@@ -71,10 +79,10 @@ Windows Actions 会执行 Rust/前端测试、实验 scrcpy 4.0 真正编译、W
 
 ## 下载内容
 
-- `MirroLeap_5.3.3_x64-setup.exe`：同名、同安装标识的轻量 NSIS 更新版，推荐。
-- `MirroLeap_5.3.3_x64_en-US.msi`：MSI 安装版，后续仍手动更新。
-- `MirroLeap_5.3.3_x64_Portable.zip`：免安装、解压运行。
+- `MirroLeap_5.3.4_x64-setup.exe`：同名、同安装标识的轻量 NSIS 更新版，推荐。
+- `MirroLeap_5.3.4_x64_en-US.msi`：MSI 安装版，后续仍手动更新。
+- `MirroLeap_5.3.4_x64_Portable.zip`：免安装、解压运行。
 - `MirroLeap.HQ.Core_v3_x64.zip`：**单独的可选核心**，普通用户不需下载；开启 HQ 后由软件自动安装。
-- `latest.json` / `MirroLeap_5.3.3_x64-setup.exe.sig` / `SHA256SUMS.txt`：签名自动更新清单与文件完整性校验。
+- `latest.json` / `MirroLeap_5.3.4_x64-setup.exe.sig` / `SHA256SUMS.txt`：签名自动更新清单与文件完整性校验。
 
 实验 scrcpy 部件固定 Genymobile/scrcpy v4.0、提交 `2322868e9e256eb5fce0b3d659ab2a409f29bae1`。补丁源码及相关依赖许可详见仓库 `hq/`。本版本在本机内处理帧，不上传手机画面。
