@@ -241,8 +241,8 @@ pub async fn check_mirroleap_update(
     app_handle: AppHandle,
 ) -> Result<AppUpdateInfo, String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
-    let data = fetch_release_json(ALL_RELEASES_API).await?;
     if isolated_hq_preview() {return Err("HQ preview does not join stable automatic updates".into());}
+    let data = fetch_release_json(ALL_RELEASES_API).await?;
     let local = app_handle.package_info().version.to_string();
     interpret_latest_release(&local, &data)
 }
@@ -371,8 +371,10 @@ pub async fn download_official_release_asset(
     window: Window, app_handle: AppHandle, version: String, kind: String,
 ) -> Result<String, String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
-    if !release_download_kind(&kind)    if isolated_hq_preview() {return Err("HQ preview cannot download stable installers".into());}
- || stable_version(&version).is_none() ||
+    if isolated_hq_preview() {
+        return Err("HQ preview cannot download stable installers".into());
+    }
+    if !release_download_kind(&kind) || stable_version(&version).is_none() ||
         version.starts_with('v') { return Err("Untrusted release download request".into()); }
     let _busy = ManualDownloadGuard::acquire()?;
     let local = app_handle.package_info().version.to_string();
@@ -510,8 +512,8 @@ pub async fn check_mirroleap_preview_update(
     app_handle: AppHandle,
 ) -> Result<AppUpdateInfo, String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
-    let data = fetch_release_json(PREVIEW_RELEASES_API).await?;
     if isolated_hq_preview() {return Err("Use GitHub Releases to update an isolated HQ preview".into());}
+    let data = fetch_release_json(PREVIEW_RELEASES_API).await?;
     let local = app_handle.package_info().version.to_string();
     interpret_preview_releases(&local, &data)
 }
