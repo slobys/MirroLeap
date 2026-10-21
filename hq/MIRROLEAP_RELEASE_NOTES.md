@@ -1,10 +1,21 @@
-# MirroLeap v5.3.0 · 原始帧按需减负与解码报告
+# MirroLeap v5.3.1 · 恢复普通投屏流畅引擎，原始帧实验单独开启
+
+## v5.3.1 · 性能优先模式（同一款 MirroLeap）
+
+- 问题原因：过去勾选 HQ 就将正常投屏 scrcpy 5.0.1 切换到实验性 scrcpy 4.0，普通核心的 Windows D3D11VA 解码选项因此不能应用。即使 v5.3.0 缩减 YUV 帧复制，也不能解决引擎切换带来的全部卡顿。
+- 从此“2.35× 实时放大（流畅优先）”默认继续使用原来的 scrcpy 5.x 引擎与对应解码参数。它放大的是桌面视频像素，并非原始解码帧高清，界面会明确告知这一限制。
+- **仅手动再次开启**“实验性原始帧高清（切换 scrcpy 4.0，可能卡顿）”才会安装/调用 v2 HQ 运行库。这样保留真实源帧高清实验，但不会牺牲绝大多数用户的普通视频流畅度。
+- 旧版仅有 hqLens=true 的用户配置自动归入流畅模式，避免更新后继续调用实验视频引擎；新开关仍需停止、重启投屏才会生效。
+- 当前没有实现 D3D11 GPU 原始解码帧纹理高清镜头，不能以“默认流畅”模式冒充最终高清。后续需独立开发 GPU 镜头，同时使用持续播放视频做同条件帧率测试。
+- 保持原来的 MirroLeap 安装标识、签名更新通道和约 5 MB 的 EXE 包体积；v2 HQ 核心仍是可选独立组件。
+
+## v5.3.0 · HQ 按需传帧 / CPU 限频 / 实际解码状态
 
 这不是另一款叫 “MirroLeap HQ Preview” 的程序。本版本沿用自 v5.2.3 以来的 **MirroLeap** 程序名称、Windows 安装身份 `com.kb.scrcpy-gui-v3`、配置目录和原有的签名更新通道。该版本作为 GitHub 测试版（Pre-release）发布，正式 Latest 仍为 v5.1.4，直到明确验收后再升级正式版。
 
 ## 你可以直接从 MirroLeap v5.2.3 更新
 
-- v5.2.3 原程序会检索仓库中的 `vX.Y.Z` 版本，并检查是否有完整的 NSIS 安装包、minisign 签名与 `latest.json`。本次使用正常的 `v5.3.0` 标签和 `MirroLeap_5.3.0_x64-setup.exe` 文件名。
+- v5.2.3 原程序会检索仓库中的 `vX.Y.Z` 版本，并检查是否有完整的 NSIS 安装包、minisign 签名与 `latest.json`。本次使用正常的 `v5.3.1` 标签和 `MirroLeap_5.3.1_x64-setup.exe` 文件名。
 - 已安装的 NSIS EXE：启动时检测新版，弹窗由用户确认后，下载并验证固定公钥签名再安装；不是静默升级。
 - MSI、便携 ZIP：可以收到新版提示，但出于安装方式安全边界，需要自行下载安装对应的新版本，不能被 NSIS 自动覆盖。
 - 注意仅存在于旧 “HQ Preview” 独立程序中的旧标识不自动合并或卸载；原来的 MirroLeap v5.2.3 更新链完全延续。
@@ -40,10 +51,10 @@ Windows Actions 会执行 Rust/前端测试、实验 scrcpy 4.0 真正编译、W
 
 ## 下载内容
 
-- `MirroLeap_5.3.0_x64-setup.exe`：同名、同安装标识的轻量 NSIS 更新版，推荐。
-- `MirroLeap_5.3.0_x64_en-US.msi`：MSI 安装版，后续仍手动更新。
-- `MirroLeap_5.3.0_x64_Portable.zip`：免安装、解压运行。
+- `MirroLeap_5.3.1_x64-setup.exe`：同名、同安装标识的轻量 NSIS 更新版，推荐。
+- `MirroLeap_5.3.1_x64_en-US.msi`：MSI 安装版，后续仍手动更新。
+- `MirroLeap_5.3.1_x64_Portable.zip`：免安装、解压运行。
 - `MirroLeap.HQ.Core_v2_x64.zip`：**单独的可选核心**，普通用户不需下载；开启 HQ 后由软件自动安装。
-- `latest.json` / `MirroLeap_5.3.0_x64-setup.exe.sig` / `SHA256SUMS.txt`：签名自动更新清单与文件完整性校验。
+- `latest.json` / `MirroLeap_5.3.1_x64-setup.exe.sig` / `SHA256SUMS.txt`：签名自动更新清单与文件完整性校验。
 
 实验 scrcpy 部件固定 Genymobile/scrcpy v4.0、提交 `2322868e9e256eb5fce0b3d659ab2a409f29bae1`。补丁源码及相关依赖许可详见仓库 `hq/`。本版本在本机内处理帧，不上传手机画面。

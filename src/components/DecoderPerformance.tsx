@@ -145,7 +145,7 @@ export default function DecoderPerformance({config, setConfig, support, observed
         {zh ? '2.35× 实时放大（流畅优先，保留普通 scrcpy）' :
           '2.35× live lens (smooth: keep regular scrcpy)'}
       </label>
-      {config.hqLens && <p role="note" className="text-xs ml-muted">
+      {config.hqLens && !usingRawCore && <p role="note" className="text-xs ml-muted">
         {zh ? '默认流畅模式保持 scrcpy 5.x；放大的是桌面投屏像素，并非原始解码帧高清。'
             : 'Smooth mode keeps scrcpy 5.x; the 2.35× lens magnifies desktop pixels, NOT original decoded frames.'}
       </p>}
@@ -169,8 +169,8 @@ export default function DecoderPerformance({config, setConfig, support, observed
             : 'HQ uses experimental scrcpy 4.0 and cannot use the normal 5.0.1 --hwdec=d3d11va flag. The D3D11 selector describes your regular core only; CPU lens antialiasing is NOT GPU video decoding.'}
       </p>}
       {usingRawCore && <p role="note" className="text-xs text-amber-600">
-        {zh ? 'HQ 核心已就绪，普通投屏仍使用轻量默认核心。下次启动投屏后，从悬浮栏开启实时放大。HQ 当前为 CPU/GDI 原始帧预览，并非最终 D3D11 GPU 版本；无有效帧时会回退旧镜头。' :
-          'Optional HQ core ready. Normal mirroring stays lightweight. Start a new mirror and enable live zoom in the hover rail. This is CPU/GDI decoded-frame preview, not final D3D11; it falls back if frames are unavailable.'}
+        {zh ? '原始帧模式下一次启动投屏会改用实验 scrcpy 4.0，整个视频可能变卡；不是真正的 D3D11 GPU 高清镜头。关掉此实验开关并重新投屏即可回到流畅的普通核心。' :
+          'Raw-frame mode switches the ENTIRE next mirror to experimental scrcpy 4.0, which may stutter. It is not a D3D11 GPU lens. Uncheck this experiment and restart mirroring to restore the regular engine.'}
       </p>}
     </>}
     {running && <p className="ml-muted text-xs">

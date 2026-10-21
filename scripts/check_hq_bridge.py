@@ -170,10 +170,13 @@ runtime=read("src-tauri/src/hq_runtime.rs")
 mirroleap_config=read("src-tauri/tauri.conf.json")
 workflow=read(".github/workflows/mirroleap-continuity.yml")
 assert 'mod hq_runtime;' in lib
+assert 'hq_experimental_core' in app and 'experimental_hq_selected' in app
+assert 'hqExperimentalCore' in read('src/hooks/useScrcpy.ts')
+assert 'Experimental raw-frame HQ' in read('src/components/DecoderPerformance.tsx')
 assert '"hq-preview-core/scrcpy-hq-bin"' not in mirroleap_config
 assert '"productName": "MirroLeap"' in mirroleap_config
 assert '"identifier": "com.kb.scrcpy-gui-v3"' in mirroleap_config
-assert '"version": "5.3.0"' in mirroleap_config
+assert '"version": "5.3.1"' in mirroleap_config
 assert 'write-updater-manifest.mjs' in workflow
 assert 'MirroLeap_${version}_x64-setup.exe' in workflow
 assert 'MIRROLEAP_HQ_CORE_SHA256' in runtime
