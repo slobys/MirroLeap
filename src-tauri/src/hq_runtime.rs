@@ -2,7 +2,7 @@
 //! The normal Windows EXE/MSI contains only the MirroLeap UI; this module has
 //! no startup network activity. The user must explicitly enable HQ before
 //! any download. The HTTPS archive must match the SHA256 compiled into the
-//! signed HQ Preview application by Windows CI.
+//! signed MirroLeap application by Windows CI.
 //!
 //! The cached runtime is user-writable, out of Program Files, and does not
 //! replace/modify any official scrcpy installation or Android server.
@@ -49,17 +49,17 @@ fn valid_sha256(hash:&str)->bool {
     hash.len()==64 && hash.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 fn verified_source()->Result<(&'static str,&'static str),String> {
-    if option_env!("MIRROLEAP_HQ_PREVIEW").is_none() {
-        return Err("只有 HQ Preview 支持一键获取可选高清核心。".into());
-    }
     let url=option_env!("MIRROLEAP_HQ_CORE_URL")
-        .ok_or("此构建没有提供已审核的 HQ 核心地址")?;
+        .ok_or("此 MirroLeap 构建没有提供已审核的 HQ 核心地址")?;
     let sha=option_env!("MIRROLEAP_HQ_CORE_SHA256")
         .ok_or("此构建没有提供 HQ 核心 SHA-256 校验值")?;
-    if !url.starts_with("https://github.com/slobys/MirroLeap/releases/download/hq-preview-v")
-        || !url.ends_with("/MirroLeap.HQ.Core_v1_x64.zip")
-        || !valid_sha256(sha)
-    {
+    // Pin both version and canonical published tag.  The normal MirroLeap
+    // installer must never accept an HQ-preview separate-app archive.
+    let required=format!(
+        "https://github.com/slobys/MirroLeap/releases/download/v{}/MirroLeap.HQ.Core_v1_x64.zip",
+        env!("CARGO_PKG_VERSION")
+    );
+    if url!=required || !valid_sha256(sha) {
         return Err("HQ 核心构建来源或校验值不受信任".into());
     }
     Ok((url,sha))
@@ -242,9 +242,14 @@ mod tests {
         assert!(validated_archive_entry("scrcpy-hq-bin/big.dll",None,MAX_EXTRACT+1).is_err());
     }
     #[test]
-    fn never_has_download_source_in_an_unsigned_dev_build() {
-        if option_env!("MIRROLEAP_HQ_PREVIEW").is_none() {
-            assert!(verified_source().is_err());
+    fn optional_core_requires_pinned_digest_and_exact_normal_release_tag() {
+        if let Ok((url,hash))=verified_source() {
+            assert!(url.contains(&format!("/v{}/",env!("CARGO_PKG_VERSION"))));
+            assert!(!url.contains("hq-preview-v"));
+            assert!(valid_sha256(hash));
+        } else {
+            assert!(option_env!("MIRROLEAP_HQ_CORE_URL").is_none()
+                || option_env!("MIRROLEAP_HQ_CORE_SHA256").is_none());
         }
     }
 }

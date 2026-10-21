@@ -31,6 +31,14 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
+## ✨ MirroLeap v5.2.8 · 恢复原来的更新方式
+
+**名称仍为 MirroLeap，不再建立“MirroLeap HQ Preview”独立应用。** 保留 v5.2.3 的 Windows 安装标识、原有配置和签名更新公钥；继续使用 v5.2.8 这种正常版本标签。已安装 v5.2.3 的 NSIS EXE 用户可以通过原来的启动检查与确认弹窗发现并安装此版本；便携 ZIP 和 MSI 仍使用手动更新。
+
+安装包保持约 5 MB 的轻量级，USB/Wi-Fi 投屏、画笔、点击特效和实时放大都在主应用中。原始帧 2.35× 高清镜头依旧是 **主动勾选才下载** 的可选组件，完整原始 scrcpy 4.0 及其 FFmpeg/SDL 运行库不随主 EXE/MSI 安装。画质路径提示可区分「原始帧」与「桌面回退」，尚未完成真实 Android GPU D3D11 高清端到端验收。
+
+这是同一 MirroLeap 更新频道里的 GitHub 测试版（Pre-release），不强制自动安装，也不替换 v5.1.4 在 GitHub 上的 Latest 标记。详见 [v5.2.8 发布说明](hq/MIRROLEAP_RELEASE_NOTES.md)。
+
 ## 🔬 MirroCreator 高清实时镜头 · 2.35 倍基线与下一阶段
 
 用户确认 **2.35× 是希望保留的默认倍率**，不接受简单降低到 1.25× 来“假装修好了模糊”。因此在下一阶段独立开发分支中已把默认倍率恢复为 2.35×；滚轮改变圆圈大小、Ctrl＋滚轮改变倍率的设计不变。
@@ -290,11 +298,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.2.4_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.2.4_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.2.4_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.2.8_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.2.8_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.2.8_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.2.4 预览版等待完整 CI/签名验证后提供下载；正式版请到 [GitHub Releases](https://github.com/slobys/MirroLeap/releases/latest) 下载**，选择 Assets 下的文件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 仍为 v5.1.4 正式版。不要把 Tags 页面的源码 ZIP 当作安装包。
+**v5.2.8 继续用 MirroLeap 原有版本与签名更新频道，等待 Windows CI 验收通过后以正常的 v5.2.8 标签发布测试版。** [GitHub Releases](https://github.com/slobys/MirroLeap/releases) 中可选择具体版本附件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 暂保持 v5.1.4 正式版。不要把 Tags 页面自动生成的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

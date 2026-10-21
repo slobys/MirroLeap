@@ -4,7 +4,7 @@
 
 默认 **2.35×**：接到有效解码帧时预览使用原始 YUV 像素，而不是已缩小的 SDL 桌面画面；无帧时回退 Windows Magnification.dll。当前不能宣传为 GPU 高清放大成品，真实 1080P/2K 视频的流畅性和画质尚待验收。
 
-独立 Windows 安装包预览工作流：[`hq-preview.yml`](../.github/workflows/hq-preview.yml)。安装风险及操作说明：[`HQ_PREVIEW_NOTES.md`](HQ_PREVIEW_NOTES.md)。预览包采用不同应用身份，不覆盖稳定版。
+Windows 轻量级 MirroLeap 更新工作流：[`mirroleap-continuity.yml`](../.github/workflows/mirroleap-continuity.yml)，版本与安装包说明见 [`MIRROLEAP_RELEASE_NOTES.md`](MIRROLEAP_RELEASE_NOTES.md)。从 v5.2.8 起继续沿用 v5.2.3 的 MirroLeap 安装标识与签名更新通道；可选 HQ 实验核心单独下载，不再建立另一款软件。
 
 ## 为什么要补丁而不是改设置
 

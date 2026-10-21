@@ -692,6 +692,32 @@ mod tests {
         assert_eq!(interpret_latest_release("5.0.8",&items).unwrap().status,"ahead");
     }
 
+    /// Regression contract against the immutable v5.2.3 installed client:
+    /// it asks check_mirroleap_update for complete vX.Y.Z releases, accepts
+    /// signed prereleases, and only then opens the once-per-startup prompt.
+    /// A separate "hq-preview-v*" tag NEVER matches this normal channel.
+    #[test]
+    fn v523_can_discover_and_install_standard_signed_v528_without_rebranding() {
+        let older=signed_release("5.2.3",true,false);
+        let normal=signed_release("5.2.8",true,false);
+        let mut hq=signed_release("5.2.9",true,false);
+        hq["tag_name"]=json!("hq-preview-v5.2.9-run2");
+        let releases=json!([hq,normal,older]);
+        let found=interpret_latest_release("5.2.3",&releases).unwrap();
+        assert_eq!(found.current_version,"5.2.3");
+        assert_eq!(found.latest_version,"5.2.8");
+        assert_eq!(found.status,"update_available");
+        assert_eq!(found.channel,"stable");
+        assert_eq!(found.release_url,
+            "https://github.com/slobys/MirroLeap/releases/tag/v5.2.8");
+        assert!(found.downloads.iter().any(|file|
+            file.name=="MirroLeap_5.2.8_x64-setup.exe"));
+        assert_eq!(signed_manifest_url("5.2.8").unwrap().as_str(),
+            "https://github.com/slobys/MirroLeap/releases/download/v5.2.8/latest.json");
+        assert_eq!(interpret_latest_release("5.2.8",&releases)
+            .unwrap().status,"up_to_date");
+    }
+
     #[test]
     fn signed_endpoint_is_pinned_and_rejects_untrusted_versions() {
         assert_eq!(signed_manifest_url("5.0.7").unwrap().as_str(),

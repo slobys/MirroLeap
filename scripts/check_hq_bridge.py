@@ -156,10 +156,15 @@ assert "MirroLeap HQ decoded-frame v1 (experimental)" in patch_script
 # Lite-app invariant: 5MB EXE/MSI, separate SHA256-pinned HQ ZIP downloaded
 # only on explicit opt-in, never during app startup or ordinary mirroring.
 runtime=read("src-tauri/src/hq_runtime.rs")
-preview_config=read("src-tauri/tauri.hq-preview.conf.json")
-workflow=read(".github/workflows/hq-preview.yml")
+mirroleap_config=read("src-tauri/tauri.conf.json")
+workflow=read(".github/workflows/mirroleap-continuity.yml")
 assert 'mod hq_runtime;' in lib
-assert '"hq-preview-core/scrcpy-hq-bin"' not in preview_config
+assert '"hq-preview-core/scrcpy-hq-bin"' not in mirroleap_config
+assert '"productName": "MirroLeap"' in mirroleap_config
+assert '"identifier": "com.kb.scrcpy-gui-v3"' in mirroleap_config
+assert '"version": "5.2.8"' in mirroleap_config
+assert 'write-updater-manifest.mjs' in workflow
+assert 'MirroLeap_${version}_x64-setup.exe' in workflow
 assert 'MIRROLEAP_HQ_CORE_SHA256' in runtime
 assert 'MIRROLEAP_HQ_CORE_URL' in runtime
 assert 'validated_archive_entry' in runtime and 'MAX_EXTRACT' in runtime

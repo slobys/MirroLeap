@@ -1,4 +1,4 @@
-name: MirroCreator HQ Preview installers (not stable)
+name: MirroLeap single-app signed prerelease and optional HQ core
 
 on:
   push:
@@ -10,12 +10,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: hq-preview-${{ github.ref }}
+  group: mirroleap-single-app-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  windows-hq-preview:
-    name: Real scrcpy 4.0 + Windows HQ tests + isolated EXE/MSI
+  windows-mirroleap:
+    name: Verified MirroLeap legacy-updatable EXE/MSI and opt-in HQ module
     runs-on: windows-latest
     timeout-minutes: 110
     steps:
@@ -52,7 +52,8 @@ jobs:
             'hq_protocol::tests','hq_bridge_windows::tests','hq_geometry::tests',
             'hq_reference_render::tests','hq_pipeline::tests',
             'hq_cpu_lens_windows::tests','native_live_lens::tests',
-            'native_click_effect::tests','hq_runtime::tests'
+            'native_click_effect::tests','hq_runtime::tests',
+            'app_update::tests::v523_can_discover_and_install_standard_signed_v528_without_rebranding'
           )
           foreach ($test in $tests) {
             cargo test --locked --manifest-path src-tauri/Cargo.toml --lib $test
@@ -221,9 +222,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = (Get-Content src-tauri/tauri.hq-preview.conf.json -Raw | ConvertFrom-Json).version
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid HQ Preview version' }
-          $tag = "hq-preview-v${version}-run${{ github.run_number }}"
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid MirroLeap version' }
+          $tag = "v${version}"
           $coreDir = 'src-tauri/hq-preview-core/scrcpy-hq-bin'
           $archiveDir = 'hq-optional-core'
           $filename = 'MirroLeap.HQ.Core_v1_x64.zip'
@@ -247,15 +248,14 @@ jobs:
           Write-Host "Optional HQ ZIP staged as a SEPARATE $mb MiB release asset; SHA256 baked into the app"
       - name: Verify optional HQ ZIP auth and archive guards in Windows Rust
         shell: pwsh
-        env:
-          MIRROLEAP_HQ_PREVIEW: '1'
         run: |
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_runtime::tests
           if ($LASTEXITCODE -ne 0) { throw 'Optional HQ downloader must pass strict SHA256/path gating' }
-      - name: Build the isolated preview executable before bundling
-        env:
-          MIRROLEAP_HQ_PREVIEW: '1'
-        run: npm run tauri build -- --no-bundle --config src-tauri/tauri.hq-preview.conf.json
+      - name: Build normal MirroLeap executable with original identity
+        run: npm run tauri build -- --no-bundle
+      - name: Stage original MirroLeap portable launcher
+        shell: pwsh
+        run: ./scripts/windows-stage-portable.ps1
       - name: Verify REAL Windows WebView2 main window is not blank
         shell: pwsh
         run: ./scripts/windows-smoke-webview.ps1
@@ -266,11 +266,12 @@ jobs:
         run: |
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_click_effect::tests::layered_click_is_visible_in_real_desktop_capture -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Native click ripple did not appear in an actual composited Windows desktop capture' }
-      - name: Build LIGHTWEIGHT SIDE-BY-SIDE HQ Preview EXE and MSI
+      - name: Build original-identity LIGHTWEIGHT MirroLeap EXE and MSI
         env:
-          MIRROLEAP_HQ_PREVIEW: '1'
-        run: npm run tauri build -- --config src-tauri/tauri.hq-preview.conf.json
-      - name: Stage and verify TWO isolated preview installers
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build
+      - name: Stage and verify MirroLeap EXE, MSI, Portable and optional HQ core
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -284,21 +285,33 @@ jobs:
           if ($msis.Count -eq 1 -and $msis[0].Length -gt 12000000) {
             throw 'Lightweight MSI exceeds 12 MB: HQ runtime leaked into installer'
           }
-          $config = Get-Content src-tauri/tauri.hq-preview.conf.json -Raw | ConvertFrom-Json
+          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $version=(Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($config.productName -ne 'MirroLeap' -or $config.identifier -ne 'com.kb.scrcpy-gui-v3') {
+            throw 'New installer does NOT match the existing v5.2.3 MirroLeap app identity'
+          }
+          if ($config.version -ne $version) {throw 'MirroLeap Tauri and NPM package versions differ'}
           if ($config.bundle.resources) {
-            throw 'HQ binaries must be optional ZIP assets, NEVER installer resources'
+            throw 'HQ binaries must remain OPTIONAL and may not inflate the MirroLeap installer'
           }
           if ($exes.Count -ne 1 -or $msis.Count -ne 1) {
-            throw "Expected one HQ Preview EXE and one MSI, found $($exes.Count) / $($msis.Count)"
+            throw "Expected exactly one original MirroLeap EXE and one MSI, found $($exes.Count) / $($msis.Count)"
           }
-          $out = 'hq-preview-release'
+          $out = 'mirroleap-release'
           New-Item -ItemType Directory -Force $out | Out-Null
           $core = Get-Item 'hq-optional-core/MirroLeap.HQ.Core_v1_x64.zip'
           if (-not $core -or $core.Length -le 1000000) {
             throw 'Separate verified HQ runtime asset missing'
           }
+          $portableDir='release-portable/MirroLeap-Portable'
+          if (-not (Test-Path -LiteralPath "$portableDir/Run-MirroLeap.cmd")) {
+            throw 'MirroLeap portable launcher missing'
+          }
+          $portable=Join-Path $out "MirroLeap_${version}_x64_Portable.zip"
+          Compress-Archive -Path "$portableDir/*" -DestinationPath $portable -CompressionLevel Optimal
+          if ((Get-Item $portable).Length -gt 15000000) {throw 'Portable MirroLeap is unexpectedly heavy'}
           $hashes = @()
-          foreach ($artifact in @($exes[0], $msis[0], $core)) {
+          foreach ($artifact in @($exes[0], $msis[0], (Get-Item $portable), $core)) {
             # GitHub Release normalizes spaces in uploaded asset names to dots.
             # Stage using the FINAL published name before hashing so users can
             # run sha256sum -c against their actual downloaded files.
@@ -313,11 +326,11 @@ jobs:
             $entry = [regex]::Match($line, '^([0-9a-f]{64}) \*(.+)$')
             if (-not $entry.Success) { throw 'Malformed preview checksum entry' }
             $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $out $entry.Groups[2].Value)).Hash.ToLowerInvariant()
-            if ($actual -ne $entry.Groups[1].Value) { throw 'Preview release SHA256 checksum verification failed' }
+            if ($actual -ne $entry.Groups[1].Value) { throw 'MirroLeap release SHA256 checksum verification failed' }
           }
-          Copy-Item -LiteralPath 'hq/HQ_PREVIEW_NOTES.md' -Destination "$out/README_HQ_PREVIEW.md"
+          Copy-Item -LiteralPath 'hq/MIRROLEAP_RELEASE_NOTES.md' -Destination "$out/README_MirroLeap.md"
           Get-ChildItem $out | Select-Object Name, Length
-      - name: Sign preview NSIS, verify pinned minisign key, create preview-only latest.json
+      - name: Sign original MirroLeap NSIS and create canonical vX.Y.Z latest.json
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -325,45 +338,45 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY -or -not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
-            throw 'Required minisign updater key unavailable. DO NOT publish unsigned HQ Preview as one-click updatable.'
+            throw 'Pinned MirroLeap updater signing key unavailable: refusing unsigned vX.Y.Z release.'
           }
-          $version = (Get-Content src-tauri/tauri.hq-preview.conf.json -Raw | ConvertFrom-Json).version
-          $tag = "hq-preview-v${version}-run${{ github.run_number }}"
-          $installer = "hq-preview-release/MirroLeap.HQ.Preview_${version}_x64-setup.exe"
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "v${version}"
+          $installer = "mirroleap-release/MirroLeap_${version}_x64-setup.exe"
           $sig = "$installer.sig"
-          if (-not (Test-Path -LiteralPath $installer)) { throw 'Preview NSIS installer absent' }
+          if (-not (Test-Path -LiteralPath $installer)) { throw 'Canonical MirroLeap NSIS installer absent' }
           npm run tauri -- signer sign "$installer"
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sig)) {
-            throw 'Preview signing failed: do not publish'
+            throw 'MirroLeap signer failed; must not publish an unsigned normal version'
           }
           node scripts/verify-updater-signature.mjs "$installer" "$sig"
-          if ($LASTEXITCODE -ne 0) { throw 'Preview minisign verification failed' }
-          node scripts/write-hq-preview-manifest.mjs "$version" "$tag" "$installer" "$sig" hq-preview-release/latest.json
-          if ($LASTEXITCODE -ne 0) { throw 'Preview signed updater manifest invalid' }
-          $latest = Get-Content hq-preview-release/latest.json -Raw | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Normal MirroLeap minisign verification failed' }
+          node scripts/write-updater-manifest.mjs "$version" "$installer" "$sig" mirroleap-release/latest.json
+          if ($LASTEXITCODE -ne 0) { throw 'Signed normal MirroLeap updater manifest invalid' }
+          $latest = Get-Content mirroleap-release/latest.json -Raw | ConvertFrom-Json
           if ($latest.version -ne $version -or
-              $latest.platforms.'windows-x86_64'.url -ne "https://github.com/${{ github.repository }}/releases/download/$tag/MirroLeap.HQ.Preview_${version}_x64-setup.exe") {
-            throw 'HQ Preview updater endpoint is not the exact signed preview release'
+              $latest.platforms.'windows-x86_64'.url -ne "https://github.com/${{ github.repository }}/releases/download/$tag/MirroLeap_${version}_x64-setup.exe") {
+            throw 'Signed MirroLeap update URL must exactly match the canonical vX.Y.Z release'
           }
-          Write-Host 'PASS isolated and signed HQ Preview updater artifacts ready for release'
+          Write-Host 'PASS same MirroLeap identity and signed vX.Y.Z updater release'
       - uses: actions/upload-artifact@v4
         with:
-          name: MirroLeap-HQ-Preview-Windows-EXE-MSI
+          name: MirroLeap-Windows-EXE-MSI-Portable-and-OptionalHQ
           if-no-files-found: error
-          path: hq-preview-release/*
-      - name: Publish PRE-RELEASE ONLY; never overwrite official Latest
+          path: mirroleap-release/*
+      - name: Publish original MirroLeap vX.Y.Z prerelease for legacy auto-detection
         if: github.ref == 'refs/heads/feat/mirrocreator-hq-lens-235'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = (Get-Content src-tauri/tauri.hq-preview.conf.json -Raw | ConvertFrom-Json).version
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid isolated HQ Preview version' }
-          $tag = "hq-preview-v${version}-run${{ github.run_number }}"
-          $files = @(Get-ChildItem hq-preview-release -File | ForEach-Object { $_.FullName })
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid normal MirroLeap package version' }
+          $tag = "v${version}"
+          $files = @(Get-ChildItem mirroleap-release -File | ForEach-Object { $_.FullName })
           gh release create $tag $files --repo ${{ github.repository }} `
-            --title "MirroLeap HQ Preview ${version} / CI ${{ github.run_number }}" `
-            --notes-file hq/HQ_PREVIEW_NOTES.md --prerelease --latest=false `
+            --title "MirroLeap v${version} - one app, lightweight installer and optional HQ" `
+            --notes-file hq/MIRROLEAP_RELEASE_NOTES.md --prerelease --latest=false `
             --target ${{ github.sha }}
           if ($LASTEXITCODE -ne 0) { throw 'GitHub prerelease publish failed' }
