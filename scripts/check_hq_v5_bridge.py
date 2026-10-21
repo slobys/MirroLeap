@@ -23,6 +23,11 @@ assert 'MIRROLEAP_HQ_TOKEN' in patch
 assert 'SINK_MARKER' in patch and 'HQ scrcpy5 raw-frame v3 (experimental)' in patch
 assert 'mirroleap_hq_sink_v5.c' in patch
 assert '#define MLHQ_ENABLE_D3D11 1' in wrapper
+# scrcpy.c allocates without MLHQ_ENABLE_D3D11, sink_v5.c uses it.
+# Conditional struct fields would overwrite adjacent scrcpy state.
+assert '#ifdef MLHQ_ENABLE_D3D11' not in header
+for field in ('last_enqueued_at', 'gpu_interval_ms', 'gpu_slow_count', 'gpu_readback_disabled'):
+    assert field in header
 assert 'av_hwframe_transfer_data(cpu, frame, 0)' in producer
 assert 'av_frame_clone(frame)' in producer
 assert 'AV_PIX_FMT_D3D11' in producer

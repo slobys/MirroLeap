@@ -23,12 +23,13 @@ struct sc_mirroleap_hq_sink {
     volatile LONG stopping;
     void * volatile newest; /* owned AVFrame* via InterlockedExchangePointer */
     uint32_t next_slot;
-#ifdef MLHQ_ENABLE_D3D11
+    /* Keep this layout IDENTICAL in scrcpy.c and sink_v5.c: the latter
+     * defines MLHQ_ENABLE_D3D11 locally, while scrcpy.c does not. Gating
+     * these fields on that macro causes memset() to overwrite scrcpy state. */
     volatile LONG last_enqueued_at; // bounded GPU texture refs on decode thread
     volatile LONG gpu_interval_ms; // readback worker adjusts reference pacing
     volatile LONG gpu_slow_count;
     volatile LONG gpu_readback_disabled; // fail closed, never stalls normal playback indefinitely
-#endif
 };
 void sc_mirroleap_hq_sink_init(struct sc_mirroleap_hq_sink *sink);
 #endif
