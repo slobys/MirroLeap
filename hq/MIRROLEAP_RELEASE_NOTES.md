@@ -1,4 +1,13 @@
-# MirroLeap v5.3.1 · 恢复普通投屏流畅引擎，原始帧实验单独开启
+# MirroLeap v5.3.2 · 默认实时放大不再占用设置页
+
+## v5.3.2 · 隐藏固定 2.35 倍设置
+
+- 默认实时放大仍是 **2.35 倍**，直接从手机悬浮栏开启，不需要在「GPU 解码与性能」里另行勾选。移除重复的默认倍率设置、提示和相关 UI 测试。
+- 设置页仅保留独立 **“原始帧高清（实验功能）”** 选项，默认关闭。普通实时放大始终使用已安装的 scrcpy 5.x 及原有解码参数；只有用户明确选择实验功能才会下载/切换单独的 scrcpy 4.0 核心。
+- 历史设置中 hqLens=true、hqExperimentalCore=false 的普通用户也不会自动切换实验核心，降低误操作导致的视频卡顿风险；原 MirroLeap 安装标识、一键更新通道与轻量安装包不变。
+- GPU 原始帧高清仍处于开发阶段，默认桌面放大不是原始帧无损高清。
+
+### v5.3.1 · 恢复普通投屏流畅引擎，原始帧实验单独开启
 
 ## v5.3.1 · 性能优先模式（同一款 MirroLeap）
 
@@ -15,7 +24,7 @@
 
 ## 你可以直接从 MirroLeap v5.2.3 更新
 
-- v5.2.3 原程序会检索仓库中的 `vX.Y.Z` 版本，并检查是否有完整的 NSIS 安装包、minisign 签名与 `latest.json`。本次使用正常的 `v5.3.1` 标签和 `MirroLeap_5.3.1_x64-setup.exe` 文件名。
+- v5.2.3 原程序会检索仓库中的 `vX.Y.Z` 版本，并检查是否有完整的 NSIS 安装包、minisign 签名与 `latest.json`。本次使用正常的 `v5.3.2` 标签和 `MirroLeap_5.3.2_x64-setup.exe` 文件名。
 - 已安装的 NSIS EXE：启动时检测新版，弹窗由用户确认后，下载并验证固定公钥签名再安装；不是静默升级。
 - MSI、便携 ZIP：可以收到新版提示，但出于安装方式安全边界，需要自行下载安装对应的新版本，不能被 NSIS 自动覆盖。
 - 注意仅存在于旧 “HQ Preview” 独立程序中的旧标识不自动合并或卸载；原来的 MirroLeap v5.2.3 更新链完全延续。
@@ -51,10 +60,10 @@ Windows Actions 会执行 Rust/前端测试、实验 scrcpy 4.0 真正编译、W
 
 ## 下载内容
 
-- `MirroLeap_5.3.1_x64-setup.exe`：同名、同安装标识的轻量 NSIS 更新版，推荐。
-- `MirroLeap_5.3.1_x64_en-US.msi`：MSI 安装版，后续仍手动更新。
-- `MirroLeap_5.3.1_x64_Portable.zip`：免安装、解压运行。
+- `MirroLeap_5.3.2_x64-setup.exe`：同名、同安装标识的轻量 NSIS 更新版，推荐。
+- `MirroLeap_5.3.2_x64_en-US.msi`：MSI 安装版，后续仍手动更新。
+- `MirroLeap_5.3.2_x64_Portable.zip`：免安装、解压运行。
 - `MirroLeap.HQ.Core_v2_x64.zip`：**单独的可选核心**，普通用户不需下载；开启 HQ 后由软件自动安装。
-- `latest.json` / `MirroLeap_5.3.1_x64-setup.exe.sig` / `SHA256SUMS.txt`：签名自动更新清单与文件完整性校验。
+- `latest.json` / `MirroLeap_5.3.2_x64-setup.exe.sig` / `SHA256SUMS.txt`：签名自动更新清单与文件完整性校验。
 
 实验 scrcpy 部件固定 Genymobile/scrcpy v4.0、提交 `2322868e9e256eb5fce0b3d659ab2a409f29bae1`。补丁源码及相关依赖许可详见仓库 `hq/`。本版本在本机内处理帧，不上传手机画面。

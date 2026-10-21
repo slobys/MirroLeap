@@ -443,7 +443,7 @@
         <button id="present-magnifier" aria-pressed="false" aria-label="定格放大镜" title="自动读取手机静态截图 · 滚轮调大小">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="10" cy="10" r="6"/><path d="m14 14 7 7M8 10h4m-2-2v4"/></svg>放大镜
         </button>
-        <button id="present-live" aria-pressed="false" aria-label="连续实时放大" title="默认 2.35 倍；滚轮调圆圈大小，Ctrl+滚轮调倍率。画质受窗口显示像素限制">
+        <button id="present-live" aria-pressed="false" aria-label="连续实时放大" title="实时放大；滚轮调圆圈大小，Ctrl+滚轮调倍率。画质受窗口显示像素限制">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6M10 7v6M18 3v5"/></svg>实时放大
         </button>
         <button id="creator-click" aria-pressed="false" aria-label="点击特效" title="显示电脑鼠标点击位置，不阻挡手机触控">
@@ -525,7 +525,7 @@
         }
         document.getElementById('present-refresh').disabled = !open || !magnifier;
         document.getElementById('present-hint').textContent = live
-          ? '正在检测实际画质来源 · 默认 2.35×'
+          ? '正在检测实际画质来源'
           : '实时模式跟随视频；定格和聚光灯暂停触控';
       }
       // 2.35x is only the optical scale, NOT proof of HQ source pixels.

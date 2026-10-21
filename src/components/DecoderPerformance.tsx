@@ -29,21 +29,14 @@ export default function DecoderPerformance({config, setConfig, support, observed
   const [hqBusy,setHqBusy]=useState(false);
   const [hqPercent,setHqPercent]=useState<number|null>(null);
   const [hqError,setHqError]=useState<string|null>(null);
-  const onHqToggle=(checked:boolean) => {
-    // Smooth 2.35x must retain regular scrcpy 5.x, including for users who
-    // migrated with hqLens=true saved by v5.3.0.
-    setHqError(null);
-    setConfig({...config,hqLens:checked,hqExperimentalCore:false});
-  };
   const onRawHqToggle=async (checked:boolean) => {
     if (!checked) {
       setHqError(null);
-      setConfig({...config,hqExperimentalCore:false});
+      setConfig({...config,hqLens:false,hqExperimentalCore:false});
       return;
     }
-    if (!config.hqLens) return;
-    // Download and switch video engines ONLY on this clearly labelled
-    // SECOND opt-in to experimental raw decoded-frame quality.
+    // Standard real-time zoom is ALWAYS available in the hover toolbar.
+    // This switch alone consents to replacing scrcpy with a raw-frame experiment.
     setHqBusy(true);
     setHqError(null);
     setHqPercent(null);
@@ -139,24 +132,12 @@ export default function DecoderPerformance({config, setConfig, support, observed
     {(support?.hostOs === 'windows' || (typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent))) && <>
       <label className="inline-flex items-center gap-2 text-xs">
         <input type="checkbox" className="accent-primary"
-          checked={Boolean(config.hqLens)}
-          disabled={hqBusy}
-          onChange={(event) => void onHqToggle(event.target.checked)}/>
-        {zh ? '2.35× 实时放大（流畅优先，保留普通 scrcpy）' :
-          '2.35× live lens (smooth: keep regular scrcpy)'}
-      </label>
-      {config.hqLens && !usingRawCore && <p role="note" className="text-xs ml-muted">
-        {zh ? '默认流畅模式保持 scrcpy 5.x；放大的是桌面投屏像素，并非原始解码帧高清。'
-            : 'Smooth mode keeps scrcpy 5.x; the 2.35× lens magnifies desktop pixels, NOT original decoded frames.'}
-      </p>}
-      {config.hqLens && <label className="inline-flex items-center gap-2 text-xs">
-        <input type="checkbox" className="accent-primary"
           checked={usingRawCore}
           disabled={hqBusy}
           onChange={(event)=>void onRawHqToggle(event.target.checked)}/>
-        {zh ? '实验性原始帧高清（切换 scrcpy 4.0，可能卡顿）' :
-          'Experimental raw-frame HQ (switches to scrcpy 4.0; may stutter)'}
-      </label>}
+        {zh ? '原始帧高清（实验功能，切换 scrcpy 4.0，可能卡顿）' :
+          'Original-frame HQ (experimental; switches to scrcpy 4.0, may stutter)'}
+      </label>
       {hqBusy && <p role="status" className="text-xs ml-muted">
         {zh ? '正在校验并安装实验原始帧核心' : 'Installing experimental raw-frame core'}
         {hqPercent!==null ? ` · ${hqPercent}%` : '…'}

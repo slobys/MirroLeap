@@ -56,50 +56,51 @@ describe('safe host hardware decoder controls', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Retrying compatible decoder');
   });
 
-  it('smooth 2.35x lens does not download or switch scrcpy', () => {
+  it('fixed live zoom has no redundant settings checkbox and preserves scrcpy 5.x', () => {
     vi.clearAllMocks();
     const setConfig=vi.fn();
     const {rerender}=render(<DecoderPerformance config={base} setConfig={setConfig}
       support={windows5} running={false}/>);
-    fireEvent.click(screen.getByLabelText(/2.35× live lens/));
+    expect(screen.queryByLabelText(/2.35× live lens/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/2.35× 实时放大/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/Original-frame HQ/)).not.toBeChecked();
+    expect(screen.getByLabelText('Host video decoder')).toBeEnabled();
     expect(invoke).not.toHaveBeenCalled();
-    expect(setConfig).toHaveBeenLastCalledWith({...base,hqLens:true,hqExperimentalCore:false});
-    // v5.3.0 persisted only hqLens=true: it now means smooth engine by default.
     rerender(<DecoderPerformance config={{...base,hqLens:true}} setConfig={setConfig}
       support={windows5} running={true}/>);
-    expect(screen.getByText(/Smooth mode keeps scrcpy 5.x/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Experimental raw-frame HQ/)).not.toBeChecked();
-    expect(screen.getByLabelText('Host video decoder')).toBeEnabled();
+    expect(screen.getByLabelText(/Original-frame HQ/)).not.toBeChecked();
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it('experimental raw source requires an independent second opt-in', async () => {
+  it('only explicitly enabling original-frame HQ switches to the separate core', async () => {
     vi.clearAllMocks();
     const setConfig=vi.fn();
-    const smooth={...base,hqLens:true,hqExperimentalCore:false};
-    const {rerender}=render(<DecoderPerformance config={smooth} setConfig={setConfig}
+    const {rerender}=render(<DecoderPerformance config={base} setConfig={setConfig}
       support={windows5} running={false}/>);
-    fireEvent.click(screen.getByLabelText(/Experimental raw-frame HQ/));
+    fireEvent.click(screen.getByLabelText(/Original-frame HQ/));
     await waitFor(()=>expect(invoke).toHaveBeenCalledWith('ensure_hq_runtime'));
     await waitFor(()=>expect(setConfig).toHaveBeenLastCalledWith({
-      ...smooth,hqLens:true,hqExperimentalCore:true
+      ...base,hqLens:true,hqExperimentalCore:true
     }));
-    rerender(<DecoderPerformance config={{...smooth,hqExperimentalCore:true}} setConfig={setConfig}
+    const raw={...base,hqLens:true,hqExperimentalCore:true};
+    rerender(<DecoderPerformance config={raw} setConfig={setConfig}
       support={windows5} observedMode="unreported" running={true}/>);
     expect(screen.getByText(/HQ uses experimental scrcpy 4.0 and cannot use/)).toBeInTheDocument();
     expect(screen.getByLabelText('Host video decoder')).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('Core did not report its decoder (GPU unconfirmed)');
+    fireEvent.click(screen.getByLabelText(/Original-frame HQ/));
+    expect(setConfig).toHaveBeenLastCalledWith({...raw,hqLens:false,hqExperimentalCore:false});
   });
 
-  it('download failure leaves HQ raw mode off', async()=>{
+  it('failed raw-core download does not enable experimental HQ', async()=>{
     vi.mocked(invoke).mockRejectedValueOnce('network offline');
     const setConfig=vi.fn();
-    render(<DecoderPerformance config={{...base,hqLens:true,hqExperimentalCore:false}}
-      setConfig={setConfig} support={windows5} running={false}/>);
-    fireEvent.click(screen.getByLabelText(/Experimental raw-frame HQ/));
+    render(<DecoderPerformance config={base} setConfig={setConfig}
+      support={windows5} running={false}/>);
+    fireEvent.click(screen.getByLabelText(/Original-frame HQ/));
     await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('network offline'));
     expect(setConfig).not.toHaveBeenCalled();
-    expect(screen.getByLabelText(/Experimental raw-frame HQ/)).not.toBeChecked();
+    expect(screen.getByLabelText(/Original-frame HQ/)).not.toBeChecked();
   });
 
   it('warns about known Windows 5.0.0 H.265 compatibility and falls back on stale OS modes', () => {
