@@ -175,6 +175,13 @@ assert "native_click_effect::flash" in frame_native
 assert "native_click_effect::stop" in frame_native
 assert "ring_pixel" in native_click
 assert "creatorCanvasClicks+=1" in phone_toolbar
+assert "get_mirrocreator_lens_status" in phone_toolbar
+assert "get_mirrocreator_lens_status" in read("src-tauri/src/commands.rs")
+assert "presented_source_size" in read("src-tauri/src/hq_cpu_lens_windows.rs")
+assert "adaptive_luma" in read("src-tauri/src/hq_reference_render.rs")
+assert "MIRROLEAP_CLICK_VISUAL_SMOKE" in native_click
+assert "capture_composited_rect" in native_click
+assert "DURATION_MS:u64=1800" in native_click
 
 
 for name in ("arrow", "rect", "step", "mask"):

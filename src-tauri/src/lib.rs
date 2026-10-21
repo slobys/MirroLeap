@@ -165,6 +165,7 @@ pub fn run() {
             commands::run_scrcpy,
             commands::stop_scrcpy,
             commands::device_frame_control,
+            commands::get_mirrocreator_lens_status,
             commands::get_app_install_kind,
             commands::open_official_community_link,
             commands::device_frame_ack,

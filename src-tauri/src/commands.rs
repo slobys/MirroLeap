@@ -3725,6 +3725,19 @@ pub fn device_frame_capture_ack(
     }
 }
 
+/// Read-only compositor diagnostic, authorised by the active phone toolbar
+/// label. Do not return decoded pixels or the private shared-memory token.
+#[tauri::command]
+pub fn get_mirrocreator_lens_status(
+    window:Window,app_handle:tauri::AppHandle,
+)->Result<serde_json::Value,String> {
+    #[cfg(target_os="windows")]
+    { serde_json::to_value(crate::device_frame::creator_lens_status(&app_handle,&window)?)
+        .map_err(|_|"Could not serialize lens diagnostics".to_string()) }
+    #[cfg(not(target_os="windows"))]
+    {let _=(window,app_handle);Err("Lens diagnostics require Windows".into())}
+}
+
 #[tauri::command]
 pub async fn device_frame_control(
     window: Window,

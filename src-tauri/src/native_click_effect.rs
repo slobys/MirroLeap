@@ -23,8 +23,10 @@ const SWP_SHOWWINDOW:u32=0x0040;
 const ULW_ALPHA:u32=2;
 const DIB_RGB_COLORS:u32=0;
 const BI_RGB:u32=0;
-const SIDE:i32=184;
-const DURATION_MS:u64=760;
+// 1.8 s with a long fully-visible phase: the earlier 760 ms, thin ring
+// often disappeared before the user could look back from the toolbar.
+const SIDE:i32=240;
+const DURATION_MS:u64=1800;
 const AC_SRC_OVER:u8=0;
 const AC_SRC_ALPHA:u8=1;
 
@@ -83,26 +85,52 @@ fn blended(alpha:f32,r:u8,g:u8,b:u8)->[u8;4] {
     [(b as u16*a/255) as u8,(g as u16*a/255) as u8,
      (r as u16*a/255) as u8,a as u8]
 }
-fn ring_pixel(x:f32,y:f32,progress:f32)->[u8;4] {
-    let px=x-SIDE as f32/2.;
-    let py=y-SIDE as f32/2.;
-    let distance=(px*px+py*py).sqrt();
-    let progress=progress.clamp(0.,1.);
-    let radius=17.+66.*progress;
-    let thickness=4.2-progress*1.4;
-    let main=(1.-((distance-radius)/thickness).abs()).clamp(0.,1.);
-    let secondary=(1.-((distance-radius*0.86)/(thickness*0.9)).abs()).clamp(0.,1.);
-    let core=if progress < 0.28 {
-        (1.-progress/0.28)*((6.-distance)/2.).clamp(0.,1.)
-    } else {0.};
-    let fade=(1.-progress).powf(0.70);
-    if core>=main && core>=secondary {
-        blended(core*fade,255,255,255)
-    } else if main>secondary {
-        blended(main*fade*0.98,10,242,191)
-    } else {
-        blended(secondary*fade*0.85,255,255,255)
+/// All per-frame calculations happen ONCE, not 57,600 times per frame.
+/// Native layered-pixel output is premultiplied BGRA for UpdateLayeredWindow.
+#[derive(Clone,Copy)]
+struct RippleStyle {
+    radius:f32, thickness:f32, fade:f32, dot_radius:f32,
+}
+impl RippleStyle {
+    fn at(progress:f32)->Self {
+        let p=progress.clamp(0.,1.);
+        Self {
+            radius:24.+76.*p,
+            thickness:7.-2.*p,
+            // A recognisable ring is visible for about 1.25 seconds,
+            // then fades instead of vanishing after a fraction of a second.
+            fade:if p<=0.70 {1.} else {((1.-p)/0.30).clamp(0.,1.)},
+            dot_radius:8.5*(1.-p*0.55),
+        }
     }
+}
+fn ring_pixel_prepared(x:f32,y:f32,style:RippleStyle)->[u8;4] {
+    let px=x+0.5-SIDE as f32/2.;
+    let py=y+0.5-SIDE as f32/2.;
+    let distance=(px*px+py*py).sqrt();
+    let diff=(distance-style.radius).abs();
+    // An almost-opaque cyan ring with a charcoal outline reads on BOTH
+    // light backgrounds and the dark Xiaomi/Android home-screen wallpaper.
+    let cyan=(style.thickness+0.7-diff).clamp(0.,1.);
+    let dark=(style.thickness+4.2-diff).clamp(0.,1.);
+    let white=(3.1-(distance-style.radius*0.78).abs()).clamp(0.,1.);
+    let dot=(style.dot_radius+0.8-distance).clamp(0.,1.);
+    let fade=style.fade;
+    if dot>0. {
+        blended(dot*fade,255,246,135)
+    } else if cyan>0. {
+        blended(cyan*fade,10,255,214)
+    } else if white>0. {
+        blended(white*fade*0.91,255,255,255)
+    } else if dark>0. {
+        blended(dark*fade*0.92,8,23,41)
+    } else {
+        [0;4]
+    }
+}
+#[cfg(test)]
+fn ring_pixel(x:f32,y:f32,progress:f32)->[u8;4] {
+    ring_pixel_prepared(x,y,RippleStyle::at(progress))
 }
 
 struct Layer {
@@ -145,11 +173,12 @@ impl Layer {
         // flickering GDI paint over the real phone.
         let buffer=unsafe {std::slice::from_raw_parts_mut(self.pixels,
             SIDE as usize*SIDE as usize*4)};
+        let style=RippleStyle::at(progress);
         for y in 0..SIDE {
             for x in 0..SIDE {
                 let offset=((y*SIDE+x)*4) as usize;
                 buffer[offset..offset+4]
-                    .copy_from_slice(&ring_pixel(x as f32,y as f32,progress));
+                    .copy_from_slice(&ring_pixel_prepared(x as f32,y as f32,style));
             }
         }
         let target=Point{x:center.x-SIDE/2,y:center.y-SIDE/2};
@@ -257,11 +286,107 @@ pub(crate) fn stop(device:&str){
 #[cfg(test)]
 mod tests {
     use super::*;
+    // CAPTUREBLT includes WS_EX_LAYERED windows. The old tests examined a
+    // BGRA buffer only, so UpdateLayeredWindow(true) could be reported as
+    // "paint confirmed" even when the compositor showed no visible ring.
+    #[cfg(target_os="windows")]
+    #[link(name="user32")]
+    unsafe extern "system" {
+        fn GetDC(hwnd:Handle)->Handle;
+        fn ReleaseDC(hwnd:Handle,dc:Handle)->i32;
+        fn GetSystemMetrics(index:i32)->i32;
+    }
+    #[cfg(target_os="windows")]
+    #[link(name="gdi32")]
+    unsafe extern "system" {
+        fn BitBlt(dst:Handle,dx:i32,dy:i32,w:i32,h:i32,
+            src:Handle,sx:i32,sy:i32,rop:u32)->i32;
+    }
+    #[cfg(target_os="windows")]
+    fn capture_composited_rect(left:i32,top:i32,side:i32)->Result<Vec<u8>,String> {
+        unsafe {
+            let screen=GetDC(null_mut());
+            if screen.is_null() {return Err("No desktop DC".into());}
+            let memory=CreateCompatibleDC(screen);
+            if memory.is_null() {
+                ReleaseDC(null_mut(),screen);
+                return Err("No screenshot memory DC".into());
+            }
+            let info=BitmapInfo {
+                header:BitmapInfoHeader {
+                    size:std::mem::size_of::<BitmapInfoHeader>() as u32,
+                    width:side,height:-side,planes:1,bit_count:32,
+                    compression:BI_RGB,size_image:0,xpels:0,ypels:0,
+                    used:0,important:0,
+                }, colors:[0],
+            };
+            let mut pixels:*mut c_void=null_mut();
+            let bitmap=CreateDIBSection(memory,&info,DIB_RGB_COLORS,
+                &mut pixels,null_mut(),0);
+            if bitmap.is_null() || pixels.is_null() {
+                DeleteDC(memory);ReleaseDC(null_mut(),screen);
+                return Err("No desktop screenshot bitmap".into());
+            }
+            let previous=SelectObject(memory,bitmap);
+            let copied=BitBlt(memory,0,0,side,side,screen,left,top,
+                0x00CC_0020 | 0x4000_0000); // SRCCOPY | CAPTUREBLT
+            let bytes=if copied!=0 {
+                std::slice::from_raw_parts(pixels as *const u8,
+                    (side*side*4) as usize).to_vec()
+            } else {Vec::new()};
+            SelectObject(memory,previous);
+            DeleteObject(bitmap);DeleteDC(memory);
+            ReleaseDC(null_mut(),screen);
+            if copied==0 {return Err("CAPTUREBLT screen read failed".into());}
+            Ok(bytes)
+        }
+    }
+    #[test]
+    fn layered_click_is_visible_in_real_desktop_capture() {
+        if std::env::var_os("MIRROLEAP_CLICK_VISUAL_SMOKE").is_none() {return;}
+        // CI runs this on a real Windows desktop after WebView2 GUI smoke.
+        // Capture no device/Android pixels, save nothing, report counts only.
+        let x=unsafe{GetSystemMetrics(76)}; // SM_XVIRTUALSCREEN
+        let y=unsafe{GetSystemMetrics(77)}; // SM_YVIRTUALSCREEN
+        let w=unsafe{GetSystemMetrics(78)}; // SM_CXVIRTUALSCREEN
+        let h=unsafe{GetSystemMetrics(79)}; // SM_CYVIRTUALSCREEN
+        assert!(w>300 && h>300,"No interactive Windows desktop available");
+        let center=Point{x:x+w/2,y:y+h/2};
+        let side=156;
+        let left=center.x-side/2;
+        let top=center.y-side/2;
+        let background=capture_composited_rect(left,top,side)
+            .expect("Read baseline Windows desktop pixels");
+        let mut layer=Layer::new().expect("Native HWND and BGRA surface");
+        assert!(layer.draw(center,0.14),"Windows refused layered click frame");
+        std::thread::sleep(Duration::from_millis(120));
+        let actual=capture_composited_rect(left,top,side)
+            .expect("Read composited Windows desktop including click overlay");
+        layer.hide();
+        let (mut differences,mut high_contrast)=(0usize,0usize);
+        for (before,after) in background.chunks_exact(4).zip(actual.chunks_exact(4)) {
+            let delta=(0..3).map(|n|before[n].abs_diff(after[n]) as u32)
+                .sum::<u32>();
+            if delta>95 {differences+=1;}
+            // Teal/bright yellow on top of arbitrary desktop wallpaper.
+            if delta>95 && after[1] as i32 > after[2] as i32+55 &&
+               after[1] as i32 > after[0] as i32+20 {
+                high_contrast+=1;
+            }
+        }
+        eprintln!("Native click: desktop pixels changed={differences}, bright={high_contrast}");
+        assert!(differences>=130,
+            "Layered click painted into Win32 but was invisible in the ACTUAL composed desktop");
+        assert!(high_contrast>=75,
+            "Click ripple was not visible as a real cyan ring in the composed desktop");
+    }
     #[test]
     fn alpha_ring_is_transparent_outside_and_visible_during_a_click(){
         assert_eq!(ring_pixel(0.,0.,0.)[3],0);
-        assert!(ring_pixel(SIDE as f32/2.+17.,SIDE as f32/2.,0.)[3]>200);
-        assert!(ring_pixel(SIDE as f32/2.+42.,SIDE as f32/2.,0.4)[3]>50);
+        assert!(ring_pixel(SIDE as f32/2.+24.,SIDE as f32/2.,0.)[3]>200);
+        assert!(ring_pixel(SIDE as f32/2.+54.,SIDE as f32/2.,0.4)[3]>100);
+        assert!(ring_pixel(SIDE as f32/2.,SIDE as f32/2.,0.6)[3]>180);
+        assert!(ring_pixel(SIDE as f32/2.+52.,SIDE as f32/2.,0.4)[1]>100);
         assert_eq!(ring_pixel(SIDE as f32/2.,SIDE as f32/2.,1.)[3],0);
     }
     #[test]

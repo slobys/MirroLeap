@@ -283,6 +283,11 @@ impl HqDecodedCpuLens {
 
     /// True only after a complete valid source frame was rendered.
     pub fn is_presenting(&self)->bool {self.previous_key.is_some()}
+    /// Only expose dimensions once Win32 accepted a source-frame BGRA paint.
+    pub fn presented_source_size(&self)->Option<(u32,u32)> {
+        self.is_presenting().then(||self.cached_frame.as_ref().map(|(_,frame)|
+            (frame.metadata.width,frame.metadata.height))).flatten()
+    }
 
     pub fn reset_source(&mut self) {
         self.cached_frame=None;

@@ -12,7 +12,7 @@
 use std::{
     ffi::c_void,
     ptr::{null, null_mut},
-    sync::{atomic::{AtomicI32, Ordering}, mpsc::{sync_channel, Receiver, SyncSender, TrySendError}, Arc, Mutex, OnceLock},
+    sync::{atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering}, mpsc::{sync_channel, Receiver, SyncSender, TrySendError}, Arc, Mutex, OnceLock},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -401,13 +401,44 @@ impl Drop for Lens {
     }
 }
 enum Command { Update(ViewUpdate) }
-struct Session { device:String, tx:SyncSender<Command>, thread:JoinHandle<()> }
+struct Session {
+    device:String, tx:SyncSender<Command>, thread:JoinHandle<()>,
+    // These atomics represent ACTUAL presentation, not mere IPC acceptance.
+    mode:Arc<AtomicU32>,source_size:Arc<AtomicU64>,hq_requested:bool,
+}
+#[derive(serde::Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct LensSourceStatus {
+    pub mode:&'static str, // off, desktop or hq_cpu
+    pub hq_requested:bool,
+    pub source_width:u32,
+    pub source_height:u32,
+}
+pub fn source_status(device:&str)->LensSourceStatus {
+    let unavailable=LensSourceStatus {
+        mode:"off",hq_requested:false,source_width:0,source_height:0,
+    };
+    let Ok(sessions)=current().try_lock() else {return unavailable;};
+    let Some(session)=sessions.as_ref().filter(|s|s.device==device) else {
+        return unavailable;
+    };
+    let mode=match session.mode.load(Ordering::Acquire) {
+        2=>"hq_cpu",1=>"desktop",_=>"off",
+    };
+    let source=if mode=="hq_cpu" {session.source_size.load(Ordering::Acquire)}
+        else {0};
+    LensSourceStatus {
+        mode,hq_requested:session.hq_requested,
+        source_width:(source>>32) as u32,source_height:source as u32,
+    }
+}
 static CURRENT:OnceLock<Mutex<Option<Session>>>=OnceLock::new();
 fn current()->&'static Mutex<Option<Session>> {CURRENT.get_or_init(||Mutex::new(None))}
 
 fn work_loop(
     rx:Receiver<Command>,started:SyncSender<Result<(),String>>,
     owner:Option<Arc<HqMappingOwner>>,
+    actual_mode:Arc<AtomicU32>,source_size:Arc<AtomicU64>,
 ) {
     let mut lens=match Lens::create() {
         Ok(lens)=>lens,
@@ -443,6 +474,7 @@ fn work_loop(
             }
         }
         lens.apply_wheel(hq.as_ref().is_none_or(|preview|!preview.is_presenting()));
+        let mut presented_source=None;
         if let (Some(owner),Some(preview),Some(view))=(owner.as_ref(),hq.as_mut(),lens.view) {
             if !view.active || !view.inside() {
                 preview.hide();
@@ -454,6 +486,7 @@ fn work_loop(
                 let _=preview.update_from_source(owner,source,
                     (view.cursor_x,view.cursor_y),target.size as u32,lens.settings.zoom);
                 if preview.is_presenting() {
+                    presented_source=preview.presented_source_size();
                     lens.set_visible(false);
                     // The wheel must still resize the HQ circle even though
                     // the Magnification.dll fallback HWND is hidden.
@@ -466,8 +499,21 @@ fn work_loop(
                 lens.set_visible(false);
             }
         }
+        // Report real HWND presentation state without copying or logging
+        // any device-frame bytes, screen coordinates, tokens or thumbnails.
+        if let Some((w,h))=presented_source {
+            source_size.store(((w as u64)<<32) | h as u64,Ordering::Release);
+            actual_mode.store(2,Ordering::Release);
+        } else {
+            source_size.store(0,Ordering::Release);
+            let displaying_legacy=lens.view.is_some_and(|v|v.active && v.inside())
+                && lens.visible;
+            actual_mode.store(u32::from(displaying_legacy),Ordering::Release);
+        }
         lens.refresh();
     }
+    actual_mode.store(0,Ordering::Release);
+    source_size.store(0,Ordering::Release);
     WHEEL_ACTIVE.store(0,Ordering::SeqCst);
 }
 
@@ -477,13 +523,19 @@ pub fn start_with_hq(device:&str,owner:Option<Arc<HqMappingOwner>>)->Result<(),S
     stop_all();
     let (tx,rx)=sync_channel(5);
     let (ready_tx,ready_rx)=sync_channel(1);
+    let hq_requested=owner.is_some();
+    let mode=Arc::new(AtomicU32::new(0));
+    let source_size=Arc::new(AtomicU64::new(0));
+    let mode_worker=mode.clone();
+    let size_worker=source_size.clone();
     let worker=thread::Builder::new().name("mirroleap-live-magnifier".into())
-        .spawn(move||work_loop(rx,ready_tx,owner))
+        .spawn(move||work_loop(rx,ready_tx,owner,mode_worker,size_worker))
         .map_err(|e|format!("Cannot start native live magnifier: {e}"))?;
     match ready_rx.recv_timeout(Duration::from_secs(4)) {
         Ok(Ok(()))=>{
             let mut lock=current().lock().map_err(|e|e.to_string())?;
-            *lock=Some(Session{device:device.to_string(),tx,thread:worker});
+            *lock=Some(Session{device:device.to_string(),tx,thread:worker,
+                mode,source_size,hq_requested});
             Ok(())
         },
         Ok(Err(e))=>{drop(tx);let _=worker.join();Err(e)},
@@ -520,6 +572,13 @@ pub fn update(device:&str,view:ViewUpdate) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn truthfully_defaults_off_without_an_active_hq_render() {
+        let status=source_status("nonexistent-phone");
+        assert_eq!(status.mode,"off");
+        assert_eq!(status.source_width,0);
+        assert!(!status.hq_requested);
+    }
     #[test]
     fn native_circle_stays_inside_all_phone_edges_while_sample_tracks_pointer() {
         for (width,height) in [(420,900),(900,420),(220,400)] {

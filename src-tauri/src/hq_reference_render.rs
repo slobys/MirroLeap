@@ -42,7 +42,39 @@ fn bilinear_plane(
     Ok(t0*(1.0-b)+t1*b)
 }
 
-fn sample_rgb(frame:&OwnedFrame, x:f32,y:f32)
+/// Source pixels per output pixel: 2.35x magnification of a small SDL
+/// window can STILL be minification against a 1440p decoded source.
+/// Single-sample bilinear undersamples fine text/checkerboard details in
+/// that case, causing dancing jaggies and moire. Supersample LUMA only
+/// (chroma remains bilinear) to preserve a bounded CPU reference budget.
+/// Do not blur when the source has <= one decoded pixel per output pixel.
+fn adaptive_luma(
+    data:&[u8],width:usize,height:usize,x:f32,y:f32,
+    source_per_output_x:f32,source_per_output_y:f32,
+)->Result<f32,&'static str> {
+    if !source_per_output_x.is_finite() || !source_per_output_y.is_finite() ||
+       source_per_output_x<=0.0 || source_per_output_y<=0.0 {
+        return Err("invalid HQ sampling footprint");
+    }
+    let sx=source_per_output_x.max(1.0);
+    let sy=source_per_output_y.max(1.0);
+    // At >=1.2 source pixels/output pixel, antialias by integrating four
+    // subpixel samples over the source footprint; no desktop-frame scaling.
+    if sx < 1.2 && sy < 1.2 {
+        return bilinear_plane(data,0,width,width,height,x,y,1,0);
+    }
+    let half_x=(sx*0.25).min(1.0);
+    let half_y=(sy*0.25).min(1.0);
+    let mut sum=0.;
+    for dy in [-half_y,half_y] {
+        for dx in [-half_x,half_x] {
+            sum+=bilinear_plane(data,0,width,width,height,x+dx,y+dy,1,0)?;
+        }
+    }
+    Ok(sum*0.25)
+}
+
+fn sample_rgb(frame:&OwnedFrame, x:f32,y:f32,scale_x:f32,scale_y:f32)
     ->Result<[u8;4],&'static str>
 {
     let w=frame.metadata.width as usize;
@@ -51,7 +83,7 @@ fn sample_rgb(frame:&OwnedFrame, x:f32,y:f32)
         return Ok(BGRA_BACKGROUND);
     }
     let data=&frame.data;
-    let y_plane=bilinear_plane(data,0,w,w,h,x,y,1,0)?;
+    let y_plane=adaptive_luma(data,w,h,x,y,scale_x,scale_y)?;
     let (u,v)=match frame.metadata.format {
         PixelFormat::Yuv420p=>{
             let y_len=w.checked_mul(h).ok_or("HQ Y plane overflow")?;
@@ -111,6 +143,8 @@ pub fn render_decoded_reference(
     }
     let size=out_size as usize;
     let mut out=vec![0u8;size*size*4];
+    let source_per_output_x=area.source_width/out_size as f32;
+    let source_per_output_y=area.source_height/out_size as f32;
     for dy in 0..size {
         let v=(dy as f32+0.5)/out_size as f32;
         for dx in 0..size {
@@ -126,7 +160,7 @@ pub fn render_decoded_reference(
             // Subtract half a pixel to align interpolated sample centers.
             let x=area.source_left+cx*area.source_width-0.5;
             let y=area.source_top+cy*area.source_height-0.5;
-            let bgra=sample_rgb(frame,x,y)?;
+            let bgra=sample_rgb(frame,x,y,source_per_output_x,source_per_output_y)?;
             out[(dy*size+dx)*4..(dy*size+dx+1)*4].copy_from_slice(&bgra);
         }
     }
@@ -220,6 +254,24 @@ mod tests {
         assert!(render_decoded_reference(&f,SourceFrame{
             width:8,height:8,rotation:0,
         },&sample,MAX_REFERENCE_DIAMETER+1).is_err());
+    }
+    #[test]
+    fn source_supersampling_suppresses_one_pixel_moire_not_details() {
+        let mut data=vec![16u8;64*64];
+        for y in 0..64 {
+            for x in 0..64 {
+                if (x+y)%2==0 {data[y*64+x]=235;}
+            }
+        }
+        let single=bilinear_plane(&data,0,64,64,64,20.,20.,1,0).unwrap();
+        let filtered=adaptive_luma(&data,64,64,20.,20.,2.,2.).unwrap();
+        assert!(single>230.,"Raw single-tap checkerboard sample is alias-prone");
+        assert!((filtered-125.5).abs()<4.,
+            "2D source subpixel integration removes aliasing without discarding decoded frames");
+        // Do not accidentally smooth native-resolution or magnified pixels.
+        let native=adaptive_luma(&data,64,64,20.,20.,1.,1.).unwrap();
+        assert_eq!(native,single);
+        assert!(adaptive_luma(&data,64,64,20.,20.,f32::NAN,2.).is_err());
     }
     #[test]
     fn direct_lens_samples_work_for_rotated_decoded_video() {

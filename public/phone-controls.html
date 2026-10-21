@@ -507,9 +507,9 @@
         } else if (stage==='canvas') {
           creatorCanvasClicks+=1;
         } else { return false; }
-        button.title='Windows 原生光圈 '+creatorNativeClicks+' 次 · WebView '+creatorCanvasClicks+' 次';
-        presentFeedback('sent','原生光圈 '+creatorNativeClicks+
-          ' 次 · WebView 画布 '+creatorCanvasClicks+' 次');
+        button.title='Win32 已接收 '+creatorNativeClicks+' 次绘制 · WebView 已处理 '+creatorCanvasClicks+' 次（实际可见性仍需屏幕验收）';
+        presentFeedback('sent','绘制指令 '+creatorNativeClicks+
+          ' 次 · 画布 '+creatorCanvasClicks+' 次（不等于肉眼可见）');
         return true;
       };
       function displayPresentState(open, spotlight, magnifier, live = false) {
@@ -525,9 +525,44 @@
         }
         document.getElementById('present-refresh').disabled = !open || !magnifier;
         document.getElementById('present-hint').textContent = live
-          ? '滚轮调圈大小 · Ctrl+滚轮调倍率 · 低倍率更清晰'
+          ? '正在检测实际画质来源 · 默认 2.35×'
           : '实时模式跟随视频；定格和聚光灯暂停触控';
       }
+      // 2.35x is only the optical scale, NOT proof of HQ source pixels.
+      // Surface what Windows actually drew (decoded CPU source vs desktop
+      // Magnification fallback), instead of a cosmetic "HD enabled" toggle.
+      async function refreshLiveQuality() {
+        if (!document.body.classList.contains('present-open') ||
+            document.getElementById('present-live').getAttribute('aria-pressed') !== 'true' ||
+            document.hidden) return;
+        const hint=document.getElementById('present-hint');
+        try {
+          const quality=await window.__TAURI__?.core?.invoke('get_mirrocreator_lens_status');
+          if (document.getElementById('present-live').getAttribute('aria-pressed') !== 'true') return;
+          const width=Number(quality?.sourceWidth);
+          const height=Number(quality?.sourceHeight);
+          if (quality?.mode === 'hq_cpu' && Number.isInteger(width) &&
+              Number.isInteger(height) && width > 0 && height > 0) {
+            hint.textContent='HQ 原始帧 '+width+'×'+height+' · CPU 抗锯齿';
+            hint.title='Win32 已接收 scrcpy 原始解码帧绘制；需目视确认实际可见性。此版本尚不是 GPU D3D11 高清渲染。滚轮调圆圈、Ctrl+滚轮调倍率';
+          } else if (quality?.mode === 'off') {
+            hint.textContent=quality?.hqRequested ?
+              'HQ 已选择 · 移入手机画面检测' :
+              '等待鼠标进入手机 · HQ 未启用';
+            hint.title='真实取样引擎只在鼠标位于前景投屏画面时绘制。';
+          } else if (quality?.hqRequested) {
+            hint.textContent='桌面回退 · 高清原始帧当前不可用';
+            hint.title='实验 HQ 已选，但此刻没有显示有效源帧；可能尚未出现视频帧、硬解像素格式不受支持或独立窗口不可用';
+          } else {
+            hint.textContent='桌面放大 · 尚未启用 HQ 原始帧';
+            hint.title='当前仍从已缩放的 Windows 桌面取样。可在主窗口「GPU 解码与性能」开启实验 HQ 后重新投屏';
+          }
+        } catch (error) {
+          hint.textContent='画质来源检查失败';
+          hint.title='当前无法确认高清帧显示状态：'+String(error).slice(0,90);
+        }
+      }
+      window.setInterval(()=>{ void refreshLiveQuality(); },1100);
       async function syncPresentState() {
         if (presenterSwitching) return;
         try {
@@ -538,6 +573,7 @@
             invoke('present_is_live'), invoke('creator_click_status'),
           ]);
           displayPresentState(true, spotlight, magnifier, live);
+          if (live) void refreshLiveQuality();
           const button=document.getElementById('creator-click');
           button.classList.toggle('active',!!click);
           button.setAttribute('aria-pressed',String(!!click));

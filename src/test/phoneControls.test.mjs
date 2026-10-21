@@ -17,13 +17,15 @@ function setup({ failToggle = false, failAction = null, failReason = 'Native act
   let clickEffect = false;
   let top = false;
   let remember = true;
+  let lensQuality={mode:'desktop',hqRequested:false,sourceWidth:0,sourceHeight:0};
   const dom = new JSDOM(html, {
     url: 'http://localhost/phone-controls.html',
     runScripts: 'dangerously',
     pretendToBeVisual: true,
     beforeParse(window) {
       window.alert = () => {};
-      window.__TAURI__ = { core: { invoke: async (command, { action }) => {
+      window.__TAURI__ = { core: { invoke: async (command, { action } = {}) => {
+        if (command === 'get_mirrocreator_lens_status') return lensQuality;
         expect(command).toBe('device_frame_control');
         actions.push(action);
         if (action === failAction) throw new Error(failReason);
@@ -64,7 +66,8 @@ function setup({ failToggle = false, failAction = null, failReason = 'Native act
       } } };
     },
   });
-  return { dom, document: dom.window.document, actions, setTop(value) { top = !!value; } };
+  return { dom, document: dom.window.document, actions, setTop(value) { top = !!value; },
+    setLensQuality(next) {lensQuality=next;} };
 }
 
 describe('real Tauri phone-controls HTML', () => {
@@ -150,17 +153,34 @@ describe('real Tauri phone-controls HTML', () => {
     expect(dom.window.mirroCreatorNativeClick('canvas')).toBe(true);
     expect(dom.window.mirroCreatorNativeClick('invalid')).toBe(false);
     expect(document.getElementById('creator-click').dataset.nativeClicks).toBe('2');
-    expect(document.getElementById('present-feedback')).toHaveTextContent('原生光圈 2 次');
-    expect(document.getElementById('present-feedback')).toHaveTextContent('WebView 画布 1 次');
+    expect(document.getElementById('present-feedback')).toHaveTextContent('绘制指令 2 次');
+    expect(document.getElementById('present-feedback')).toHaveTextContent('画布 1 次');
+    expect(document.getElementById('present-feedback')).toHaveTextContent('不等于肉眼可见');
     document.getElementById('present-live').click();
     await nextTask();await nextTask();
     expect(actions).toContain('present_live');
     expect(document.getElementById('present-live').getAttribute('aria-pressed')).toBe('true');
-    expect(document.getElementById('present-hint')).toHaveTextContent('滚轮调圈大小');
+    expect(document.getElementById('present-hint')).toHaveTextContent('桌面放大');
     document.getElementById('present-off').click();
     await nextTask();await nextTask();
     expect(document.getElementById('present-live').getAttribute('aria-pressed')).toBe('false');
     expect(document.getElementById('present-hint')).toHaveTextContent('定格和聚光灯暂停触控');
+    dom.window.close();
+  });
+
+  it('reports ACTUAL HQ source dimensions and returns to desktop fallback when frames stop', async()=>{
+    const {dom,document,setLensQuality}=setup();
+    document.getElementById('present-toggle').click();
+    await nextTask();await nextTask();
+    document.getElementById('present-live').click();
+    await nextTask();await nextTask();
+    setLensQuality({mode:'hq_cpu',hqRequested:true,sourceWidth:1440,sourceHeight:2560});
+    await new Promise(resolve=>setTimeout(resolve,1150));
+    expect(document.getElementById('present-hint')).toHaveTextContent('HQ 原始帧 1440×2560');
+    expect(document.getElementById('present-hint').title).toContain('尚不是 GPU D3D11');
+    setLensQuality({mode:'desktop',hqRequested:true,sourceWidth:0,sourceHeight:0});
+    await new Promise(resolve=>setTimeout(resolve,1150));
+    expect(document.getElementById('present-hint')).toHaveTextContent('高清原始帧当前不可用');
     dom.window.close();
   });
 

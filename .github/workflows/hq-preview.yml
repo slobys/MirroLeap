@@ -51,7 +51,8 @@ jobs:
           $tests = @(
             'hq_protocol::tests','hq_bridge_windows::tests','hq_geometry::tests',
             'hq_reference_render::tests','hq_pipeline::tests',
-            'hq_cpu_lens_windows::tests','native_live_lens::tests'
+            'hq_cpu_lens_windows::tests','native_live_lens::tests',
+            'native_click_effect::tests'
           )
           foreach ($test in $tests) {
             cargo test --locked --manifest-path src-tauri/Cargo.toml --lib $test
@@ -175,6 +176,13 @@ jobs:
       - name: Verify REAL Windows WebView2 main window is not blank
         shell: pwsh
         run: ./scripts/windows-smoke-webview.ps1
+      - name: Windows click ripple real desktop COMPOSITOR pixel smoke
+        shell: pwsh
+        env:
+          MIRROLEAP_CLICK_VISUAL_SMOKE: '1'
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_click_effect::tests::layered_click_is_visible_in_real_desktop_capture -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Native click ripple did not appear in an actual composited Windows desktop capture' }
       - name: Build SIDE-BY-SIDE HQ Preview EXE and MSI (no stable updater)
         env:
           MIRROLEAP_HQ_PREVIEW: '1'
@@ -222,10 +230,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $tag = "hq-preview-v5.2.4-run${{ github.run_number }}"
+          $version = (Get-Content src-tauri/tauri.hq-preview.conf.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid isolated HQ Preview version' }
+          $tag = "hq-preview-v${version}-run${{ github.run_number }}"
           $files = @(Get-ChildItem hq-preview-release -File | ForEach-Object { $_.FullName })
           gh release create $tag $files --repo ${{ github.repository }} `
-            --title "MirroLeap HQ Preview 5.2.4 / CI ${{ github.run_number }}" `
+            --title "MirroLeap HQ Preview ${version} / CI ${{ github.run_number }}" `
             --notes-file hq/HQ_PREVIEW_NOTES.md --prerelease --latest=false `
             --target ${{ github.sha }}
           if ($LASTEXITCODE -ne 0) { throw 'GitHub prerelease publish failed' }

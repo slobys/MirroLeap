@@ -1255,6 +1255,15 @@ fn device_for_controls(app: &AppHandle, caller: &tauri::Window) -> Result<String
         .ok_or_else(|| "This control bar is not attached to an active scrcpy window".into())
 }
 
+/// Only the Tauri toolbar bound to the current device can inspect whether
+/// the user is really seeing decoded-source pixels or desktop fallback.
+pub(crate) fn creator_lens_status(
+    app:&AppHandle,caller:&tauri::Window,
+)->Result<crate::native_live_lens::LensSourceStatus,String> {
+    let device=device_for_controls(app,caller)?;
+    Ok(crate::native_live_lens::source_status(&device))
+}
+
 /// Called only by the dedicated phone-controls-* toolbar window.
 /// The full-screen visual overlay cannot receive pointer events by design.
 fn ink_action_script(action: &str) -> Option<&'static str> {
