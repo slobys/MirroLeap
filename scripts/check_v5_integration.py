@@ -212,7 +212,9 @@ assert 'struct ScopedWheelHook' in native_lens
 
 assert 'set_ignore_cursor_events(mode == "live")' in frame_native
 assert 'start_live_zoom_sampling' not in frame_native
-assert "mode === 'live'" in present and "mode === 'off' || mode === 'live'" in present
+assert "mode === 'live'" in present and "mode === 'off' || w < 1 || h < 1" in present
+assert 'updatePrivacyCircle' in present and 'destination-out' in present
+assert 'present_privacy_cycle' in frame_native and 'privacy_circle' in native_lens
 assert "document.body.classList.toggle('presenting', value === 'spotlight' || value === 'magnifier')" in present
 assert 'lensX' in present and 'lensY' in present
 assert 'Math.max(0, left)' in present and 'Math.max(0, top)' in present

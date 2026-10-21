@@ -14,6 +14,14 @@
   let point = {x: .5, y: .5};
   let snapshot = null;
   let snapshotToken = 0;
+  // Visual-only privacy shade. Never redacts scrcpy frames or recordings.
+  let privacy = 'off'; // off | dim | black
+  const privacyLevels = new Set(['off', 'dim', 'black']);
+  let liveCircle = null; // normalized HWND position supplied by native lens
+  const drawShade = (w, h) => {
+    ctx.fillStyle = privacy === 'black' ? '#000000' : 'rgba(0,0,0,.84)';
+    ctx.fillRect(0, 0, w, h);
+  };
 
   let drawPending = false;
   const minRadiusRatio = .11;
@@ -28,9 +36,27 @@
     drawPending = false;
     const w = canvas.width, h = canvas.height;
     ctx.clearRect(0, 0, w, h);
-    // The native live lens draws itself directly from the Windows compositor.
-    // Never paint a second fake/static magnifier on top of it.
-    if (mode === 'off' || mode === 'live' || w < 1 || h < 1) return;
+    if (mode === 'off' || w < 1 || h < 1) return;
+    // If a frozen frame expires on rotation or refresh, keep the phone
+    // covered until the user explicitly disables the visual shield.
+    if (mode === 'magnifier' && privacy !== 'off' && !snapshot) {
+      ctx.save(); drawShade(w, h); ctx.restore();
+      return;
+    }
+    // Native live lens/HQ circle draws ON TOP of this mouse-through canvas.
+    // Use native geometry, not pointermove (which is intentionally disabled).
+    if (mode === 'live') {
+      if (privacy === 'off' || !liveCircle) return;
+      ctx.save();
+      drawShade(w, h);
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.ellipse(liveCircle.cx * w, liveCircle.cy * h,
+        liveCircle.rx * w, liveCircle.ry * h, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
     const x = point.x * w;
     const y = point.y * h;
     const radius = Math.max(12, Math.min(w, h) * radiusRatio);
@@ -51,6 +77,9 @@
       ctx.fill();
       ctx.globalCompositeOperation = 'source-over';
     } else if (mode === 'magnifier' && snapshot) {
+      // Paint the shade BEHIND the snapshot circle, and nowhere else.
+      // The rounded phone aperture remains clipped in frame.html.
+      if (privacy !== 'off') drawShade(w, h);
       const sampleW = (radius * 2 / zoomFactor / w) * snapshot.width;
       const sampleH = (radius * 2 / zoomFactor / h) * snapshot.height;
       // Do not clamp the requested source center to the image edge: that
@@ -86,7 +115,7 @@
     ctx.arc(lensX, lensY, radius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
-    if (mode === 'magnifier') {
+    if (mode === 'magnifier' && privacy === 'off') {
       ctx.save();
       ctx.font = '600 12px sans-serif';
       ctx.textAlign = 'center';
@@ -173,6 +202,28 @@
     focusPoint() { return {...point}; },
     size() { return radiusRatio; },
     zoom() { return zoomFactor; },
+    privacy() { return privacy; },
+    updatePrivacyCircle(value) {
+      if (value === null) {liveCircle = null; redraw(); return true;}
+      if (mode !== 'live' || !value ||
+          !['cx','cy','rx','ry'].every(key => Number.isFinite(value[key])) ||
+          value.cx < 0 || value.cx > 1 || value.cy < 0 || value.cy > 1 ||
+          value.rx <= 0 || value.rx > .5 || value.ry <= 0 || value.ry > .5) {
+        return false;
+      }
+      liveCircle = {cx:value.cx, cy:value.cy, rx:value.rx, ry:value.ry};
+      redraw();
+      return true;
+    },
+    setPrivacy(value) {
+      if (!privacyLevels.has(value)) throw new Error('Unknown privacy level');
+      if (!['magnifier','live'].includes(mode) && value !== 'off') {
+        throw new Error('Privacy requires an active magnifier');
+      }
+      privacy = value;
+      redraw();
+      return privacy;
+    },
     resetSize() {
       radiusRatio = defaultRadiusRatio;
       zoomFactor = zoomDefault;
@@ -184,6 +235,8 @@
       if (value !== mode) {
         snapshot = null;
         snapshotToken++;
+        privacy = 'off'; // never persist shielding across modes/devices
+        liveCircle = null;
       }
       mode = value;
       // Only these modes intentionally capture the pointer. The native

@@ -53,7 +53,12 @@ assert 'native_live_lens::update' in native
 assert 'WindowFromPoint' in native and 'GetAncestor(hovered,GA_ROOT)' in native
 assert 'start_creator_click_sampler' in native
 assert 'MagSetWindowSource' in (root / "src-tauri/src/native_live_lens.rs").read_text()
-assert "mode === 'off' || mode === 'live'" in present
+assert "mode === 'live'" in present and "updatePrivacyCircle" in present
+assert "privacyLevels = new Set(['off', 'dim', 'black'])" in present
+assert "drawShade(w, h)" in present and "destination-out" in present
+assert 'present_privacy_cycle' in native and 'present_privacy_is_black' in native
+assert 'privacy_circle' in (root / "src-tauri/src/native_live_lens.rs").read_text()
+assert 'update_presentation_mode(app, device, "off")' in native
 
 assert "update_presentation_mode(app, device, \"off\")" in native
 assert "set_presentation_snapshot(" in native

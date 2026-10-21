@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Verify the Windows hover toolbar with actual Chromium/Edge box geometry:
- * all quick actions and all six presenter actions must be visible,
+ * all quick actions and all seven presenter actions must be visible,
  * unobstructed and never crop the
  * neighboring close/minimize, ink and emergency reset controls. Browser-only
  * mock is inert; native IPC is verified separately by the Rust/Windows build.
@@ -23,7 +23,7 @@ const layouts = [
 ];
 const file = pathToFileURL(resolve('public/phone-controls.html')).href;
 const names = ['fullscreen','home','back','recents','power','rotate','paste','top','remember'];
-const presenterActions = ['spotlight','magnifier','live','creator-click','refresh','off'];
+const presenterActions = ['spotlight','magnifier','live','privacy','creator-click','refresh','off'];
 const browser = await chromium.launch({
   channel: process.env.MIRROLEAP_LAYOUT_BROWSER === 'chromium' ? undefined : 'msedge',
   headless: true, args:['--no-first-run', '--disable-extensions'],
@@ -46,6 +46,8 @@ try {
           if (action === 'present_status') return presenter;
           if (action === 'present_is_spotlight') return presentMode === 'spotlight';
           if (action === 'present_is_magnifier') return presentMode === 'magnifier';
+          if (action === 'present_is_live') return presentMode === 'live';
+          if (action === 'present_privacy_is_dim' || action === 'present_privacy_is_black') return false;
           if (action === 'present_toggle') {
             presenter = !presenter; open = false; ink = false;
             if (!presenter) presentMode = 'off';
@@ -129,7 +131,7 @@ try {
       for(const item of presenterGeometry.controls){
         assert(item.ok,`Presenter ${item.name} obscured: ${entry.layout} ${dpi} ${JSON.stringify(presenterGeometry)}`);
       }
-      console.log('PASS',entry.layout,`${dpi*100}% DPI, all quick + six presenter controls reachable`);
+      console.log('PASS',entry.layout,`${dpi*100}% DPI, all quick + seven presenter controls reachable`);
       await page.close();
     }
     await context.close();

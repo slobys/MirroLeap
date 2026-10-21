@@ -14,6 +14,7 @@ function setup({ failToggle = false, failAction = null, failReason = 'Native act
   let quick = false;
   let presenter = false;
   let presenterMode = 'off';
+  let privacy='off';
   let clickEffect = false;
   let top = false;
   let remember = true;
@@ -34,29 +35,36 @@ function setup({ failToggle = false, failAction = null, failReason = 'Native act
           enabled = !enabled;
           quick = false;
           presenter = false;
-          presenterMode = 'off';
+          presenterMode = 'off'; privacy='off';
         }
-        if (action === 'ink_reset') { enabled = false; quick = false; presenter = false; presenterMode='off'; }
+        if (action === 'ink_reset') { enabled = false; quick = false; presenter = false; presenterMode='off'; privacy='off'; }
         if (action === 'quick_toggle') {
-          quick = !quick; enabled = false; presenter = false; presenterMode='off';
+          quick = !quick; enabled = false; presenter = false; presenterMode='off'; privacy='off';
         }
         if (action === 'present_status') return presenter;
         if (action === 'present_is_spotlight') return presenterMode === 'spotlight';
         if (action === 'present_is_magnifier') return presenterMode === 'magnifier';
         if (action === 'present_is_live') return presenterMode === 'live';
+        if (action === 'present_privacy_is_dim') return privacy === 'dim';
+        if (action === 'present_privacy_is_black') return privacy === 'black';
+        if (action === 'present_privacy_cycle') {
+          if (!['magnifier','live'].includes(presenterMode)) throw Error('magnifier required');
+          privacy=privacy==='off'?'dim':privacy==='dim'?'black':'off';
+          return privacy!=='off';
+        }
         if (action === 'creator_click_status') return clickEffect;
         if (action === 'creator_click_toggle') return (clickEffect = !clickEffect);
         if (action === 'present_toggle') {
           presenter = !presenter;
           enabled = false;quick = false;
-          if (!presenter) presenterMode = 'off';
+          if (!presenter) {presenterMode = 'off';privacy='off';}
           return presenter;
         }
-        if (action === 'present_spotlight') { presenterMode = 'spotlight'; return true; }
-        if (action === 'present_magnifier') { presenterMode = 'magnifier'; return true; }
-        if (action === 'present_live') { presenterMode = presenterMode === 'live' ? 'off' : 'live'; return presenterMode === 'live'; }
+        if (action === 'present_spotlight') { presenterMode = 'spotlight';privacy='off'; return true; }
+        if (action === 'present_magnifier') { presenterMode = 'magnifier';privacy='off'; return true; }
+        if (action === 'present_live') { presenterMode = presenterMode === 'live' ? 'off' : 'live';privacy='off'; return presenterMode === 'live'; }
         if (action === 'present_refresh') return true;
-        if (action === 'present_off') { presenterMode = 'off'; return false; }
+        if (action === 'present_off') { presenterMode = 'off';privacy='off'; return false; }
         if (action === 'quick_status') return quick;
         if (action === 'quick_top_status') return top;
         if (action === 'quick_top_toggle') return (top = !top);
@@ -360,6 +368,29 @@ describe('real Tauri phone-controls HTML', () => {
     expect(actions).toEqual(expect.arrayContaining([
       'present_toggle','present_spotlight','present_magnifier','present_refresh','present_off'
     ]));
+    dom.window.close();
+  });
+
+  it('offers visual-only privacy exclusively during magnifier and cycles off/dim/black/off',async()=>{
+    const {dom,document,actions}=setup();
+    const toggle=document.getElementById('present-toggle');
+    const privacy=document.getElementById('present-privacy');
+    expect(privacy.disabled).toBe(true);
+    toggle.click();await nextTask();await nextTask();
+    expect(privacy.disabled).toBe(true);
+    document.getElementById('present-magnifier').click();
+    await nextTask();await nextTask();
+    expect(privacy.disabled).toBe(false);
+    privacy.click();await nextTask();await nextTask();
+    expect(privacy.getAttribute('aria-pressed')).toBe('true');
+    expect(document.getElementById('present-privacy-label').textContent).toBe('暗化');
+    privacy.click();await nextTask();await nextTask();
+    expect(document.getElementById('present-privacy-label').textContent).toBe('全黑');
+    privacy.click();await nextTask();await nextTask();
+    expect(privacy.getAttribute('aria-pressed')).toBe('false');
+    document.getElementById('present-off').click();await nextTask();await nextTask();
+    expect(privacy.disabled).toBe(true);
+    expect(actions.filter(action=>action==='present_privacy_cycle')).toHaveLength(3);
     dom.window.close();
   });
 

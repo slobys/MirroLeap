@@ -20,7 +20,7 @@ function boot() {
         if (!contexts.has(this.id)) {
           const ctx = {};
           for (const method of ['save','restore','clearRect','fillRect','beginPath',
-            'moveTo','lineTo','arc','clip','fill','stroke','drawImage','strokeText','fillText']) {
+            'moveTo','lineTo','arc','ellipse','clip','fill','stroke','drawImage','strokeText','fillText']) {
             ctx[method] = (...args) => operations.push([this.id,method,...args]);
           }
           contexts.set(this.id,ctx);
@@ -114,6 +114,47 @@ describe('MirroPresent real phone-frame Canvas behavior', () => {
     await expect(window.scrcpyPresent.loadSnapshot('data:image/png;base64,YWJj','landscape')).rejects.toThrow(/orientation/);
     window.scrcpyPresent.setMode('off');
     await expect(window.scrcpyPresent.loadSnapshot('data:image/png;base64,YWJj','portrait')).rejects.toThrow(/Enable/);
+    dom.window.close();
+  });
+
+  it('shades only outside the snapshot circle, cycles dark/black and clears on exit', async()=>{
+    const {dom,window,operations}=boot();
+    const lens=window.scrcpyPresent;
+    expect(lens.privacy()).toBe('off');
+    expect(()=>lens.setPrivacy('black')).toThrow(/active magnifier/);
+    lens.setMode('magnifier');
+    await lens.loadSnapshot('data:image/png;base64,YWJj','portrait');
+    operations.length=0;
+    expect(lens.setPrivacy('dim')).toBe('dim');
+    expect(operations.some(row=>row[0]==='presentation' && row[1]==='fillRect' &&
+      row[2]===0 && row[3]===0 && row[4]===300 && row[5]===500)).toBe(true);
+    expect(operations.some(row=>row[0]==='presentation' && row[1]==='drawImage')).toBe(true);
+    expect(lens.setPrivacy('black')).toBe('black');
+    expect(()=>lens.setPrivacy('fake')).toThrow(/Unknown privacy/);
+    lens.setMode('off');
+    expect(lens.privacy()).toBe('off');
+    expect(window.document.body.classList.contains('presenting')).toBe(false);
+    dom.window.close();
+  });
+
+  it('live lens accepts only native relative circle geometry, hides its mask on exit',()=>{
+    const {dom,window,operations}=boot();
+    const lens=window.scrcpyPresent;
+    lens.setMode('live');
+    expect(window.document.body.classList.contains('presenting')).toBe(false);
+    expect(lens.setPrivacy('black')).toBe('black');
+    expect(lens.updatePrivacyCircle({cx:2,cy:.5,rx:.2,ry:.2})).toBe(false);
+    expect(lens.updatePrivacyCircle({cx:.5,cy:.5,rx:Infinity,ry:.2})).toBe(false);
+    operations.length=0;
+    expect(lens.updatePrivacyCircle({cx:.5,cy:.5,rx:.25,ry:.12})).toBe(true);
+    expect(operations.some(row=>row[0]==='presentation' && row[1]==='ellipse' &&
+      row[2]===150 && row[3]===250 && row[4]===75 && row[5]===60)).toBe(true);
+    expect(operations.some(row=>row[0]==='presentation' && row[1]==='fillRect')).toBe(true);
+    operations.length=0;
+    expect(lens.updatePrivacyCircle(null)).toBe(true);
+    expect(operations.some(row=>row[0]==='presentation' && row[1]==='ellipse')).toBe(false);
+    lens.setMode('off');
+    expect(lens.privacy()).toBe('off');
     dom.window.close();
   });
 

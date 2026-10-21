@@ -49,6 +49,15 @@ use crate::ScrcpyState;
 static ACTIVE_DRAGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static PRESENTATION_MODES: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
 static PRESENTATION_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+// Visual-only per-device shading; never redacts raw scrcpy captures.
+static PRESENTATION_PRIVACY: OnceLock<Mutex<HashMap<String,&'static str>>> = OnceLock::new();
+fn privacy_levels()->&'static Mutex<HashMap<String,&'static str>> {
+    PRESENTATION_PRIVACY.get_or_init(||Mutex::new(HashMap::new()))
+}
+fn presentation_privacy(device:&str)->&'static str {
+    privacy_levels().lock().ok().and_then(|levels|levels.get(device).copied())
+        .unwrap_or("off")
+}
 static INK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static QUICK_ENABLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static PRESENT_TOOL_OPEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -316,6 +325,11 @@ pub(crate) fn presentation_mode(device: &str) -> String {
         .unwrap_or("off").to_string()
 }
 fn update_presentation_mode(app: &AppHandle, device: &str, mode: &'static str) {
+    // Any mode switch, disconnect or minimize drops visual-only privacy.
+    // The front-end setMode() clears its own shade and stale lens geometry.
+    if presentation_mode(device) != mode || mode == "off" {
+        if let Ok(mut levels)=privacy_levels().lock() {levels.remove(device);}
+    }
     if let Ok(mut modes) = presentation_modes().lock() {
         if mode == "off" { modes.remove(device); }
         else { modes.insert(device.to_string(), mode); }
@@ -741,6 +755,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut layout_synced_at: Option<Instant> = None;
     let mut topmost_checked_at: Option<Instant> = None;
     let mut clip_retry_reported = false;
+    let mut last_privacy_circle: Option<crate::native_live_lens::PrivacyCircle> = None;
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -762,6 +777,9 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         let Some(pid) = pid else { break };
 
         let Some(captured) = capture_screen(pid) else {
+            if last_privacy_circle.take().is_some() {
+                let _=overlay.eval("window.scrcpyPresent?.updatePrivacyCircle(null)");
+            }
             if presentation_mode(&device)=="live" {
                 // Minimize, disconnect and old HWND replacement must never
                 // leave a topmost native magnifier above other applications.
@@ -815,6 +833,9 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // parallel, which previously caused jitter and visible separation.
         if is_dragging(&device) {
             previous_frame = None;
+            if last_privacy_circle.take().is_some() {
+                let _=overlay.eval("window.scrcpyPresent?.updatePrivacyCircle(null)");
+            }
             if presentation_mode(&device)=="live" {
                 crate::native_live_lens::update(&device,
                     crate::native_live_lens::ViewUpdate {
@@ -1117,6 +1138,29 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                     frame_hwnd:overlay.hwnd().ok().map(|h|h.0 as usize).unwrap_or(0),
                     controls_hwnd:toolbar.hwnd().ok().map(|h|h.0 as usize).unwrap_or(0),
                 });
+        }
+        // A native HWND (not Chromium pointer events) is the single source
+        // of truth for the moving 2.35x circle and wheel-resized diameter.
+        // Only send geometry when it changes; no decoded-frame readback.
+        let shade_circle=if presentation_mode(&device)=="live" &&
+            presentation_privacy(&device)!="off" {
+            crate::native_live_lens::privacy_circle(&device)
+        } else {None};
+        if shade_circle!=last_privacy_circle {
+            if let Some(c)=shade_circle {
+                if c.width>0 && c.height>0 {
+                    let cx=(c.x as f64+c.diameter as f64/2.)/c.width as f64;
+                    let cy=(c.y as f64+c.diameter as f64/2.)/c.height as f64;
+                    let rx=c.diameter as f64/(2.*c.width as f64);
+                    let ry=c.diameter as f64/(2.*c.height as f64);
+                    let _=overlay.eval(format!(
+                        "window.scrcpyPresent?.updatePrivacyCircle({{cx:{cx:.7},cy:{cy:.7},rx:{rx:.7},ry:{ry:.7}}})"
+                    ));
+                }
+            } else if last_privacy_circle.is_some() {
+                let _=overlay.eval("window.scrcpyPresent?.updatePrivacyCircle(null)");
+            }
+            last_privacy_circle=shade_circle;
         }
         let close_to_edge = cursor.map(|(x,y)| is_frame_edge_hover(x,y,frame)).unwrap_or(false);
         let inside_controls = match (cursor, controls_rect) {
@@ -1950,6 +1994,8 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
     if action == "present_is_spotlight" { return Ok(presentation_mode(&device) == "spotlight"); }
     if action == "present_is_magnifier" { return Ok(presentation_mode(&device) == "magnifier"); }
     if action == "present_is_live" { return Ok(presentation_mode(&device) == "live"); }
+    if action == "present_privacy_is_dim" {return Ok(presentation_privacy(&device)=="dim");}
+    if action == "present_privacy_is_black" {return Ok(presentation_privacy(&device)=="black");}
     if action == "creator_click_status" { return Ok(is_creator_click_enabled(&device)); }
     if action == "creator_click_toggle" {
         if !is_present_panel_open(&device) {
@@ -2074,6 +2120,25 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
                         },
                     }
                 }
+            },
+            "present_privacy_cycle" => {
+                let mode=presentation_mode(&device);
+                if !matches!(mode.as_str(),"magnifier"|"live") {
+                    return Err("先开启放大镜或实时放大，再启用防窥".into());
+                }
+                let _guard=PresentationTransitionGuard::begin(&device)?;
+                let next=match presentation_privacy(&device) {
+                    "off"=>"dim","dim"=>"black",_=>"off",
+                };
+                let overlay=app.get_webview_window(&label(&device))
+                    .ok_or("手机画面窗口不可用")?;
+                let script=format!(
+                    "return window.scrcpyPresent?.setPrivacy('{next}') === '{next}';"
+                );
+                evaluate_ink(&overlay,&script).await?;
+                let mut levels=privacy_levels().lock().map_err(|e|e.to_string())?;
+                if next=="off" {levels.remove(&device);} else {levels.insert(device.clone(),next);}
+                Ok(next!="off")
             },
             "present_refresh" => {
                 crate::commands::refresh_presenter_image(app, &device, None).await?;

@@ -174,11 +174,14 @@
     body[data-layout^="tight-ink"] #present-tools {
       top:0; height:136px; padding:6px; gap:4px;
     }
-    .present-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}
+    .present-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;}
     .present-grid button {
-      width:100%;min-width:0;height:51px;min-height:51px;gap:2px;
+      width:100%;min-width:0;height:37px;min-height:37px;gap:1px;
       font-size:10px;background:rgba(113,129,147,.16);
     }
+    #present-off {grid-column:1/-1;height:34px;min-height:34px;flex-direction:row;gap:6px;}
+    #present-privacy.active {background:rgba(18,185,151,.34);color:#a6fff0;}
+    #present-privacy:disabled {opacity:.45;cursor:default;}
     #present-live.active,#creator-click.active {background:rgba(18,185,151,.34);color:#a6fff0;}
     /* Persistent diagnostic: native + Canvas ACKs received since enabling.
        It is not the number of Android actions (which may also be blocked). */
@@ -190,16 +193,16 @@
       pointer-events:none;
     }
 
-    .present-grid button svg {width:19px;height:19px;}
+    .present-grid button svg {width:17px;height:17px;}
     .present-hint {font-size:11px;line-height:16px;color:#98a9bb;}
-    /* Stack mode has only 168x202 physical CSS pixels. A 3x2 palette
-       cannot fit six 51px buttons plus a long explanation and title. Keep
-       every action tappable; abbreviate the supporting copy instead. */
+    /* 7 actions in three rows must fit even 168x202 and emergency 136px
+       palettes without making touch targets smaller than 34 CSS pixels. */
     body[data-layout^="stack"] #present-tools {padding:7px;gap:4px;}
     body[data-layout^="stack"] .present-grid {gap:4px;}
     body[data-layout^="stack"] .present-grid button {
-      height:43px;min-height:43px;font-size:9px;gap:0;
+      height:37px;min-height:37px;font-size:9px;gap:0;
     }
+    body[data-layout^="stack"] #present-off {height:34px;min-height:34px;}
     body[data-layout^="stack"] #present-feedback {
       font-size:10px;line-height:13px;min-height:13px;
     }
@@ -208,8 +211,10 @@
     }
 
     body[data-layout^="tight-ink"] .present-grid button {
-      height:44px;min-height:44px;font-size:9px;
+      height:34px;min-height:34px;font-size:8px;gap:0;
     }
+    body[data-layout^="tight-ink"] .present-grid button svg {width:12px;height:12px;}
+    body[data-layout^="tight-ink"] #present-off {height:34px;min-height:34px;}
     body[data-layout^="tight-ink"] .present-hint {display:none;}
     #present-feedback[data-feedback="error"] {color:#fda4af;}
     #present-feedback[data-feedback="sent"] {color:#9fffea;}
@@ -446,6 +451,9 @@
         <button id="present-live" aria-pressed="false" aria-label="连续实时放大" title="实时放大；滚轮调圆圈大小，Ctrl+滚轮调倍率。画质受窗口显示像素限制">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M7 10h6M10 7v6M18 3v5"/></svg>实时放大
         </button>
+        <button id="present-privacy" aria-pressed="false" disabled aria-label="防窥模式" title="放大镜防窥：关闭 → 暗化 → 全黑；仅遮盖可见画面，不保护原始录像">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12s4-7 9-7 9 7 9 7-4 7-9 7-9-7-9-7Z"/><path d="m4 20 16-16"/></svg><span id="present-privacy-label">防窥</span>
+        </button>
         <button id="creator-click" aria-pressed="false" aria-label="点击特效" title="显示电脑鼠标点击位置，不阻挡手机触控">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="5"/><path d="M12 1v5m0 12v5M1 12h5m12 0h5"/></svg>点击特效
         </button>
@@ -524,9 +532,21 @@
           button.setAttribute('aria-pressed', String(pressed));
         }
         document.getElementById('present-refresh').disabled = !open || !magnifier;
+        if (!open || (!magnifier && !live)) displayPrivacyState('off',false);
         document.getElementById('present-hint').textContent = live
           ? '正在检测实际画质来源'
           : '实时模式跟随视频；定格和聚光灯暂停触控';
+      }
+      function displayPrivacyState(level, allowed) {
+        const button=document.getElementById('present-privacy');
+        const active=allowed && (level==='dim' || level==='black');
+        button.disabled=!allowed;
+        button.classList.toggle('active',active);
+        button.setAttribute('aria-pressed',String(active));
+        document.getElementById('present-privacy-label').textContent=
+          !active ? '防窥' : level==='black' ? '全黑' : '暗化';
+        button.title=!allowed ? '请先开启放大镜或实时放大' :
+          '防窥：关闭 → 暗化 → 全黑 → 关闭（仅视觉遮罩，不保护原始录像）';
       }
       // 2.35x is only the optical scale, NOT proof of HQ source pixels.
       // Surface what Windows actually drew (decoded CPU source vs desktop
@@ -573,6 +593,13 @@
             invoke('present_is_live'), invoke('creator_click_status'),
           ]);
           displayPresentState(true, spotlight, magnifier, live);
+          const allowed=magnifier || live;
+          if (allowed) {
+            const [dim,black]=await Promise.all([
+              invoke('present_privacy_is_dim'),invoke('present_privacy_is_black')
+            ]);
+            displayPrivacyState(black?'black':dim?'dim':'off',true);
+          }
           if (live) void refreshLiveQuality();
           const button=document.getElementById('creator-click');
           button.classList.toggle('active',!!click);
@@ -807,9 +834,9 @@
       });
       const presentLabels = Object.freeze({
         spotlight: '聚光灯', magnifier: '定格放大镜', live:'实时放大',
-        refresh: '刷新截图', off: '退出演示',
+        privacy:'防窥', refresh: '刷新截图', off: '退出演示',
       });
-      for (const action of ['spotlight','magnifier','live','refresh','off']) {
+      for (const action of ['spotlight','magnifier','live','privacy','refresh','off']) {
         const button = document.getElementById('present-' + action);
         button.addEventListener('click', async () => {
           if (!document.body.classList.contains('present-open') || presenterSwitching) return;
@@ -818,10 +845,11 @@
           button.setAttribute('aria-busy', 'true');
           presentFeedback('busy', '正在操作：' + presentLabels[action]);
           try {
-            await invoke('present_' + action);
+            await invoke(action === 'privacy' ? 'present_privacy_cycle' : 'present_' + action);
             clearReport();
             presentFeedback('sent', action === 'off' ?
-              '演示已退出，手机触控恢复' :
+              '演示已退出，手机触控恢复' : action === 'privacy' ?
+              '防窥状态已切换 · 仅遮挡可见画面，原始录制不受影响' :
               presentLabels[action] + '已就绪 · 滚轮缩放');
           } catch (error) {
             report(error);

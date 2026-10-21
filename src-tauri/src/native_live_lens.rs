@@ -258,6 +258,23 @@ fn lens_geometry(view:ViewUpdate,settings:LensSettings)->Option<Geometry> {
     })
 }
 
+/// Screen-relative circle actually painted by the native GPU/desktop lens.
+/// The WebView only uses these integer coordinates to draw a visual shade;
+/// neither scrcpy nor this worker copies any phone video pixels to JS.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub struct PrivacyCircle {
+    pub x:i32, pub y:i32, pub diameter:i32,
+    pub width:i32, pub height:i32,
+}
+fn visible_circle(view:ViewUpdate,settings:LensSettings)->Option<PrivacyCircle> {
+    let geometry=lens_geometry(view,settings)?;
+    Some(PrivacyCircle {
+        x:geometry.x.saturating_sub(view.x),
+        y:geometry.y.saturating_sub(view.y),diameter:geometry.size,
+        width:view.width,height:view.height,
+    })
+}
+
 struct Lens { host:RawHwnd, magnifier:RawHwnd, visible:bool, size:i32, exclusion:(usize,usize), settings:LensSettings, view:Option<ViewUpdate> }
 impl Lens {
     fn create()->Result<Self,String> {
@@ -404,7 +421,8 @@ enum Command { Update(ViewUpdate) }
 struct Session {
     device:String, tx:SyncSender<Command>, thread:JoinHandle<()>,
     // These atomics represent ACTUAL presentation, not mere IPC acceptance.
-    mode:Arc<AtomicU32>,source_size:Arc<AtomicU64>,hq_requested:bool,
+    mode:Arc<AtomicU32>,source_size:Arc<AtomicU64>,
+    circle:Arc<Mutex<Option<PrivacyCircle>>>,hq_requested:bool,
 }
 #[derive(serde::Serialize)]
 #[serde(rename_all="camelCase")]
@@ -432,6 +450,14 @@ pub fn source_status(device:&str)->LensSourceStatus {
         source_width:(source>>32) as u32,source_height:source as u32,
     }
 }
+/// Only the currently visible native/HQ lens is allowed to open the shade
+/// hole. If another app has focus or the mirror is minimized, return None.
+pub fn privacy_circle(device:&str)->Option<PrivacyCircle> {
+    let sessions=current().try_lock().ok()?;
+    let session=sessions.as_ref().filter(|s|s.device==device)?;
+    let guard=session.circle.try_lock().ok()?;
+    *guard
+}
 static CURRENT:OnceLock<Mutex<Option<Session>>>=OnceLock::new();
 fn current()->&'static Mutex<Option<Session>> {CURRENT.get_or_init(||Mutex::new(None))}
 
@@ -439,6 +465,7 @@ fn work_loop(
     rx:Receiver<Command>,started:SyncSender<Result<(),String>>,
     owner:Option<Arc<HqMappingOwner>>,
     actual_mode:Arc<AtomicU32>,source_size:Arc<AtomicU64>,
+    circle:Arc<Mutex<Option<PrivacyCircle>>>,
 ) {
     let mut lens=match Lens::create() {
         Ok(lens)=>lens,
@@ -555,11 +582,20 @@ fn work_loop(
                 && lens.visible;
             actual_mode.store(u32::from(displaying_legacy),Ordering::Release);
         }
+        // Never leave a dark shade around an invisible or outdated circle.
+        // Geometry is shared, not the full decoded image; the native window
+        // remains mouse-through and retains its original rendering cadence.
+        let visible=presented_source.is_some() || lens.visible;
+        let next=if visible {
+            lens.view.and_then(|view|visible_circle(view,lens.settings))
+        } else {None};
+        if let Ok(mut guard)=circle.lock() { *guard=next; }
         lens.refresh();
     }
     if let Some(owner)=owner.as_ref() {owner.set_consumer_active(false);}
     actual_mode.store(0,Ordering::Release);
     source_size.store(0,Ordering::Release);
+    if let Ok(mut guard)=circle.lock() { *guard=None; }
     WHEEL_ACTIVE.store(0,Ordering::SeqCst);
 }
 
@@ -574,14 +610,16 @@ pub fn start_with_hq(device:&str,owner:Option<Arc<HqMappingOwner>>)->Result<(),S
     let source_size=Arc::new(AtomicU64::new(0));
     let mode_worker=mode.clone();
     let size_worker=source_size.clone();
+    let circle=Arc::new(Mutex::new(None));
+    let circle_worker=circle.clone();
     let worker=thread::Builder::new().name("mirroleap-live-magnifier".into())
-        .spawn(move||work_loop(rx,ready_tx,owner,mode_worker,size_worker))
+        .spawn(move||work_loop(rx,ready_tx,owner,mode_worker,size_worker,circle_worker))
         .map_err(|e|format!("Cannot start native live magnifier: {e}"))?;
     match ready_rx.recv_timeout(Duration::from_secs(4)) {
         Ok(Ok(()))=>{
             let mut lock=current().lock().map_err(|e|e.to_string())?;
             *lock=Some(Session{device:device.to_string(),tx,thread:worker,
-                mode,source_size,hq_requested});
+                mode,source_size,circle,hq_requested});
             Ok(())
         },
         Ok(Err(e))=>{drop(tx);let _=worker.join();Err(e)},
@@ -627,6 +665,15 @@ mod tests {
     }
     #[test]
     fn native_circle_stays_inside_all_phone_edges_while_sample_tracks_pointer() {
+        let centered=ViewUpdate{x:20,y:30,width:420,height:900,
+            cursor_x:230,cursor_y:480,active:true,
+            video_hwnd:0,frame_hwnd:0,controls_hwnd:0};
+        let current=visible_circle(centered,LensSettings::default()).unwrap();
+        assert_eq!(current.width,420);
+        assert_eq!(current.height,900);
+        assert!(current.x>=4 && current.y>=4);
+        assert!(current.x+current.diameter<=420);
+        assert!(visible_circle(ViewUpdate{active:false,..centered},LensSettings::default()).is_none());
         for (width,height) in [(420,900),(900,420),(220,400)] {
             for (dx,dy) in [(0,0),(width-1,0),(0,height-1),
                             (width-1,height-1),(width/2,height/2)] {
