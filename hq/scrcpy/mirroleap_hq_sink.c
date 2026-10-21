@@ -122,9 +122,13 @@ mlhq_hw_frame_supported(const AVFrame *frame) {
     return frames && frames->sw_format == AV_PIX_FMT_NV12;
 }
 
-// GPU→CPU transfer is never performed on the scrcpy decoder / SDL threads.
-// Running it for the ENTIRE full-resolution frame is an interim fallback,
-// not the future GPU ROI/zero-copy magnifier.
+// The video decoder never blocks on readback. Adapt separate source-pixel
+// capture to measured GPU transfer cost; this is not GPU ROI/zero-copy.
+static LONG mlhq_gpu_capture_interval_ms(DWORD duration_ms) {
+    if (duration_ms<=10u) {return 80;}
+    if (duration_ms<=25u) {return 100;}
+    return 140;
+}
 static void
 mlhq_publish_hw_or_cpu(struct sc_mirroleap_hq_sink *sink,
                        const AVFrame *frame) {
@@ -141,6 +145,8 @@ mlhq_publish_hw_or_cpu(struct sc_mirroleap_hq_sink *sink,
     const DWORD started=GetTickCount();
     const int transferred=av_hwframe_transfer_data(cpu, frame, 0);
     const DWORD readback_ms=(DWORD)(GetTickCount()-started);
+    InterlockedExchange(&sink->gpu_interval_ms,
+        mlhq_gpu_capture_interval_ms(readback_ms));
     // Hardware D3D11VA reads can starve SDL's own renderer. After TWO slow
     // transfers stop sampling for the session and report a recoverable HQ
     // failure so the old desktop lens remains available without video lag.
@@ -349,11 +355,12 @@ mlhq_push(struct sc_frame_sink *receiver,const AVFrame *frame) {
     if (!mlhq_frame_supported(frame) && !mlhq_hw_frame_supported(frame)) {
         return MLHQ_PUSH_OK;
     }
-    // D3D11VA frame refs are queued at <= 8fps and software frames at <=
-    // 20fps. No video decoder or SDL thread waits for a GPU→CPU transfer.
+    // D3D11VA uses measured 80/100/140ms intervals; software remains 20fps.
+    // No decode or SDL thread does GPU readback or waits for the circle.
     DWORD now=GetTickCount();
-    DWORD interval=frame->format==AV_PIX_FMT_D3D11 ? 125u :
-        MLHQ_MIN_PUBLISH_MS;
+    DWORD interval=frame->format==AV_PIX_FMT_D3D11
+        ? (DWORD)InterlockedCompareExchange(&sink->gpu_interval_ms,0,0)
+        : MLHQ_MIN_PUBLISH_MS;
     DWORD last=(DWORD)InterlockedCompareExchange(&sink->last_enqueued_at,0,0);
     if (last && (DWORD)(now-last)<interval) {return MLHQ_PUSH_OK;}
 #else
@@ -375,6 +382,9 @@ mlhq_push(struct sc_frame_sink *receiver,const AVFrame *frame) {
 void
 sc_mirroleap_hq_sink_init(struct sc_mirroleap_hq_sink *sink) {
     memset(sink,0,sizeof(*sink));
+#ifdef MLHQ_ENABLE_D3D11
+    sink->gpu_interval_ms=100; // safe startup before first GPU timing
+#endif
     static const struct sc_frame_sink_ops ops={
         .open=mlhq_open,
         .close=mlhq_close,

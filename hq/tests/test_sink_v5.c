@@ -51,6 +51,12 @@ int main(int argc,char **argv) {
     for (int i=0;i<16;i++) sample_y[(i/4)*8+i%4]=(uint8_t)(i+3);
     for (int i=0;i<8;i++) sample_uv[(i/4)*8+i%4]=(uint8_t)(100+i);
     CHECK(mlhq_hw_frame_supported(&frame));
+    CHECK(mlhq_gpu_capture_interval_ms(0)==80);
+    CHECK(mlhq_gpu_capture_interval_ms(10)==80);
+    CHECK(mlhq_gpu_capture_interval_ms(11)==100);
+    CHECK(mlhq_gpu_capture_interval_ms(25)==100);
+    CHECK(mlhq_gpu_capture_interval_ms(26)==140);
+    CHECK(sink.gpu_interval_ms==100);
     const unsigned initial_clones=clone_count;
     CHECK(sink.frame_sink.ops->push(&sink.frame_sink,&frame)==SC_SINK_OK);
     CHECK(clone_count==initial_clones+1);
@@ -64,6 +70,7 @@ int main(int argc,char **argv) {
     CHECK(pending!=NULL);
     mlhq_publish_hw_or_cpu(&sink,pending);
     CHECK(hw_transfers==1);
+    CHECK(sink.gpu_interval_ms==80);
     CHECK(mlhq_read_u32(shared,MLHQ_G_LATEST_SLOT)==0);
     unsigned char *slot=shared+MLHQ_SLOT_BASE(0);
     CHECK(mlhq_read_u32(slot,MLHQ_S_FORMAT)==MLHQ_FORMAT_NV12);
@@ -85,6 +92,7 @@ int main(int argc,char **argv) {
     slow_gpu_readback=true;
     mlhq_publish_hw_or_cpu(&sink,&frame);
     CHECK(hw_transfers==2);
+    CHECK(sink.gpu_interval_ms==140);
     CHECK(!sink.gpu_readback_disabled);
     mlhq_publish_hw_or_cpu(&sink,&frame);
     CHECK(hw_transfers==3);

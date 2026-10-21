@@ -23,10 +23,9 @@ const SWP_SHOWWINDOW:u32=0x0040;
 const ULW_ALPHA:u32=2;
 const DIB_RGB_COLORS:u32=0;
 const BI_RGB:u32=0;
-// 1.8 s with a long fully-visible phase: the earlier 760 ms, thin ring
-// often disappeared before the user could look back from the toolbar.
+// Complete the full native click ripple (expand + fade) within 600ms.
 const SIDE:i32=240;
-const DURATION_MS:u64=1800;
+const DURATION_MS:u64=600;
 const AC_SRC_OVER:u8=0;
 const AC_SRC_ALPHA:u8=1;
 
@@ -97,9 +96,8 @@ impl RippleStyle {
         Self {
             radius:24.+76.*p,
             thickness:7.-2.*p,
-            // A recognisable ring is visible for about 1.25 seconds,
-            // then fades instead of vanishing after a fraction of a second.
-            fade:if p<=0.70 {1.} else {((1.-p)/0.30).clamp(0.,1.)},
+            // Fast expansion and fade during final 270ms.
+            fade:if p<=0.55 {1.} else {((1.-p)/0.45).clamp(0.,1.)},
             dot_radius:8.5*(1.-p*0.55),
         }
     }
@@ -388,6 +386,13 @@ mod tests {
         assert!(ring_pixel(SIDE as f32/2.,SIDE as f32/2.,0.6)[3]>180);
         assert!(ring_pixel(SIDE as f32/2.+52.,SIDE as f32/2.,0.4)[1]>100);
         assert_eq!(ring_pixel(SIDE as f32/2.,SIDE as f32/2.,1.)[3],0);
+    }
+    #[test]
+    fn ripple_completes_in_600ms_including_fade() {
+        assert_eq!(DURATION_MS,600);
+        assert_eq!(RippleStyle::at(0.5).fade,1.);
+        assert!(RippleStyle::at(0.8).fade<0.5);
+        assert_eq!(RippleStyle::at(1.).fade,0.);
     }
     #[test]
     fn stored_pixels_are_premultiplied_alpha(){

@@ -21,10 +21,11 @@ use crate::hq_pipeline::render_decoded_hq_preview;
 const MAX_LENS:u32 = 720;
 // The CPU reference is opt-in: cap its redraws independently of scrcpy's
 // full-rate decoded video. HQ GPU work remains a future D3D11 stage.
-const HQ_MIN_PAINT_INTERVAL:Duration=Duration::from_millis(50);
-const HQ_MAX_PAINT_INTERVAL:Duration=Duration::from_millis(160);
+const HQ_MIN_PAINT_INTERVAL:Duration=Duration::from_millis(32);
+const HQ_MAX_PAINT_INTERVAL:Duration=Duration::from_millis(120);
+// Adaptive cooldown leaves 2x measured rendering budget without delaying fast frames.
 fn cpu_paint_interval(render_time:Duration)->Duration {
-    render_time.saturating_mul(3).clamp(HQ_MIN_PAINT_INTERVAL,HQ_MAX_PAINT_INTERVAL)
+    render_time.saturating_mul(2).clamp(HQ_MIN_PAINT_INTERVAL,HQ_MAX_PAINT_INTERVAL)
 }
 
 const EX_LAYERED:u32 = 0x0008_0000;
@@ -605,11 +606,11 @@ mod tests {
     #[test]
     fn hq_cpu_pacer_bounds_load_without_capping_the_scrcpy_video_stream() {
         assert_eq!(cpu_paint_interval(Duration::from_millis(4)),
-            Duration::from_millis(50));
+            Duration::from_millis(32));
         assert_eq!(cpu_paint_interval(Duration::from_millis(28)),
-            Duration::from_millis(84));
+            Duration::from_millis(56));
         assert_eq!(cpu_paint_interval(Duration::from_millis(100)),
-            Duration::from_millis(160));
+            Duration::from_millis(120));
     }
 
     #[test]
