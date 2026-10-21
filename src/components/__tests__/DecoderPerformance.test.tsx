@@ -59,7 +59,7 @@ describe('safe host hardware decoder controls', () => {
   it('explains scrcpy v4 HQ decoder incompatibility and avoids claiming GPU decoding', () => {
     const {rerender}=render(<DecoderPerformance config={{...base,hqLens:true,hardwareDecoder:'d3d11va'}}
       setConfig={vi.fn()} support={windows5} observedMode="starting" running={true}/>);
-    expect(screen.getByText(/HQ uses scrcpy 4.0 and cannot use/)).toBeInTheDocument();
+    expect(screen.getByText(/HQ uses experimental scrcpy 4.0 and cannot use/)).toBeInTheDocument();
     rerender(<DecoderPerformance config={{...base,hqLens:true,hardwareDecoder:'d3d11va'}}
       setConfig={vi.fn()} support={windows5} observedMode="unreported" running={true}/>);
     expect(screen.getByRole('status')).toHaveTextContent('Core did not report its decoder (GPU unconfirmed)');
