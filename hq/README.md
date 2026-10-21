@@ -1,6 +1,6 @@
-# MirroCreator HQ：原始解码帧实时预览接线 · Stage 4（CPU/GDI）
+# MirroCreator HQ：原始帧按需减负 · Stage 5（CPU/GDI，协议 v2）
 
-**状态：feature 分支加入 Windows 设备会话显式 HQ 开关、版本校验、实时原始帧内存接入和鼠标穿透的圆形 CPU/GDI 显示窗口；默认关闭且可回退旧镜头。D3D11 GPU 镜头与真实 Android 视频验收仍未完成。**
+**状态：feature 分支加入按需启停 v2 原始解码帧传输、CPU/GDI 绘制限频，以及实际解码方式的诚实诊断。默认放大 2.35×，放大圈未启用时不持续复制高分辨率 YUV 帧；仍能回退旧镜头。D3D11 GPU 镜头与真实 Android 视频性能验收尚未完成。**
 
 默认 **2.35×**：接到有效解码帧时预览使用原始 YUV 像素，而不是已缩小的 SDL 桌面画面；无帧时回退 Windows Magnification.dll。当前不能宣传为 GPU 高清放大成品，真实 1080P/2K 视频的流畅性和画质尚待验收。
 

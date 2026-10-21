@@ -173,7 +173,7 @@ assert 'mod hq_runtime;' in lib
 assert '"hq-preview-core/scrcpy-hq-bin"' not in mirroleap_config
 assert '"productName": "MirroLeap"' in mirroleap_config
 assert '"identifier": "com.kb.scrcpy-gui-v3"' in mirroleap_config
-assert '"version": "5.2.9"' in mirroleap_config
+assert '"version": "5.3.0"' in mirroleap_config
 assert 'write-updater-manifest.mjs' in workflow
 assert 'MirroLeap_${version}_x64-setup.exe' in workflow
 assert 'MIRROLEAP_HQ_CORE_SHA256' in runtime
@@ -202,6 +202,6 @@ except ValueError:
 else:
     raise AssertionError("wrong scrcpy source must be rejected")
 
-print("HQ v1: pinned scrcpy client marker, per-device opt-in token, "
-      "bounded decoded frames, CPU/GDI circle and legacy fallback invariants passed "
+print("HQ v2: demand-driven decoded frames, per-device opt-in token, "
+      "paced CPU/GDI circle and legacy fallback invariants passed "
       "(NOT GPU and NOT Android-device end-to-end validated)")

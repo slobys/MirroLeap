@@ -31,15 +31,26 @@
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
 
-## ✨ MirroLeap v5.2.9 · 实时放大窗口修复与轻量一键更新
+## ✨ MirroLeap v5.3.0 · HQ 原始帧减负与真实解码诊断
 
-**名称仍为 MirroLeap，不再建立“MirroLeap HQ Preview”独立应用。** 保留 v5.2.3 的 Windows 安装标识、原有配置和签名更新公钥；继续使用 v5.2.9 这种正常版本标签。已安装 v5.2.3 的 NSIS EXE 用户可以通过原来的启动检查与确认弹窗发现并安装此版本；便携 ZIP 和 MSI 仍使用手动更新。
+- **按需源帧**：仅在实时放大圆圈确实处于活动状态、鼠标位于手机画面内时，实验性 scrcpy 4.0 才复制 YUV 解码帧；放大关闭后立即停止大帧复制，避免勾选 HQ 就拖慢整个手机投屏。
+- **CPU 渲染限频**：原始帧复制上限为 20 次/秒，CPU/GDI 圆形镜头根据绘制耗时独立限频，优先让 scrcpy 的正常视频解码/播放保持流畅。默认放大倍率仍是 2.35×；这不是最终的 D3D11 GPU 高清镜头。
+- **实际解码诊断**：HQ 实验核心如果只报告 FPS、没有报告硬件/软件解码方式，界面会明确显示“核心未报告（无法确认 GPU）”，不再停留在“等待输出”。普通核心 scrcpy 5.0.1 的 D3D11 选项不能作为 HQ scrcpy 4.0 已开启 GPU 的证明。
+- **可选 HQ v2 核心**：为确保旧版完整拷贝组件不会忽略按需开关，5.3.0 首次使用 HQ 时会重新下载一次独立 v2 核心（主安装包仍约 5 MB），之后可重复使用本机缓存。
+- **FPS 提醒**：软件显示的 FPS 来自 scrcpy 真实日志。静止桌面可能只产生少量视频帧，单次 11 FPS 不能直接证明 Wi-Fi 或 GPU 卡顿；请用持续播放的视频，分别在 HQ 开/关状态比较。
+
+### v5.2.9 相关改进
+
+此前已修复 HQ 圆形窗口可能被手机视频或透明真机边框遮挡的问题，本轮保留它的实时置顶与失败回退。
+
+
+**名称仍为 MirroLeap，不再建立“MirroLeap HQ Preview”独立应用。** 保留 v5.2.3 的 Windows 安装标识、原有配置和签名更新公钥；继续使用 v5.3.0 这种正常版本标签。已安装 v5.2.3 的 NSIS EXE 用户可以通过原来的启动检查与确认弹窗发现并安装此版本；便携 ZIP 和 MSI 仍使用手动更新。
 
 安装包保持约 5 MB 的轻量级，USB/Wi-Fi 投屏、画笔、点击特效和实时放大都在主应用中。原始帧 2.35× 高清镜头依旧是 **主动勾选才下载** 的可选组件，完整原始 scrcpy 4.0 及其 FFmpeg/SDL 运行库不随主 EXE/MSI 安装。画质路径提示可区分「原始帧」与「桌面回退」，尚未完成真实 Android GPU D3D11 高清端到端验收。
 
-这是同一 MirroLeap 更新频道里的 GitHub 测试版（Pre-release），不强制自动安装，也不替换 v5.1.4 在 GitHub 上的 Latest 标记。详见 [v5.2.9 发布说明](hq/MIRROLEAP_RELEASE_NOTES.md)。
+这是同一 MirroLeap 更新频道里的 GitHub 测试版（Pre-release），不强制自动安装，也不替换 v5.1.4 在 GitHub 上的 Latest 标记。详见 [v5.3.0 发布说明](hq/MIRROLEAP_RELEASE_NOTES.md)。
 
-本轮还修复了“HQ 原始帧已接收，但圆形放大窗口被 SDL 投屏画面挡住”的 Windows Z 顺序问题，增加真实合成截图验证以及失败时自动恢复旧放大镜，不再仅凭帧数认为用户已看到高清镜头。
+本版同时保留 HQ 圆圈的 Windows 置顶/遮挡修复，并对 YUV 取图、CPU 抗锯齿执行按需启停和负载限制，不再让已接收的帧与用户实际可见的放大圈混为一谈。
 
 ## 🔬 MirroCreator 高清实时镜头 · 2.35 倍基线与下一阶段
 
@@ -300,11 +311,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.2.9_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.2.9_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.2.9_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.3.0_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.3.0_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.3.0_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.2.9 继续用 MirroLeap 原有版本与签名更新频道，等待 Windows CI 验收通过后以正常的 v5.2.9 标签发布测试版。** [GitHub Releases](https://github.com/slobys/MirroLeap/releases) 中可选择具体版本附件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 暂保持 v5.1.4 正式版。不要把 Tags 页面自动生成的源码 ZIP 当作安装包。
+**v5.3.0 继续用 MirroLeap 原有版本与签名更新频道，等待 Windows CI 验收通过后以正常的 v5.2.9 标签发布测试版。** [GitHub Releases](https://github.com/slobys/MirroLeap/releases) 中可选择具体版本附件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 暂保持 v5.1.4 正式版。不要把 Tags 页面自动生成的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

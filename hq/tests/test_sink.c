@@ -44,6 +44,7 @@ LONG InterlockedCompareExchange(volatile LONG *a,LONG b,LONG c) {
 void *InterlockedExchangePointer(void * volatile *a,void *b) {
     return __atomic_exchange_n(a,b,__ATOMIC_SEQ_CST);
 }
+static unsigned clone_count;
 AVFrame *av_frame_clone(const AVFrame *a) {
     AVFrame *new_frame=malloc(sizeof(*new_frame));
     if (new_frame) {memcpy(new_frame,a,sizeof(*new_frame));clone_count++;}
@@ -51,7 +52,6 @@ AVFrame *av_frame_clone(const AVFrame *a) {
 }
 void av_frame_free(AVFrame **a) {if (*a) {free(*a);*a=NULL;}}
 
-static unsigned clone_count;
 static void
 initialize(unsigned char *mem) {
     memcpy(mem,"MLHQ",4);
