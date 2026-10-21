@@ -93,7 +93,9 @@ jobs:
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_live_lens::tests
       - name: Windows native MirroCreator click ripple pixel tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_click_effect::tests
-      - name: Windows HQ decoded-frame shared-memory owner and protocol tests
+      - name: Windows HQ decoded-frame IPC and native GDI circle smoke
+        env:
+          MIRROLEAP_HQ_GDI_SMOKE: '1'
         run: |
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_protocol::tests
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_bridge_windows::tests

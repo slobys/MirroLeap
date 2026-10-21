@@ -354,6 +354,27 @@ mod tests {
         assert!(output.chunks_exact(4).any(|pixel|pixel[3]>0 && pixel[3]<255));
     }
     #[test]
+    fn native_layered_window_can_present_a_bgra_circle_when_opted_into_smoke() {
+        if std::env::var_os("MIRROLEAP_HQ_GDI_SMOKE").is_none() {
+            // Some headless Windows builders cannot provide a composited
+            // desktop. CI enables this only after Edge GUI smoke succeeds.
+            return;
+        }
+        let mut window=HqDecodedCpuLens::create()
+            .expect("Windows user32 window and GDI HDC");
+        let mut bgra=vec![0u8;128*128*4];
+        for pixel in bgra.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[20,165,225,255]);
+        }
+        window.present_bgra(&bgra,40,40,128)
+            .expect("top-down BGRA DIB and native layered window rendering");
+        window.hide();
+        window.present_bgra(&bgra,42,43,128)
+            .expect("redraw after a temporary hide");
+        window.hide();
+        // Drop must restore selected stock bitmap and release HDC/HBITMAP/HWND.
+    }
+    #[test]
     fn round_bgra_checks_dimensions_before_access() {
         for size in [0,39,721,10_000] {
             assert!(circular_premultiplied_bgra(&[],size).is_err());
