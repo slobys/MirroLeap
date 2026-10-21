@@ -200,7 +200,7 @@ fn wide(s:&str)->Vec<u16> {s.encode_utf16().chain(Some(0)).collect()}
 pub struct ViewUpdate {
     pub x:i32, pub y:i32, pub width:i32, pub height:i32,
     pub cursor_x:i32, pub cursor_y:i32, pub active:bool,
-    pub frame_hwnd:usize, pub controls_hwnd:usize,
+    pub video_hwnd:usize, pub frame_hwnd:usize, pub controls_hwnd:usize,
 }
 impl ViewUpdate {
     pub fn inside(&self)->bool {
@@ -453,6 +453,7 @@ fn work_loop(
     // Independent BGRA layered window for the reviewed CPU reference path.
     // If the desktop compositor refuses it, keep Magnification.dll working.
     let mut hq=owner.as_ref().and_then(|_|HqDecodedCpuLens::create().ok());
+    let mut hq_hard_failures=0u8;
     let _=started.send(Ok(()));
     loop {
         match rx.recv_timeout(Duration::from_millis(16)) {
@@ -475,29 +476,56 @@ fn work_loop(
         }
         lens.apply_wheel(hq.as_ref().is_none_or(|preview|!preview.is_presenting()));
         let mut presented_source=None;
+        let mut deactivate_hq=false;
         if let (Some(owner),Some(preview),Some(view))=(owner.as_ref(),hq.as_mut(),lens.view) {
             if !view.active || !view.inside() {
                 preview.hide();
                 lens.set_visible(false);
+                hq_hard_failures=0;
             } else if let Some(target)=lens_geometry(view,lens.settings) {
                 let source=ScreenViewport {
                     x:view.x,y:view.y,width:view.width as u32,height:view.height as u32,
                 };
-                let _=preview.update_from_source(owner,source,
+                let painted=preview.update_from_source(owner,source,
                     (view.cursor_x,view.cursor_y),target.size as u32,lens.settings.zoom);
-                if preview.is_presenting() {
-                    presented_source=preview.presented_source_size();
-                    lens.set_visible(false);
-                    // The wheel must still resize the HQ circle even though
-                    // the Magnification.dll fallback HWND is hidden.
-                    set_wheel_target(view);
+                // Even on a paused video/unchanged publication, SDL and the
+                // bezel can jump above our previously painted topmost HWND.
+                // Do NOT report "HQ source" until our window is confirmed
+                // visible above this phone's current related windows.
+                let on_top=if painted.is_ok() {
+                    preview.maintain_visible(
+                        view.video_hwnd,view.frame_hwnd,view.controls_hwnd)
                 } else {
-                    lens.display(view); // No valid source frame: never go black.
+                    Err("HQ decoded-frame paint failed")
+                };
+                match on_top {
+                    Ok(true)=>{
+                        hq_hard_failures=0;
+                        presented_source=preview.presented_source_size();
+                        lens.set_visible(false);
+                        set_wheel_target(view);
+                    },
+                    Ok(false)=>{
+                        hq_hard_failures=0; // no decoded frame yet
+                        lens.display(view); // never leave the circle missing
+                    },
+                    Err(_)=>{
+                        preview.hide();
+                        hq_hard_failures=hq_hard_failures.saturating_add(1);
+                        lens.display(view); // immediate working magnifier fallback
+                        if hq_hard_failures>=3 {deactivate_hq=true;}
+                    },
                 }
             } else {
                 preview.hide();
                 lens.set_visible(false);
+                hq_hard_failures=0;
             }
+        }
+        if deactivate_hq {
+            // Repeated compositor failure: keep Magnification.dll operational
+            // rather than hiding the entire live zoom for this session.
+            hq=None;
         }
         // Report real HWND presentation state without copying or logging
         // any device-frame bytes, screen coordinates, tokens or thumbnails.
@@ -587,7 +615,7 @@ mod tests {
                 let view=ViewUpdate{
                     x:100,y:-80,width,height,
                     cursor_x:100+dx,cursor_y:-80+dy,
-                    active:true,frame_hwnd:0,controls_hwnd:0,
+                    active:true,video_hwnd:0,frame_hwnd:0,controls_hwnd:0,
                 };
                 let rect=lens_geometry(view,LensSettings::default()).unwrap();
                 assert!(rect.x>=view.x+4);
@@ -620,7 +648,7 @@ mod tests {
     #[test]
     fn wheel_changes_diameter_separately_from_optical_zoom() {
         let view=ViewUpdate{x:10,y:20,width:430,height:920,cursor_x:200,cursor_y:400,
-            active:true,frame_hwnd:0,controls_hwnd:0};
+            active:true,video_hwnd:0,frame_hwnd:0,controls_hwnd:0};
         let mut settings=LensSettings::default();
         let initial=lens_geometry(view,settings).unwrap();
         let old_zoom=settings.zoom;
@@ -650,7 +678,7 @@ mod tests {
         assert!((settings.diameter_ratio-DIAMETER_MAX).abs()<0.001);
         assert!((settings.zoom-FACTOR_MAX).abs()<0.001);
         let view=ViewUpdate{x:-100,y:30,width:320,height:660,
-            cursor_x:219,cursor_y:689,active:true,frame_hwnd:0,controls_hwnd:0};
+            cursor_x:219,cursor_y:689,active:true,video_hwnd:0,frame_hwnd:0,controls_hwnd:0};
         let g=lens_geometry(view,settings).unwrap();
         assert!(g.x>=view.x+4 && g.x+g.size<=view.x+view.width-4);
         assert!(g.y>=view.y+4 && g.y+g.size<=view.y+view.height-4);
@@ -665,7 +693,7 @@ mod tests {
     #[test]
     fn native_lens_pauses_outside_phone_or_in_background() {
         let view=ViewUpdate{x:10,y:10,width:430,height:920,cursor_x:30,cursor_y:30,
-            active:true,frame_hwnd:0,controls_hwnd:0};
+            active:true,video_hwnd:0,frame_hwnd:0,controls_hwnd:0};
         assert!(lens_geometry(view,LensSettings::default()).is_some());
         assert!(lens_geometry(ViewUpdate{active:false,..view},LensSettings::default()).is_none());
         assert!(lens_geometry(ViewUpdate{cursor_x:0,..view},LensSettings::default()).is_none());

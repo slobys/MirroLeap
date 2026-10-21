@@ -123,11 +123,19 @@ assert "try_latest_with_publish_id" in circle
 assert "cached_frame" in circle and "latest_publish_id" in circle
 assert "lens_redraws_for_cursor_or_zoom_even_when_video_frame_is_unchanged" in circle
 assert "lens_position" in circle and "MAX_LENS:u32 = 720" in circle
+assert "SetWindowPos(self.hwnd.as_ptr(),HWND_TOPMOST" in circle
+assert "related_phone_above" in circle and "maintain_visible" in circle
+assert "hq_circular_window_is_visible_over_restacked_phone_topmost_hwnd" in circle
+assert 'MIRROLEAP_HQ_COMPOSITOR_SMOKE' in circle
+assert 'HQ BGRA was accepted but the circle was invisible' in read(".github/workflows/mirroleap-continuity.yml")
 native=read("src-tauri/src/native_live_lens.rs")
 phone=read("src-tauri/src/device_frame.rs")
 ui=read("src/components/DecoderPerformance.tsx")
 assert "hq_cpu_lens_windows::HqDecodedCpuLens" in native
 assert "start_with_hq(device,owner)" in phone
+assert "video_hwnd:hwnd.0 as usize" in phone
+assert "preview.maintain_visible" in native
+assert "lens.display(view); // immediate working magnifier fallback" in native
 assert "hqLens" in ui and "Optional 2.35× HQ lens" in ui
 assert "CPU/GDI decoded-frame preview, not final D3D11" in ui
 assert "hqlens" not in producer.lower()
@@ -162,7 +170,7 @@ assert 'mod hq_runtime;' in lib
 assert '"hq-preview-core/scrcpy-hq-bin"' not in mirroleap_config
 assert '"productName": "MirroLeap"' in mirroleap_config
 assert '"identifier": "com.kb.scrcpy-gui-v3"' in mirroleap_config
-assert '"version": "5.2.8"' in mirroleap_config
+assert '"version": "5.2.9"' in mirroleap_config
 assert 'write-updater-manifest.mjs' in workflow
 assert 'MirroLeap_${version}_x64-setup.exe' in workflow
 assert 'MIRROLEAP_HQ_CORE_SHA256' in runtime

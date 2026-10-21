@@ -1,14 +1,22 @@
-# MirroLeap v5.2.8 · 延续原版的一体化轻量更新
+# MirroLeap v5.2.9 · 延续原版的一体化轻量更新
 
 这不是另一款叫 “MirroLeap HQ Preview” 的程序。本版本沿用自 v5.2.3 以来的 **MirroLeap** 程序名称、Windows 安装身份 `com.kb.scrcpy-gui-v3`、配置目录和原有的签名更新通道。该版本作为 GitHub 测试版（Pre-release）发布，正式 Latest 仍为 v5.1.4，直到明确验收后再升级正式版。
 
 ## 你可以直接从 MirroLeap v5.2.3 更新
 
-- v5.2.3 原程序会检索仓库中的 `vX.Y.Z` 版本，并检查是否有完整的 NSIS 安装包、minisign 签名与 `latest.json`。本次使用正常的 `v5.2.8` 标签和 `MirroLeap_5.2.8_x64-setup.exe` 文件名。
+- v5.2.3 原程序会检索仓库中的 `vX.Y.Z` 版本，并检查是否有完整的 NSIS 安装包、minisign 签名与 `latest.json`。本次使用正常的 `v5.2.9` 标签和 `MirroLeap_5.2.9_x64-setup.exe` 文件名。
 - 已安装的 NSIS EXE：启动时检测新版，弹窗由用户确认后，下载并验证固定公钥签名再安装；不是静默升级。
 - MSI、便携 ZIP：可以收到新版提示，但出于安装方式安全边界，需要自行下载安装对应的新版本，不能被 NSIS 自动覆盖。
 - 注意仅存在于旧 “HQ Preview” 独立程序中的旧标识不自动合并或卸载；原来的 MirroLeap v5.2.3 更新链完全延续。
 - Windows SmartScreen 或来源提示仍可能存在：项目的 minisign 更新签名不是微软认可的 Authenticode 发布证书，请不要关闭系统安全保护。
+
+## v5.2.9 · 修复 HQ 原始帧已到达但放大圆圈消失
+
+- 修复 Windows HQ 分层圆形窗口“已接收 864×1920 等真实解码帧、悬浮栏显示 HQ，但手机画面看不到放大圆圈”的问题。原实现成功提交 BGRA 后只调用 `ShowWindow`，没有明确把 HQ HWND 放到与 scrcpy SDL 一样的最上层；真机边框和投屏视频重新置顶后可能盖住它。
+- 新实现使用非激活的 `SetWindowPos(HWND_TOPMOST)` 显示 HQ 像素，并且每次视频跟随刷新都核对真实的 HWND 可见性、位置与当前手机投屏视频/边框/工具栏的 Z 顺序。即使手机停在静止画面、没有新帧，也会恢复被挡住的放大圆圈。
+- 窗口层级或绘制调用失败时立刻恢复既有 Windows Magnification.dll 2.35× 实时放大镜；连续异常时禁用本次实验性 HQ 窗口，避免出现按钮已启用但什么都不显示的状态。
+- Windows CI 新增模拟一个重新置顶的 SDL 手机视频窗口，并通过真实 DWM 合成桌面截图验证 HQ 圆形画面仍能覆盖其上；只靠 `UpdateLayeredWindow` 返回成功不算通过。
+- 这是 Windows 自动化环境的窗口层级修复，仍需在用户 Android 设备中确认实际表现；D3D11 GPU 最终高清方案仍在后续研发。
 
 ## 小安装包，高清功能可选
 
@@ -24,10 +32,10 @@ Windows Actions 会执行 Rust/前端测试、实验 scrcpy 4.0 真正编译、W
 
 ## 下载内容
 
-- `MirroLeap_5.2.8_x64-setup.exe`：同名、同安装标识的轻量 NSIS 更新版，推荐。
-- `MirroLeap_5.2.8_x64_en-US.msi`：MSI 安装版，后续仍手动更新。
-- `MirroLeap_5.2.8_x64_Portable.zip`：免安装、解压运行。
+- `MirroLeap_5.2.9_x64-setup.exe`：同名、同安装标识的轻量 NSIS 更新版，推荐。
+- `MirroLeap_5.2.9_x64_en-US.msi`：MSI 安装版，后续仍手动更新。
+- `MirroLeap_5.2.9_x64_Portable.zip`：免安装、解压运行。
 - `MirroLeap.HQ.Core_v1_x64.zip`：**单独的可选核心**，普通用户不需下载；开启 HQ 后由软件自动安装。
-- `latest.json` / `MirroLeap_5.2.8_x64-setup.exe.sig` / `SHA256SUMS.txt`：签名自动更新清单与文件完整性校验。
+- `latest.json` / `MirroLeap_5.2.9_x64-setup.exe.sig` / `SHA256SUMS.txt`：签名自动更新清单与文件完整性校验。
 
 实验 scrcpy 部件固定 Genymobile/scrcpy v4.0、提交 `2322868e9e256eb5fce0b3d659ab2a409f29bae1`。补丁源码及相关依赖许可详见仓库 `hq/`。本版本在本机内处理帧，不上传手机画面。

@@ -820,7 +820,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                     crate::native_live_lens::ViewUpdate {
                         x:screen.x,y:screen.y,width:screen.width,height:screen.height,
                         cursor_x:i32::MIN/2,cursor_y:i32::MIN/2,active:false,
-                        frame_hwnd:0,controls_hwnd:0,
+                        video_hwnd:0,frame_hwnd:0,controls_hwnd:0,
                     });
             }
 
@@ -1113,6 +1113,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 crate::native_live_lens::ViewUpdate {
                     x:screen.x,y:screen.y,width:screen.width,height:screen.height,
                     cursor_x,cursor_y,active:focused && !dragging,
+                    video_hwnd:hwnd.0 as usize,
                     frame_hwnd:overlay.hwnd().ok().map(|h|h.0 as usize).unwrap_or(0),
                     controls_hwnd:toolbar.hwnd().ok().map(|h|h.0 as usize).unwrap_or(0),
                 });

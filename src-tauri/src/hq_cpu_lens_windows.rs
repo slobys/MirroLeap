@@ -26,6 +26,12 @@ const EX_TOPMOST:u32 = 0x0000_0008;
 const WS_POPUP:u32 = 0x8000_0000;
 const ULW_ALPHA:u32 = 0x02;
 const AC_SRC_ALPHA:u8 = 0x01;
+const SWP_NOACTIVATE:u32 = 0x0010;
+const SWP_SHOWWINDOW:u32 = 0x0040;
+const GW_HWNDPREV:u32 = 3;
+const GWL_EXSTYLE:i32 = -20;
+const MAX_Z_ORDER_SCAN:usize = 512;
+const HWND_TOPMOST:isize = -1;
 const DIB_RGB_COLORS:u32 = 0;
 
 #[repr(C)]
@@ -34,6 +40,9 @@ struct Point {x:i32,y:i32}
 #[repr(C)]
 #[derive(Copy,Clone)]
 struct Size {cx:i32,cy:i32}
+#[repr(C)]
+#[derive(Copy,Clone,Default)]
+struct WindowRect {left:i32,top:i32,right:i32,bottom:i32}
 #[repr(C)]
 #[derive(Copy,Clone)]
 struct Blend {
@@ -59,6 +68,12 @@ unsafe extern "system" {
         instance:*mut c_void,params:*mut c_void)->*mut c_void;
     fn DestroyWindow(hwnd:*mut c_void)->i32;
     fn ShowWindow(hwnd:*mut c_void,command:i32)->i32;
+    fn SetWindowPos(hwnd:*mut c_void,after:*mut c_void,x:i32,y:i32,
+        width:i32,height:i32,flags:u32)->i32;
+    fn GetWindow(hwnd:*mut c_void,command:u32)->*mut c_void;
+    fn GetWindowRect(hwnd:*mut c_void,rect:*mut WindowRect)->i32;
+    fn IsWindowVisible(hwnd:*mut c_void)->i32;
+    fn GetWindowLongPtrW(hwnd:*mut c_void,index:i32)->isize;
     fn GetDC(hwnd:*mut c_void)->*mut c_void;
     fn ReleaseDC(hwnd:*mut c_void,dc:*mut c_void)->i32;
     fn UpdateLayeredWindow(hwnd:*mut c_void,dst_dc:*mut c_void,
@@ -176,6 +191,7 @@ pub struct HqDecodedCpuLens {
     previous_key:Option<PresentationKey>,
     cached_frame:Option<(u32,crate::hq_protocol::OwnedFrame)>,
     last_generation:u64,
+    presented_rect:Option<(i32,i32,u32)>,
 }
 
 impl HqDecodedCpuLens {
@@ -200,7 +216,7 @@ impl HqDecodedCpuLens {
             hwnd,dc,
             default_bitmap:NonNull::dangling(),
             bitmap:None,pixels:None,dimension:0,previous_key:None,cached_frame:None,
-            last_generation:0,
+            last_generation:0,presented_rect:None,
         })
     }
 
@@ -247,6 +263,78 @@ impl HqDecodedCpuLens {
         Ok(())
     }
 
+    // The Android SDL video, transparent bezel and Tauri rail can all be
+    // re-stacked AFTER our last decoded frame. WS_EX_TOPMOST only chooses
+    // the topmost BAND at creation, not the order within that band.
+    // Unlike the old Magnification.dll host and click ripple, the original
+    // HQ path called ShowWindow() after UpdateLayeredWindow() but NEVER
+    // promoted its HWND. Successful BGRA paint was therefore reported as
+    // "HQ original frame" even if the SDL/topmost bezel covered it.
+    fn raise_to_top(&self,rect:(i32,i32,u32))->Result<(),&'static str> {
+        let (x,y,side)=rect;
+        let ok=unsafe {
+            SetWindowPos(self.hwnd.as_ptr(),HWND_TOPMOST as *mut c_void,
+                x,y,side as i32,side as i32,SWP_NOACTIVATE|SWP_SHOWWINDOW)
+        };
+        if ok==0 {return Err("Windows refused to raise the HQ lens above phone video");}
+        Ok(())
+    }
+
+    fn hwnd_visible_at(&self,rect:(i32,i32,u32))->bool {
+        let mut actual=WindowRect::default();
+        unsafe {
+            IsWindowVisible(self.hwnd.as_ptr())!=0 &&
+            GetWindowRect(self.hwnd.as_ptr(),&mut actual)!=0 &&
+            actual.left==rect.0 && actual.top==rect.1 &&
+            actual.right.saturating_sub(actual.left)==rect.2 as i32 &&
+            actual.bottom.saturating_sub(actual.top)==rect.2 as i32 &&
+            (GetWindowLongPtrW(self.hwnd.as_ptr(),GWL_EXSTYLE) as u32 & EX_TOPMOST)!=0
+        }
+    }
+
+    /// Inspect only the three HWNDs in this *active* phone session.
+    /// Never raise HQ over unrelated foreground windows: the follower
+    /// reports active=false when a different desktop application has focus.
+    fn related_phone_above(&self,video:usize,frame:usize,controls:usize)->bool {
+        let own=self.hwnd.as_ptr() as usize;
+        let related=[video,frame,controls];
+        let mut candidate=unsafe{GetWindow(self.hwnd.as_ptr(),GW_HWNDPREV)};
+        for _ in 0..MAX_Z_ORDER_SCAN {
+            if candidate.is_null() {return false;}
+            let hwnd=candidate as usize;
+            if hwnd!=own && related.contains(&hwnd) &&
+               unsafe {IsWindowVisible(candidate)}!=0 {
+                return true;
+            }
+            candidate=unsafe{GetWindow(candidate,GW_HWNDPREV)};
+        }
+        // A suspicious/looping native Z-order isn't confirmed visible.
+        true
+    }
+
+    /// This must be called on every live-lens tick, EVEN when the decoded
+    /// frame/publication and cursor are unchanged. Otherwise Windows may
+    /// move SDL / the bezel in front while our presentation key stays cached.
+    /// Returning false or Err requires the caller to show legacy magnification.
+    pub fn maintain_visible(&mut self,video:usize,frame:usize,controls:usize)
+        ->Result<bool,&'static str>
+    {
+        let Some(rect)=self.presented_rect else {return Ok(false);};
+        if !self.hwnd_visible_at(rect) ||
+           self.related_phone_above(video,frame,controls) {
+            if let Err(error)=self.raise_to_top(rect) {
+                self.hide();
+                return Err(error);
+            }
+        }
+        if !self.hwnd_visible_at(rect) ||
+           self.related_phone_above(video,frame,controls) {
+            self.hide();
+            return Err("HQ pixels were accepted but the Windows lens is not visible above SDL");
+        }
+        Ok(true)
+    }
+
     fn present_bgra(&mut self,bgra:&[u8],x:i32,y:i32,diameter:u32)
         ->Result<(),&'static str>
     {
@@ -272,17 +360,23 @@ impl HqDecodedCpuLens {
         if ok==0 {
             return Err("Windows could not update experimental HQ round lens");
         }
-        unsafe {ShowWindow(self.hwnd.as_ptr(),4);} // SW_SHOWNOACTIVATE
+        let rect=(x,y,diameter);
+        // Match the proven native click ripple and legacy magnifier path:
+        // *explicitly* promote after the successful UpdateLayeredWindow.
+        // SWP_NOACTIVATE preserves Android touch and keyboard focus.
+        self.raise_to_top(rect)?;
+        self.presented_rect=Some(rect);
         Ok(())
     }
 
     pub fn hide(&mut self) {
         unsafe {ShowWindow(self.hwnd.as_ptr(),0);}
         self.previous_key=None;
+        self.presented_rect=None;
     }
 
     /// True only after a complete valid source frame was rendered.
-    pub fn is_presenting(&self)->bool {self.previous_key.is_some()}
+    pub fn is_presenting(&self)->bool {self.previous_key.is_some() && self.presented_rect.is_some()}
     /// Only expose dimensions once Win32 accepted a source-frame BGRA paint.
     pub fn presented_source_size(&self)->Option<(u32,u32)> {
         self.is_presenting().then(||self.cached_frame.as_ref().map(|(_,frame)|
@@ -359,6 +453,132 @@ impl Drop for HqDecodedCpuLens {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // A composited desktop screenshot is the only way CI can prove that
+    // successful UpdateLayeredWindow pixels are actually ABOVE the (topmost)
+    // scrcpy and Tauri companion HWNDs. Never store/export screen pixels.
+    #[link(name="user32")]
+    unsafe extern "system" {
+        fn GetDC(hwnd:*mut c_void)->*mut c_void;
+        fn ReleaseDC(hwnd:*mut c_void,dc:*mut c_void)->i32;
+        fn GetSystemMetrics(index:i32)->i32;
+    }
+    #[link(name="gdi32")]
+    unsafe extern "system" {
+        fn BitBlt(target:*mut c_void,x:i32,y:i32,w:i32,h:i32,source:*mut c_void,
+            source_x:i32,source_y:i32,operation:u32)->i32;
+    }
+    fn capture_composited(left:i32,top:i32,size:i32)->Result<Vec<u8>,&'static str> {
+        unsafe {
+            let desktop=GetDC(ptr::null_mut());
+            if desktop.is_null() {return Err("No desktop DC for HQ visibility test");}
+            let dc=CreateCompatibleDC(desktop);
+            if dc.is_null() {
+                ReleaseDC(ptr::null_mut(),desktop);
+                return Err("No screenshot DC");
+            }
+            let info=BitmapInfo {
+                header:BitmapInfoHeader {
+                    size:std::mem::size_of::<BitmapInfoHeader>() as u32,
+                    width:size,height:-size,planes:1,bits_per_pixel:32,
+                    compression:0,size_image:0,ppm_x:0,ppm_y:0,
+                    colors_used:0,colors_important:0,
+                },colors:[0],
+            };
+            let mut bits=ptr::null_mut();
+            let bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,&mut bits,
+                ptr::null_mut(),0);
+            if bitmap.is_null() || bits.is_null() {
+                DeleteDC(dc);ReleaseDC(ptr::null_mut(),desktop);
+                return Err("No screenshot DIB");
+            }
+            let old=SelectObject(dc,bitmap);
+            let ok=BitBlt(dc,0,0,size,size,desktop,left,top,
+                0x00CC_0020|0x4000_0000); // SRCCOPY | CAPTUREBLT
+            let output=if ok!=0 {
+                std::slice::from_raw_parts(bits as *const u8,
+                    (size*size*4) as usize).to_vec()
+            } else {Vec::new()};
+            SelectObject(dc,old);DeleteObject(bitmap);
+            DeleteDC(dc);ReleaseDC(ptr::null_mut(),desktop);
+            if ok==0 {return Err("Cannot read DWM-composited HWND pixels");}
+            Ok(output)
+        }
+    }
+    fn significantly_changed(before:&[u8],after:&[u8])->usize {
+        before.chunks_exact(4).zip(after.chunks_exact(4))
+            .filter(|(a,b)| (0..3).map(|i|a[i].abs_diff(b[i]) as usize)
+                .sum::<usize>()>115)
+            .count()
+    }
+
+    struct OpaquePhoneWindow(*mut c_void);
+    impl Drop for OpaquePhoneWindow {
+        fn drop(&mut self) {
+            unsafe {ShowWindow(self.0,0);DestroyWindow(self.0);}
+        }
+    }
+    #[test]
+    fn hq_circular_window_is_visible_over_restacked_phone_topmost_hwnd() {
+        if std::env::var_os("MIRROLEAP_HQ_COMPOSITOR_SMOKE").is_none() {
+            return; // opt-in CI Windows interactive desktop ONLY
+        }
+        let x=unsafe {GetSystemMetrics(76)};
+        let y=unsafe {GetSystemMetrics(77)};
+        let w=unsafe {GetSystemMetrics(78)};
+        let h=unsafe {GetSystemMetrics(79)};
+        assert!(w>350 && h>350,"Desktop must be interactive for HQ screenshot test");
+        let side=180i32;
+        let left=x+(w-side)/2;
+        let top=y+(h-side)/2;
+        let class=wide("STATIC");
+        let name=wide("Simulated topmost scrcpy SDL mirror");
+        let covering=unsafe {
+            CreateWindowExW(EX_TOPMOST|EX_TOOLWINDOW|EX_NOACTIVATE,
+                class.as_ptr(),name.as_ptr(),WS_POPUP,
+                left-12,top-12,side+24,side+24,ptr::null_mut(),
+                ptr::null_mut(),ptr::null_mut(),ptr::null_mut())
+        };
+        assert!(!covering.is_null(),"Failed to create opaque simulated scrcpy HWND");
+        let phone=OpaquePhoneWindow(covering);
+        let topmost=HWND_TOPMOST as *mut c_void;
+        let show_flags=SWP_NOACTIVATE|SWP_SHOWWINDOW;
+        assert_ne!(unsafe {
+            SetWindowPos(phone.0,topmost,left-12,top-12,side+24,side+24,show_flags)
+        },0,"Simulated scrcpy video must be in topmost tier");
+        std::thread::sleep(std::time::Duration::from_millis(90));
+        let baseline=capture_composited(left,top,side)
+            .expect("Capture SDL-like opaque phone BEFORE HQ");
+        let mut hq=HqDecodedCpuLens::create().expect("Create optional HQ round HWND");
+        let pixels=[18u8,255u8,100u8,255u8].repeat((side*side) as usize);
+        hq.present_bgra(&pixels,left,top,side as u32)
+            .expect("Present original BGRA as Windows round HQ window");
+        assert!(hq.maintain_visible(phone.0 as usize,0,0)
+            .expect("Reconcile HQ with existing scrcpy HWND"));
+        std::thread::sleep(std::time::Duration::from_millis(110));
+        let visible=capture_composited(left,top,side)
+            .expect("Capture real desktop pixels after HQ");
+        let first=significantly_changed(&baseline,&visible);
+        assert!(first>1600,
+            "HQ UpdateLayeredWindow returned success but its pixels are NOT visible above SDL");
+        // A Tauri frame health tick may move an already-topmost SDL HWND
+        // *above* the cached HQ circle without changing the video frame id.
+        assert_ne!(unsafe {
+            SetWindowPos(phone.0,topmost,left-12,top-12,side+24,side+24,show_flags)
+        },0);
+        assert!(hq.related_phone_above(phone.0 as usize,0,0),
+            "Test must place the simulated SDL HWND above HQ");
+        assert!(hq.maintain_visible(phone.0 as usize,0,0)
+            .expect("Re-promote cached HQ circle after SDL frame re-stacking"));
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let restored=capture_composited(left,top,side)
+            .expect("Capture actual round HQ after topmost video re-stacking");
+        let corrected=significantly_changed(&baseline,&restored);
+        assert!(corrected>1600,
+            "After video restack, HQ is still hidden despite accepting original frames");
+        assert!(!hq.related_phone_above(phone.0 as usize,0,0));
+        eprintln!("HQ composited round window: visible_pixels={first}, restored_pixels={corrected}");
+        hq.hide();
+    }
     #[test]
     fn lens_redraws_for_cursor_or_zoom_even_when_video_frame_is_unchanged() {
         let viewport=ScreenViewport{x:20,y:30,width:360,height:640};

@@ -266,6 +266,15 @@ jobs:
         run: |
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_click_effect::tests::layered_click_is_visible_in_real_desktop_capture -- --nocapture
           if ($LASTEXITCODE -ne 0) { throw 'Native click ripple did not appear in an actual composited Windows desktop capture' }
+      - name: Real HQ circle composited above an actively re-stacked topmost SDL-like HWND
+        shell: pwsh
+        env:
+          MIRROLEAP_HQ_COMPOSITOR_SMOKE: '1'
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_cpu_lens_windows::tests::hq_circular_window_is_visible_over_restacked_phone_topmost_hwnd -- --nocapture
+          if ($LASTEXITCODE -ne 0) {
+            throw 'HQ BGRA was accepted but the circle was invisible above the native phone video'
+          }
       - name: Build original-identity LIGHTWEIGHT MirroLeap EXE and MSI
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
