@@ -1,4 +1,4 @@
-/* MirroLeap experimental decoded video frame IPC, protocol v1.
+/* MirroLeap experimental decoded video frame IPC, protocol v2.
  * Copyright (c) 2026 MirroLeap contributors. MIT license applies.
  *
  * The producer is an opt-in addition to the Apache-2.0 scrcpy v4.0 client.
@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define MLHQ_VERSION        1u
+#define MLHQ_VERSION        2u
 #define MLHQ_HEADER_BYTES   64u
 #define MLHQ_SLOT_BYTES     80u
 #define MLHQ_SLOT_COUNT     2u
@@ -41,7 +41,9 @@
 #define MLHQ_G_SLOT_COUNT   16u
 #define MLHQ_G_LATEST_SLOT  20u /* InterlockedExchange */
 #define MLHQ_G_LATEST_SEQ   24u /* optional monotonic frame counter */
-#define MLHQ_G_RESERVED     28u
+#define MLHQ_G_CONSUMER_ACTIVE 28u /* v2: 0=idle, 1=visible HQ lens, atomic */
+#define MLHQ_G_RESERVED     32u
+#define MLHQ_MIN_PUBLISH_MS 50u /* bounded copies while live */
 
 /* Each 80-byte slot header is followed by slot_capacity bytes. */
 #define MLHQ_S_SEQUENCE     0u  /* odd during write, even when committed */

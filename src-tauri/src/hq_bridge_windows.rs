@@ -15,7 +15,7 @@ use std::{
 };
 use crate::hq_protocol::{
     self, FrameMetadata, OwnedFrame, HEADER_BYTES, MAPPING_BYTES, NO_FRAME,
-    SLOT_CAPACITY, SLOT_COUNT, SLOT_HEADER_BYTES, VERSION,
+    SLOT_CAPACITY, SLOT_COUNT, SLOT_HEADER_BYTES, VERSION, CONSUMER_ACTIVE_OFFSET,
 };
 
 const PAGE_READWRITE: u32=0x04;
@@ -119,6 +119,24 @@ impl HqMappingOwner {
             (*(self.base.as_ptr().add(offset) as *const AtomicU32))
                 .load(Ordering::Acquire)
         }
+    }
+
+    /// Set demand ONLY for a currently visible HQ circle. When disabled the
+    /// patched scrcpy sink neither clones nor copies decoded pixels.
+    pub fn set_consumer_active(&self,active:bool) {
+        let flag=unsafe{&*(self.base.as_ptr().add(CONSUMER_ACTIVE_OFFSET) as *const AtomicU32)};
+        if active {
+            if flag.load(Ordering::Acquire)==0 {
+                // Clear old source pixels before allowing a fresh producer.
+                self.reset_publication();
+                flag.store(1,Ordering::Release);
+            }
+        } else {
+            flag.store(0,Ordering::Release);
+        }
+    }
+    pub fn consumer_active(&self)->bool {
+        self.atomic_u32(CONSUMER_ACTIVE_OFFSET)==1
     }
 
     /// Returns None while the producer is busy, no frame is available,
@@ -230,6 +248,11 @@ mod tests {
         let b=HqMappingOwner::new().expect("mapping B");
         assert_ne!(a.child_env_token(),b.child_env_token());
         assert!(a.try_latest().unwrap().is_none());
+        assert!(!a.consumer_active());
+        a.set_consumer_active(true);
+        assert!(a.consumer_active());
+        a.set_consumer_active(false);
+        assert!(!a.consumer_active());
         assert!(b.try_latest().unwrap().is_none());
         assert_eq!(a.latest_publish_id().unwrap(),None);
         assert_eq!(b.latest_publish_id().unwrap(),None);

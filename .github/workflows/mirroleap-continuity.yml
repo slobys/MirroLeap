@@ -89,7 +89,7 @@ jobs:
             --buildtype=release -Dcompile_server=false \
             -Dcompile_app=true -Dusb=false -Dv4l2=false -Dportable=true
           meson compile -C hq/upstream-build
-          ./hq/upstream-build/app/scrcpy.exe --version | grep -F 'MirroLeap HQ decoded-frame v1 (experimental)'
+          ./hq/upstream-build/app/scrcpy.exe --version | grep -F 'MirroLeap HQ decoded-frame v2 (experimental)'
       - name: Download SHA256-pinned OFFICIAL scrcpy v4.0 Windows runtime
         shell: pwsh
         run: |
@@ -200,8 +200,8 @@ jobs:
           $target = 'src-tauri/hq-preview-core/scrcpy-hq-bin'
           $probe = & (Join-Path $target 'scrcpy.exe') --version 2>&1 | Out-String
           Write-Host "HQ --version exit code: $LASTEXITCODE"
-          Write-Host "HQ preview marker present: $($probe.Contains('MirroLeap HQ decoded-frame v1 (experimental)'))"
-          if ($LASTEXITCODE -ne 0 -or -not $probe.Contains('MirroLeap HQ decoded-frame v1 (experimental)')) {
+          Write-Host "HQ preview marker present: $($probe.Contains('MirroLeap HQ decoded-frame v2 (experimental)'))"
+          if ($LASTEXITCODE -ne 0 -or -not $probe.Contains('MirroLeap HQ decoded-frame v2 (experimental)')) {
             throw 'Assembled preview scrcpy client failed: verify bundled UCRT64 dependencies'
           }
           $adbProbe = & (Join-Path $target 'adb.exe') version 2>&1 | Out-String
@@ -227,7 +227,7 @@ jobs:
           $tag = "v${version}"
           $coreDir = 'src-tauri/hq-preview-core/scrcpy-hq-bin'
           $archiveDir = 'hq-optional-core'
-          $filename = 'MirroLeap.HQ.Core_v1_x64.zip'
+          $filename = 'MirroLeap.HQ.Core_v2_x64.zip'
           New-Item -ItemType Directory -Force $archiveDir | Out-Null
           $zip = Join-Path $archiveDir $filename
           Compress-Archive -LiteralPath $coreDir -DestinationPath $zip -CompressionLevel Optimal
@@ -308,7 +308,7 @@ jobs:
           }
           $out = 'mirroleap-release'
           New-Item -ItemType Directory -Force $out | Out-Null
-          $core = Get-Item 'hq-optional-core/MirroLeap.HQ.Core_v1_x64.zip'
+          $core = Get-Item 'hq-optional-core/MirroLeap.HQ.Core_v2_x64.zip'
           if (-not $core -or $core.Length -le 1000000) {
             throw 'Separate verified HQ runtime asset missing'
           }

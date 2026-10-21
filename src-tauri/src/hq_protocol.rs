@@ -5,7 +5,8 @@
 //! It is deliberately independent of Windows, so malformed buffers, frame
 //! sizes, rotation and source formats can be regression-tested on Linux CI.
 
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
+pub const CONSUMER_ACTIVE_OFFSET:usize = 28;
 pub const HEADER_BYTES: usize = 64;
 pub const SLOT_HEADER_BYTES: usize = 80;
 pub const SLOT_COUNT: usize = 2;

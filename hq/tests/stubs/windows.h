@@ -22,6 +22,7 @@ void *MapViewOfFile(HANDLE,DWORD,DWORD,DWORD,SIZE_T);
 HANDLE CreateEventW(void *,int,int,const wchar_t *);
 HANDLE CreateThread(void *,SIZE_T,DWORD (WINAPI *)(LPVOID),LPVOID,DWORD,DWORD *);
 DWORD WaitForSingleObject(HANDLE,DWORD);
+DWORD GetTickCount(void);
 int CloseHandle(HANDLE);
 int UnmapViewOfFile(const void *);
 int SetEvent(HANDLE);

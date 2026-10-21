@@ -32,6 +32,7 @@ HANDLE CreateThread(void *a,SIZE_T b,DWORD (WINAPI *c)(LPVOID),LPVOID d,
     (void)a;(void)b;(void)c;(void)d;(void)e;(void)f;return NULL;
 }
 DWORD WaitForSingleObject(HANDLE a,DWORD b) {(void)a;(void)b;return 0;}
+DWORD GetTickCount(void) {return 1000;}
 int CloseHandle(HANDLE a) {(void)a;return 1;}
 int UnmapViewOfFile(const void *a) {(void)a;return 1;}
 int SetEvent(HANDLE a) {(void)a;return 1;}
@@ -45,11 +46,12 @@ void *InterlockedExchangePointer(void * volatile *a,void *b) {
 }
 AVFrame *av_frame_clone(const AVFrame *a) {
     AVFrame *new_frame=malloc(sizeof(*new_frame));
-    if (new_frame) memcpy(new_frame,a,sizeof(*new_frame));
+    if (new_frame) {memcpy(new_frame,a,sizeof(*new_frame));clone_count++;}
     return new_frame;
 }
 void av_frame_free(AVFrame **a) {if (*a) {free(*a);*a=NULL;}}
 
+static unsigned clone_count;
 static void
 initialize(unsigned char *mem) {
     memcpy(mem,"MLHQ",4);
@@ -58,6 +60,7 @@ initialize(unsigned char *mem) {
     mlhq_u32(mem,MLHQ_G_CAPACITY,MLHQ_SLOT_CAPACITY);
     mlhq_u32(mem,MLHQ_G_SLOT_COUNT,MLHQ_SLOT_COUNT);
     mlhq_u32(mem,MLHQ_G_LATEST_SLOT,MLHQ_NO_FRAME);
+    mlhq_u32(mem,MLHQ_G_CONSUMER_ACTIVE,1); // test direct source writer is on
 }
 
 int
@@ -129,6 +132,25 @@ main(int argc,char **argv) {
     frame.width=MLHQ_MAX_WIDTH+2;
     mlhq_publish(&sink,&frame); // bounds check prevents overruns
     CHECK(mlhq_read_u32(shared,MLHQ_G_LATEST_SEQ)==committed);
+    // v2: even a valid source frame MUST NOT be published or cloned when
+    // the live lens is off. A disabled HQ checkbox must not cost video FPS.
+    frame.width=4;frame.height=4;
+    mlhq_u32(shared,MLHQ_G_CONSUMER_ACTIVE,0);
+    mlhq_publish(&sink,&frame);
+    CHECK(mlhq_read_u32(shared,MLHQ_G_LATEST_SEQ)==committed);
+    struct sc_mirroleap_hq_sink preview={0};
+    sc_mirroleap_hq_sink_init(&preview);
+    preview.memory=shared;
+    preview.worker=(HANDLE)(uintptr_t)1; // only test push, no worker thread
+    const unsigned before=clone_count;
+    CHECK(preview.frame_sink.ops->push(&preview.frame_sink,&frame));
+    CHECK(clone_count==before);
+    mlhq_u32(shared,MLHQ_G_CONSUMER_ACTIVE,1);
+    CHECK(preview.frame_sink.ops->push(&preview.frame_sink,&frame));
+    CHECK(clone_count==before+1);
+    AVFrame *queued=InterlockedExchangePointer((void*volatile*)&preview.newest,NULL);
+    CHECK(queued!=NULL);
+    av_frame_free(&queued);
 
     /* The sink cannot terminate a normal scrcpy session when HQ is absent. */
     struct sc_mirroleap_hq_sink not_connected={0};

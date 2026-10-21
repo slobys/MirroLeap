@@ -61,6 +61,16 @@ mlhq_compatible_mapping(const unsigned char *base) {
            mlhq_read_u32(base,MLHQ_G_SLOT_COUNT)==MLHQ_SLOT_COUNT;
 }
 
+// The SDL/FFmpeg pipeline must stay at its normal FPS when the user only
+// enabled the HQ option in settings. A decoded-frame copy is authorized
+// ONLY while the pointer is inside an active HQ round lens.
+static bool
+mlhq_consumer_active(const struct sc_mirroleap_hq_sink *sink) {
+    return sink->memory &&
+        InterlockedCompareExchange((volatile LONG *)(void *)
+            (sink->memory+MLHQ_G_CONSUMER_ACTIVE),0,0)==1;
+}
+
 static bool
 mlhq_frame_supported(const AVFrame *frame) {
     if (!frame || frame->width<2 || frame->height<2 ||
@@ -95,7 +105,7 @@ mlhq_copy_rows(unsigned char *dest, const uint8_t *src,
 /* Called on a dedicated lightweight worker, never on FFmpeg decoder thread. */
 static void
 mlhq_publish(struct sc_mirroleap_hq_sink *sink,const AVFrame *frame) {
-    if (!sink->memory || !mlhq_frame_supported(frame)) {return;}
+    if (!mlhq_consumer_active(sink) || !mlhq_frame_supported(frame)) {return;}
     const uint32_t w=(uint32_t)frame->width;
     const uint32_t h=(uint32_t)frame->height;
     const uint32_t y=w*h;
@@ -150,6 +160,8 @@ mlhq_publish(struct sc_mirroleap_hq_sink *sink,const AVFrame *frame) {
 
     MemoryBarrier(); // data/metadata visible before even sequence
     InterlockedIncrement(sequence); // odd -> even: committed
+    // Do not expose a frame committed after the UI disabled its HQ lens.
+    if (!mlhq_consumer_active(sink)) {return;}
     InterlockedExchange((volatile LONG*)(void*)
         (sink->memory+MLHQ_G_LATEST_SLOT),(LONG)index);
     InterlockedIncrement((volatile LONG*)(void*)
@@ -159,13 +171,23 @@ mlhq_publish(struct sc_mirroleap_hq_sink *sink,const AVFrame *frame) {
 static DWORD WINAPI
 mlhq_worker(LPVOID context) {
     struct sc_mirroleap_hq_sink *sink=context;
+    DWORD last_copied_at=0;
     while (InterlockedCompareExchange(&sink->stopping,0,0)==0) {
         WaitForSingleObject(sink->ready,100);
         AVFrame *frame=InterlockedExchangePointer(
             (void *volatile *)&sink->newest,NULL);
         if (frame) {
-            if (InterlockedCompareExchange(&sink->stopping,0,0)==0) {
-                mlhq_publish(sink,frame);
+            if (InterlockedCompareExchange(&sink->stopping,0,0)==0 &&
+                mlhq_consumer_active(sink)) {
+                const DWORD now=GetTickCount();
+                // Never copy more than 20 full YUV frames/second, even when
+                // Android sends 60+. The latest frame wins; normal scrcpy
+                // decoder, SDL and Android FPS stay entirely independent.
+                if (!last_copied_at ||
+                    (DWORD)(now-last_copied_at)>=MLHQ_MIN_PUBLISH_MS) {
+                    mlhq_publish(sink,frame);
+                    last_copied_at=now ? now : 1;
+                }
             }
             av_frame_free(&frame);
         }
@@ -233,7 +255,8 @@ static bool
 mlhq_push(struct sc_frame_sink *receiver,const AVFrame *frame) {
     struct sc_mirroleap_hq_sink *sink=
         (struct sc_mirroleap_hq_sink*)receiver;
-    if (!sink->worker || !mlhq_frame_supported(frame)) {return true;}
+    if (!sink->worker || !mlhq_consumer_active(sink) ||
+        !mlhq_frame_supported(frame)) {return true;}
     // Reference-counted buffer clone only: copying frame pixels is exclusively
     // the worker's job, never a blocking operation on decoder / SDL threads.
     AVFrame *clone=av_frame_clone(frame);

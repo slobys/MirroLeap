@@ -34,7 +34,7 @@ patch_script = read("hq/apply_scrcpy_v4.py")
 app = read("src-tauri/src/commands.rs")
 lib = read("src-tauri/src/lib.rs")
 
-assert numeric_macro(header, "MLHQ_VERSION") == 1
+assert numeric_macro(header, "MLHQ_VERSION") == 2
 assert numeric_macro(header, "MLHQ_HEADER_BYTES") == 64
 assert numeric_macro(header, "MLHQ_SLOT_BYTES") == 80
 assert numeric_macro(header, "MLHQ_SLOT_COUNT") == 2
@@ -146,6 +146,9 @@ assert "hqlens" not in producer.lower()
 # Manual-only Windows session probe is a deterministic producer-side
 # diagnostic; without explicit -PatchedScrcpy it must not start a client.
 probe = read("hq/windows-frame-probe.ps1")
+assert 'MLHQ_G_CONSUMER_ACTIVE' in header and 'MLHQ_MIN_PUBLISH_MS' in header
+assert 'mlhq_consumer_active' in producer and 'MLHQ_MIN_PUBLISH_MS' in producer
+assert 'set_consumer_active' in read('src-tauri/src/hq_bridge_windows.rs')
 assert "MIRROLEAP_HQ_TOKEN" in probe
 assert "MemoryMappedFile" in probe
 assert "Get-LatestValidFrame" in probe and "ReadUInt32(24)" in probe
@@ -160,7 +163,7 @@ assert "if let Some(token)=hq_token" in app
 assert "create_hq_session(&exe_path,&config).await?" in app
 assert "HQ_VERSION_MARKER" in app and "hq_lens.unwrap_or(false)" in app
 assert 'MIRROLEAP_HQ_TOKEN' not in read("src/hooks/useScrcpy.ts")
-assert "MirroLeap HQ decoded-frame v1 (experimental)" in patch_script
+assert "MirroLeap HQ decoded-frame v2 (experimental)" in patch_script
 # Lite-app invariant: 5MB EXE/MSI, separate SHA256-pinned HQ ZIP downloaded
 # only on explicit opt-in, never during app startup or ordinary mirroring.
 runtime=read("src-tauri/src/hq_runtime.rs")
@@ -178,7 +181,7 @@ assert 'MIRROLEAP_HQ_CORE_URL' in runtime
 assert 'validated_archive_entry' in runtime and 'MAX_EXTRACT' in runtime
 assert 'ensure_hq_runtime' in app and "crate::hq_runtime::ensure" in app
 assert "mirroleap-hq-core-progress" in runtime
-assert 'MirroLeap.HQ.Core_v1_x64.zip' in workflow
+assert 'MirroLeap.HQ.Core_v2_x64.zip' in workflow
 assert 'Lightweight EXE exceeds 9 MB' in workflow
 assert "start_scrcpy" not in producer
 assert "http://" not in producer and "https://" not in producer

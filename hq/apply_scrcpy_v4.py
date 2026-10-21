@@ -26,7 +26,7 @@ START_MESON = "        'src/sys/win/process.c',"
 START_VERSION = "        scrcpy_print_version();"
 VERSION_ADD = START_VERSION + '''
 #ifdef _WIN32
-        printf("MirroLeap HQ decoded-frame v1 (experimental)\\n");
+        printf("MirroLeap HQ decoded-frame v2 (experimental)\\n");
 #endif'''
 
 INCLUDE_ADD = START_INCLUDE + """

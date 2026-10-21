@@ -1743,7 +1743,7 @@ pub struct ScrcpyConfig {
 /// Only a deliberately patched scrcpy v4.0 client prints this stable marker
 /// on --version. A normal official binary must never receive an HQ token.
 #[cfg(target_os="windows")]
-const HQ_VERSION_MARKER:&str="MirroLeap HQ decoded-frame v1 (experimental)";
+const HQ_VERSION_MARKER:&str="MirroLeap HQ decoded-frame v2 (experimental)";
 
 #[cfg(target_os="windows")]
 async fn create_hq_session(

@@ -17,9 +17,9 @@ use sha2::{Digest,Sha256};
 use tauri::{AppHandle,Emitter,Manager};
 use tokio::io::AsyncWriteExt;
 
-const ROOT_NAME:&str="hq-runtime-v1";
+const ROOT_NAME:&str="hq-runtime-v2";
 const CACHE_MARKER:&str=".mirroleap-hq-installed";
-const CLIENT_MARKER:&str="MirroLeap HQ decoded-frame v1 (experimental)";
+const CLIENT_MARKER:&str="MirroLeap HQ decoded-frame v2 (experimental)";
 const MAX_DOWNLOAD:u64=110*1024*1024;
 const MAX_EXTRACT:u64=500*1024*1024;
 const MAX_ENTRIES:usize=750;
@@ -56,7 +56,7 @@ fn verified_source()->Result<(&'static str,&'static str),String> {
     // Pin both version and canonical published tag.  The normal MirroLeap
     // installer must never accept an HQ-preview separate-app archive.
     let required=format!(
-        "https://github.com/slobys/MirroLeap/releases/download/v{}/MirroLeap.HQ.Core_v1_x64.zip",
+        "https://github.com/slobys/MirroLeap/releases/download/v{}/MirroLeap.HQ.Core_v2_x64.zip",
         env!("CARGO_PKG_VERSION")
     );
     if url!=required || !valid_sha256(sha) {
@@ -66,8 +66,8 @@ fn verified_source()->Result<(&'static str,&'static str),String> {
 }
 fn complete(dir:&Path)->bool {
     let marker=fs::read_to_string(dir.join(CACHE_MARKER)).ok();
-    marker.as_deref().is_some_and(|v|v.starts_with("hq4.0-protocol-v1:") &&
-        valid_sha256(v.trim().strip_prefix("hq4.0-protocol-v1:").unwrap_or("")))
+    marker.as_deref().is_some_and(|v|v.starts_with("hq4.0-protocol-v2:") &&
+        valid_sha256(v.trim().strip_prefix("hq4.0-protocol-v2:").unwrap_or("")))
         && ["scrcpy.exe","adb.exe","scrcpy-server"].iter()
             .all(|file|dir.join(file).is_file())
 }
@@ -130,7 +130,7 @@ fn unpack(archive:&Path,stage:&Path,sha:&str)->Result<PathBuf,String> {
         return Err("HQ runtime is missing the patched client, adb or server".into());
     }
     fs::write(files.join(CACHE_MARKER),
-        format!("hq4.0-protocol-v1:{sha}"))
+        format!("hq4.0-protocol-v2:{sha}"))
         .map_err(|e|e.to_string())?;
     Ok(files)
 }
