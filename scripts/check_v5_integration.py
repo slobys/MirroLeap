@@ -181,7 +181,8 @@ assert "presented_source_size" in read("src-tauri/src/hq_cpu_lens_windows.rs")
 assert "adaptive_luma" in read("src-tauri/src/hq_reference_render.rs")
 assert "MIRROLEAP_CLICK_VISUAL_SMOKE" in native_click
 assert "capture_composited_rect" in native_click
-assert "DURATION_MS:u64=1800" in native_click
+assert "DURATION_MS:u64=600" in native_click
+assert "ripple_completes_in_600ms_including_fade" in native_click
 
 
 for name in ("arrow", "rect", "step", "mask"):
