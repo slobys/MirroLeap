@@ -86,8 +86,10 @@ export interface ScrcpyConfig {
     borderless?: boolean;
     /** Windows-only live native scrcpy view with a click-through phone shell. */
     deviceFrame?: boolean;
-    /** Experimental raw scrcpy v4.0 decoded-frame magnifier. OFF by default. */
+    /** Enable 2.35x live lens without replacing the normal scrcpy video engine. */
     hqLens?: boolean;
+    /** SECOND opt-in: replace scrcpy 5.x with the experimental raw-frame scrcpy 4.0. */
+    hqExperimentalCore?: boolean;
     record?: boolean;
     recordPath?: string;
     scrcpyPath?: string;
@@ -233,6 +235,7 @@ export function useScrcpy() {
         // It remains optional and does not affect camera/desktop/fullscreen modes.
         deviceFrame: typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent),
         hqLens: false,
+        hqExperimentalCore: false,
         recordPath: "",
         vdWidth: 1920,
         vdHeight: 1080,

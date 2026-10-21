@@ -1693,6 +1693,8 @@ pub struct ScrcpyConfig {
     device_frame: Option<bool>,
     /// Experimental raw decoded-frame lens; opt-in per launch, Windows only.
     hq_lens: Option<bool>,
+    /// SECOND explicit opt-in: use optional raw-frame scrcpy 4.0 instead of normal 5.x.
+    hq_experimental_core: Option<bool>,
     remember_window_position: Option<bool>,
     record: Option<bool>,
     record_path: Option<String>,
@@ -1745,11 +1747,18 @@ pub struct ScrcpyConfig {
 #[cfg(target_os="windows")]
 const HQ_VERSION_MARKER:&str="MirroLeap HQ decoded-frame v2 (experimental)";
 
+// Existing hqLens=true configuration does not consent to switching video
+// engines. Preserve normal scrcpy 5.x unless BOTH switches are enabled.
+fn experimental_hq_selected(lens:Option<bool>,raw:Option<bool>)->bool {
+    lens==Some(true) && raw==Some(true)
+}
+
+
 #[cfg(target_os="windows")]
 async fn create_hq_session(
     exe_path:&str,config:&ScrcpyConfig,
 )->Result<Option<Arc<crate::hq_bridge_windows::HqMappingOwner>>,String> {
-    if !config.hq_lens.unwrap_or(false) {return Ok(None);}
+    if !experimental_hq_selected(config.hq_lens,config.hq_experimental_core) {return Ok(None);}
     if !wants_device_frame(config) {
         return Err("HQ 预览只支持带手机边框的 Windows 普通窗口投屏。".into());
     }
@@ -2626,8 +2635,12 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
         return Err("This Android device is already being mirrored".into());
     }
     let mut exe_path = get_binary_path("scrcpy", config.scrcpy_path.clone());
+    if config.hq_lens==Some(true) && config.hq_experimental_core!=Some(true) {
+        let _=window.emit("scrcpy-log",
+            "[PERFORMANCE] Smooth 2.35x lens: retaining normal scrcpy 5.x and configured decoder. Experimental raw-frame core is not active.");
+    }
     #[cfg(target_os="windows")]
-    if config.hq_lens.unwrap_or(false) {
+    if experimental_hq_selected(config.hq_lens,config.hq_experimental_core) {
         // HQ needs a private patched binary. It is no longer inside the
         // light ~5 MB installer; fetch only when explicitly requested. A
         // previously enabled user setting also authorizes repair/download.
@@ -2638,7 +2651,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     // Ordinary mirroring retains the existing configured/official core and
     // does not allocate HQ memory, download assets or modify any DLL.
     #[cfg(not(target_os="windows"))]
-    if config.hq_lens.unwrap_or(false) {
+    if experimental_hq_selected(config.hq_lens,config.hq_experimental_core) {
         return Err("HQ decoded-frame preview requires Windows".into());
     }
 
@@ -2663,7 +2676,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
 
     let mut adb_exe_path = get_binary_path("adb", config.scrcpy_path.clone());
     #[cfg(target_os="windows")]
-    if config.hq_lens.unwrap_or(false) {
+    if experimental_hq_selected(config.hq_lens,config.hq_experimental_core) {
         if let Some(candidate)=Path::new(&exe_path).parent().map(|p|p.join("adb.exe")) {
             if candidate.is_file() {adb_exe_path=candidate.to_string_lossy().into_owned();}
         }
@@ -3061,6 +3074,15 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
 mod tests {
     use super::*;
 
+    #[test]
+    fn old_hq_setting_migrates_to_smooth_scrcpy_without_v4_core() {
+        assert!(!experimental_hq_selected(None,None));
+        assert!(!experimental_hq_selected(Some(true),None));
+        assert!(!experimental_hq_selected(Some(true),Some(false)));
+        assert!(!experimental_hq_selected(Some(false),Some(true)));
+        assert!(experimental_hq_selected(Some(true),Some(true)));
+    }
+
     fn base_config(session_mode: &str) -> ScrcpyConfig {
         ScrcpyConfig {
             device: "device1".to_string(),
@@ -3076,6 +3098,7 @@ mod tests {
             borderless: None,
             device_frame: None,
             hq_lens: None,
+            hq_experimental_core: None,
             remember_window_position: None,
             record: None,
             record_path: None,

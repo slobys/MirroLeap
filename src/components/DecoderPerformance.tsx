@@ -29,14 +29,21 @@ export default function DecoderPerformance({config, setConfig, support, observed
   const [hqBusy,setHqBusy]=useState(false);
   const [hqPercent,setHqPercent]=useState<number|null>(null);
   const [hqError,setHqError]=useState<string|null>(null);
-  const onHqToggle=async (checked:boolean) => {
+  const onHqToggle=(checked:boolean) => {
+    // Smooth 2.35x must retain regular scrcpy 5.x, including for users who
+    // migrated with hqLens=true saved by v5.3.0.
+    setHqError(null);
+    setConfig({...config,hqLens:checked,hqExperimentalCore:false});
+  };
+  const onRawHqToggle=async (checked:boolean) => {
     if (!checked) {
       setHqError(null);
-      setConfig({...config,hqLens:false});
+      setConfig({...config,hqExperimentalCore:false});
       return;
     }
-    // The ordinary ~5 MB installer contains ZERO experimental FFmpeg/SDL
-    // binaries. Network/installation occurs only after this explicit opt-in.
+    if (!config.hqLens) return;
+    // Download and switch video engines ONLY on this clearly labelled
+    // SECOND opt-in to experimental raw decoded-frame quality.
     setHqBusy(true);
     setHqError(null);
     setHqPercent(null);
@@ -47,7 +54,7 @@ export default function DecoderPerformance({config, setConfig, support, observed
           if (Number.isFinite(payload?.percent)) setHqPercent(payload.percent);
         });
       await invoke('ensure_hq_runtime');
-      setConfig({...config,hqLens:true});
+      setConfig({...config,hqLens:true,hqExperimentalCore:true});
     } catch(error) {
       setHqError(String(error));
     } finally {
@@ -57,6 +64,7 @@ export default function DecoderPerformance({config, setConfig, support, observed
     }
   };
   const zh = locale.startsWith('zh');
+  const usingRawCore=Boolean(config.hqLens && config.hqExperimentalCore);
   const supported = Boolean(support?.supportsHwdec);
   const modes = supported ? support?.modes || [] : [];
   const requested = config.hardwareDecoder || 'auto';
@@ -74,7 +82,7 @@ export default function DecoderPerformance({config, setConfig, support, observed
       </h2>
       <span className="ml-muted text-xs">
         {zh ? '投屏核心' : 'scrcpy core'}：
-        {support?.scrcpyVersion ? (config.hqLens ?
+        {support?.scrcpyVersion ? (usingRawCore ?
           (zh ? `普通 v${support.scrcpyVersion} · HQ 使用 scrcpy 4.0` :
                 `Normal v${support.scrcpyVersion} · HQ uses scrcpy 4.0`) :
           `v${support.scrcpyVersion}`) : (zh ? '未检测' : 'Not detected')}
@@ -90,7 +98,7 @@ export default function DecoderPerformance({config, setConfig, support, observed
     </label>
     <select id="ml-hwdec" className="ml-select"
       value={selected}
-      disabled={!supported}
+      disabled={!supported || usingRawCore}
       onChange={(event) => setConfig({
         ...config,
         hardwareDecoder: event.target.value as ScrcpyConfig['hardwareDecoder'],
@@ -134,21 +142,33 @@ export default function DecoderPerformance({config, setConfig, support, observed
           checked={Boolean(config.hqLens)}
           disabled={hqBusy}
           onChange={(event) => void onHqToggle(event.target.checked)}/>
-        {zh ? '可选 2.35× 高清放大（首次开启才下载独立核心）' :
-          'Optional 2.35× HQ lens (downloads core on first opt-in)'}
+        {zh ? '2.35× 实时放大（流畅优先，保留普通 scrcpy）' :
+          '2.35× live lens (smooth: keep regular scrcpy)'}
       </label>
+      {config.hqLens && <p role="note" className="text-xs ml-muted">
+        {zh ? '默认流畅模式保持 scrcpy 5.x；放大的是桌面投屏像素，并非原始解码帧高清。'
+            : 'Smooth mode keeps scrcpy 5.x; the 2.35× lens magnifies desktop pixels, NOT original decoded frames.'}
+      </p>}
+      {config.hqLens && <label className="inline-flex items-center gap-2 text-xs">
+        <input type="checkbox" className="accent-primary"
+          checked={usingRawCore}
+          disabled={hqBusy}
+          onChange={(event)=>void onRawHqToggle(event.target.checked)}/>
+        {zh ? '实验性原始帧高清（切换 scrcpy 4.0，可能卡顿）' :
+          'Experimental raw-frame HQ (switches to scrcpy 4.0; may stutter)'}
+      </label>}
       {hqBusy && <p role="status" className="text-xs ml-muted">
-        {zh ? '正在校验并安装可选 HQ 核心' : 'Installing and verifying optional HQ core'}
+        {zh ? '正在校验并安装实验原始帧核心' : 'Installing experimental raw-frame core'}
         {hqPercent!==null ? ` · ${hqPercent}%` : '…'}
       </p>}
       {hqError && <p role="alert" className="text-xs text-red-600">
         {zh ? '高清核心暂时无法启用：' : 'HQ core not enabled: '}{hqError}
       </p>}
-      {config.hqLens && <p role="note" className="text-xs text-amber-600">
+      {usingRawCore && <p role="note" className="text-xs text-amber-600">
         {zh ? '注意：HQ 实验核心基于 scrcpy 4.0，不支持普通 5.0.1 的 --hwdec=d3d11va。上方 D3D11 选项只适用于普通核心；HQ CPU 抗锯齿不是 GPU 视频解码，也不代表启用了硬解。'
             : 'HQ uses experimental scrcpy 4.0 and cannot use the normal 5.0.1 --hwdec=d3d11va flag. The D3D11 selector describes your regular core only; CPU lens antialiasing is NOT GPU video decoding.'}
       </p>}
-      {config.hqLens && <p role="note" className="text-xs text-amber-600">
+      {usingRawCore && <p role="note" className="text-xs text-amber-600">
         {zh ? 'HQ 核心已就绪，普通投屏仍使用轻量默认核心。下次启动投屏后，从悬浮栏开启实时放大。HQ 当前为 CPU/GDI 原始帧预览，并非最终 D3D11 GPU 版本；无有效帧时会回退旧镜头。' :
           'Optional HQ core ready. Normal mirroring stays lightweight. Start a new mirror and enable live zoom in the hover rail. This is CPU/GDI decoded-frame preview, not final D3D11; it falls back if frames are unavailable.'}
       </p>}
