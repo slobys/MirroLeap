@@ -12,12 +12,15 @@
 use std::{
     ffi::c_void,
     ptr::{null, null_mut},
-    sync::{atomic::{AtomicI32, Ordering}, mpsc::{sync_channel, Receiver, SyncSender, TrySendError}, Mutex, OnceLock},
+    sync::{atomic::{AtomicI32, Ordering}, mpsc::{sync_channel, Receiver, SyncSender, TrySendError}, Arc, Mutex, OnceLock},
     thread::{self, JoinHandle},
     time::Duration,
 };
 
 type RawHwnd = *mut c_void;
+use crate::hq_bridge_windows::HqMappingOwner;
+use crate::hq_cpu_lens_windows::HqDecodedCpuLens;
+use crate::hq_geometry::ScreenViewport;
 const EX_LAYERED: u32 = 0x0008_0000;
 const EX_TRANSPARENT: u32 = 0x0000_0020;
 const EX_TOOLWINDOW: u32 = 0x0000_0080;
@@ -348,7 +351,7 @@ impl Lens {
             set_wheel_target(view);
         }
     }
-    fn apply_wheel(&mut self) {
+    fn apply_wheel(&mut self,render_legacy:bool) {
         let diameter_delta=WHEEL_SIZE_DELTA.swap(0,Ordering::SeqCst);
         let zoom_delta=WHEEL_ZOOM_DELTA.swap(0,Ordering::SeqCst);
         if diameter_delta==0 && zoom_delta==0 {return;}
@@ -381,7 +384,7 @@ impl Lens {
                 self.settings.zoom=previous_zoom;
             }
         }
-        if changed_diameter || zoom_applied {self.display(view);}
+        if (changed_diameter || zoom_applied) && render_legacy {self.display(view);}
     }
     fn refresh(&self) {
         if self.visible { unsafe {InvalidateRect(self.magnifier,null(),0);}}
@@ -402,7 +405,10 @@ struct Session { device:String, tx:SyncSender<Command>, thread:JoinHandle<()> }
 static CURRENT:OnceLock<Mutex<Option<Session>>>=OnceLock::new();
 fn current()->&'static Mutex<Option<Session>> {CURRENT.get_or_init(||Mutex::new(None))}
 
-fn work_loop(rx:Receiver<Command>,started:SyncSender<Result<(),String>>) {
+fn work_loop(
+    rx:Receiver<Command>,started:SyncSender<Result<(),String>>,
+    owner:Option<Arc<HqMappingOwner>>,
+) {
     let mut lens=match Lens::create() {
         Ok(lens)=>lens,
         Err(e)=>{let _=started.send(Err(e));return},
@@ -413,10 +419,19 @@ fn work_loop(rx:Receiver<Command>,started:SyncSender<Result<(),String>>) {
         Ok(hook)=>hook,
         Err(e)=>{let _=started.send(Err(e));return},
     };
+    // Independent BGRA layered window for the reviewed CPU reference path.
+    // If the desktop compositor refuses it, keep Magnification.dll working.
+    let mut hq=owner.as_ref().and_then(|_|HqDecodedCpuLens::create().ok());
     let _=started.send(Ok(()));
     loop {
         match rx.recv_timeout(Duration::from_millis(16)) {
-            Ok(Command::Update(update))=>lens.display(update),
+            Ok(Command::Update(update))=> {
+                if owner.is_none() || hq.is_none() {
+                    lens.display(update);
+                } else {
+                    lens.view=Some(update);
+                }
+            },
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected)=>break,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout)=>{},
         }
@@ -427,17 +442,43 @@ fn work_loop(rx:Receiver<Command>,started:SyncSender<Result<(),String>>) {
                 DispatchMessageW(&msg);
             }
         }
+        lens.apply_wheel(hq.as_ref().is_none_or(|preview|!preview.is_presenting()));
+        if let (Some(owner),Some(preview),Some(view))=(owner.as_ref(),hq.as_mut(),lens.view) {
+            if !view.active || !view.inside() {
+                preview.hide();
+                lens.set_visible(false);
+            } else if let Some(target)=lens_geometry(view,lens.settings) {
+                let source=ScreenViewport {
+                    x:view.x,y:view.y,width:view.width as u32,height:view.height as u32,
+                };
+                let _=preview.update_from_source(owner,source,
+                    (view.cursor_x,view.cursor_y),target.size as u32,lens.settings.zoom);
+                if preview.is_presenting() {
+                    lens.set_visible(false);
+                    // The wheel must still resize the HQ circle even though
+                    // the Magnification.dll fallback HWND is hidden.
+                    set_wheel_target(view);
+                } else {
+                    lens.display(view); // No valid source frame: never go black.
+                }
+            } else {
+                preview.hide();
+                lens.set_visible(false);
+            }
+        }
         lens.refresh();
-        lens.apply_wheel();
     }
+    WHEEL_ACTIVE.store(0,Ordering::SeqCst);
 }
 
-pub fn start(device:&str)->Result<(),String> {
+pub fn start(device:&str)->Result<(),String> { start_with_hq(device,None) }
+
+pub fn start_with_hq(device:&str,owner:Option<Arc<HqMappingOwner>>)->Result<(),String> {
     stop_all();
     let (tx,rx)=sync_channel(5);
     let (ready_tx,ready_rx)=sync_channel(1);
     let worker=thread::Builder::new().name("mirroleap-live-magnifier".into())
-        .spawn(move||work_loop(rx,ready_tx))
+        .spawn(move||work_loop(rx,ready_tx,owner))
         .map_err(|e|format!("Cannot start native live magnifier: {e}"))?;
     match ready_rx.recv_timeout(Duration::from_secs(4)) {
         Ok(Ok(()))=>{

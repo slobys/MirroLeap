@@ -174,6 +174,8 @@ pub struct HqDecodedCpuLens {
     pixels:Option<NonNull<u8>>,
     dimension:u32,
     previous_key:Option<PresentationKey>,
+    cached_frame:Option<(u32,crate::hq_protocol::OwnedFrame)>,
+    last_generation:u64,
 }
 
 impl HqDecodedCpuLens {
@@ -197,7 +199,8 @@ impl HqDecodedCpuLens {
         Ok(Self {
             hwnd,dc,
             default_bitmap:NonNull::dangling(),
-            bitmap:None,pixels:None,dimension:0,previous_key:None,
+            bitmap:None,pixels:None,dimension:0,previous_key:None,cached_frame:None,
+            last_generation:0,
         })
     }
 
@@ -278,6 +281,14 @@ impl HqDecodedCpuLens {
         self.previous_key=None;
     }
 
+    /// True only after a complete valid source frame was rendered.
+    pub fn is_presenting(&self)->bool {self.previous_key.is_some()}
+
+    pub fn reset_source(&mut self) {
+        self.cached_frame=None;
+        self.hide();
+    }
+
     /// Opt-in source-preview adapter. Inactive or unchanged frames never
     /// repaint the HWND. Never call from scrcpy's decoder thread.
     ///
@@ -287,19 +298,36 @@ impl HqDecodedCpuLens {
         &mut self, owner:&HqMappingOwner, viewport:ScreenViewport,
         cursor:(i32,i32),lens_diameter:u32,zoom:f32,
     )->Result<bool,&'static str> {
-        let Some((publish_id,frame))=owner.try_latest_with_publish_id()
-            .inspect_err(|_|self.hide())? else {
-            // The writer may simply be between two slots. Keep the last
-            // valid frame visible rather than flickering to transparency.
-            return Ok(false);
+        let generation=owner.generation();
+        if generation!=self.last_generation {
+            // The publish counter restarts from 1 on decoder/audio retry.
+            // Never reuse a cached frame with the same ID from the OLD stream.
+            self.reset_source();
+            self.last_generation=generation;
+        }
+        let publish_id=match owner.latest_publish_id() {
+            Ok(Some(id))=>id,
+            Ok(None)=>{self.reset_source();return Ok(false);},
+            Err(error)=>{self.reset_source();return Err(error);},
         };
         let key=PresentationKey::new(
             publish_id,viewport,cursor,lens_diameter,zoom);
+        // Paused/static Android images keep full source resolution as the
+        // pointer moves, without allocating/copying ~12 MiB every idle tick.
         if self.previous_key==Some(key) {return Ok(false);}
+        if self.cached_frame.as_ref().map(|(id,_)|*id)!=Some(publish_id) {
+            let next=match owner.try_latest_with_publish_id() {
+                Ok(frame)=>frame,
+                Err(error)=>{self.reset_source();return Err(error);},
+            };
+            let Some(frame)=next else {return Ok(false);};
+            self.cached_frame=Some(frame);
+        }
         let (left,top)=lens_position(viewport,cursor,lens_diameter)
             .inspect_err(|_|self.hide())?;
+        let frame=&self.cached_frame.as_ref().expect("HQ source cached").1;
         let image=render_decoded_hq_preview(
-            &frame,viewport,cursor,lens_diameter,zoom)
+            frame,viewport,cursor,lens_diameter,zoom)
             .inspect_err(|_|self.hide())?;
         self.present_bgra(&image.bgra,left,top,lens_diameter)
             .inspect_err(|_|self.hide())?;

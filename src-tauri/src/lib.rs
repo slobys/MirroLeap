@@ -46,6 +46,9 @@ use std::os::unix::process::CommandExt;
 
 pub struct ScrcpyState {
     pub processes: Mutex<HashMap<String, Child>>,
+    /// Explicit, per-device opt-in decoded-frame sessions. Never persisted.
+    #[cfg(target_os = "windows")]
+    pub hq_sessions: Mutex<HashMap<String,std::sync::Arc<hq_bridge_windows::HqMappingOwner>>>,
     /// ADB binary resolved for each active mirror (supports custom core paths).
     pub adb_paths: Mutex<HashMap<String, String>>,
     /// Current recording file per device; shared with user-stop and natural
@@ -120,6 +123,8 @@ pub fn run() {
         .setup(|app| {
             app.manage(ScrcpyState {
                 processes: Mutex::new(HashMap::new()),
+                #[cfg(target_os = "windows")]
+                hq_sessions: Mutex::new(HashMap::new()),
                 adb_paths: Mutex::new(HashMap::new()),
                 recording_paths: Mutex::new(HashMap::new()),
                 active_device: Mutex::new(None),

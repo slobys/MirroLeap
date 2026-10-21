@@ -91,8 +91,21 @@ export default function DecoderPerformance({config, setConfig, support, observed
       <Gauge size={15} className="ml-primary"/>
       {zh ? '在运行日志输出实际帧率（scrcpy --print-fps）' : 'Log actual FPS (scrcpy --print-fps)'}
     </label>
+    {(support?.hostOs === 'windows' || (typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent))) && <>
+      <label className="inline-flex items-center gap-2 text-xs">
+        <input type="checkbox" className="accent-primary"
+          checked={Boolean(config.hqLens)}
+          onChange={(event) => setConfig({...config,hqLens:event.target.checked})}/>
+        {zh ? '实验性 2.35× 原始帧高清放大（启动下次投屏时启用）' :
+          'Experimental 2.35× decoded-frame lens (next session)'}
+      </label>
+      {config.hqLens && <p role="note" className="text-xs text-amber-600">
+        {zh ? '仅支持打包的 HQ 预览核心或手动选定的带 HQ 标识 scrcpy 4.0。需要先启动投屏，再从悬浮栏点击实时放大。当前是 CPU/GDI 预览，不是 D3D11 GPU；无有效原始帧时回退旧镜头，未完成真机视频验收。' :
+          'Requires the bundled HQ preview core or an explicitly selected HQ-patched scrcpy 4.0. Start mirroring, then choose live zoom in the hover rail. This is CPU/GDI preview, not D3D11 GPU; it falls back without valid source frames and has not passed Android video acceptance tests.'}
+      </p>}
+    </>}
     {running && <p className="ml-muted text-xs">
-      {zh ? '解码参数和 FPS 日志开关将在下次投屏启动时生效，不会打断当前画面。'
+      {zh ? '解码参数、HQ 与 FPS 日志开关将在下次投屏启动时生效，不会打断当前画面。'
         : 'Decoder and FPS logging preferences apply to your next mirroring session without interrupting this one.'}
     </p>}
     <div className="flex items-center gap-2 text-xs" role="status">

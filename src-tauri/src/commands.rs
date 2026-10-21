@@ -1691,6 +1691,8 @@ pub struct ScrcpyConfig {
     borderless: Option<bool>,
     /// Draw a click-through iPhone-inspired bezel above the live SDL window (Windows only).
     device_frame: Option<bool>,
+    /// Experimental raw decoded-frame lens; opt-in per launch, Windows only.
+    hq_lens: Option<bool>,
     remember_window_position: Option<bool>,
     record: Option<bool>,
     record_path: Option<String>,
@@ -1736,6 +1738,36 @@ pub struct ScrcpyConfig {
     /// Useful when the device reports incorrect encoder limits that prevent
     /// scrcpy from starting.
     ignore_video_encoder_constraints: Option<bool>,
+}
+
+/// Only a deliberately patched scrcpy v4.0 client prints this stable marker
+/// on --version. A normal official binary must never receive an HQ token.
+#[cfg(target_os="windows")]
+const HQ_VERSION_MARKER:&str="MirroLeap HQ decoded-frame v1 (experimental)";
+
+#[cfg(target_os="windows")]
+async fn create_hq_session(
+    exe_path:&str,config:&ScrcpyConfig,
+)->Result<Option<Arc<crate::hq_bridge_windows::HqMappingOwner>>,String> {
+    if !config.hq_lens.unwrap_or(false) {return Ok(None);}
+    if !wants_device_frame(config) {
+        return Err("HQ 预览只支持带手机边框的 Windows 普通窗口投屏。".into());
+    }
+    if !Path::new(exe_path).is_file() {
+        return Err("未找到实验版 scrcpy 4.0 客户端，已拒绝启用 HQ。".into());
+    }
+    let mut command=create_command(exe_path);
+    command.arg("--version");
+    let output=timeout(Duration::from_secs(6),command.output()).await
+        .map_err(|_|"HQ 客户端版本检查超时")?
+        .map_err(|_|"无法启动 HQ 客户端版本检查")?;
+    let text=String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() || !text.contains("scrcpy 4.0") ||
+       !text.contains(HQ_VERSION_MARKER) {
+        return Err("此客户端不是已标记的实验版 scrcpy 4.0，请先安装 HQ 预览核心；普通 scrcpy 不会自动修改。".into());
+    }
+    crate::hq_bridge_windows::HqMappingOwner::new()
+        .map(Arc::new).map(Some).map_err(str::to_string)
 }
 
 fn resolve_audio_codec_flag<'a>(config: &'a ScrcpyConfig, audio_codec_override: Option<&'a str>) -> Option<&'a str> {
@@ -2412,6 +2444,7 @@ async fn spawn_scrcpy_streams(
     server_path: Option<&str>,
     args: &[String],
     vsync: bool,
+    hq_token: Option<&str>,
 ) -> Result<(tokio::process::Child, Arc<AtomicBool>, Arc<AtomicBool>), String> {
     let command_str = format!("> scrcpy {}", args.join(" "));
     let _ = window.emit("scrcpy-log", command_str);
@@ -2430,6 +2463,9 @@ async fn spawn_scrcpy_streams(
     // the renderer syncs to the display refresh; "0" lets the user opt out
     // (slightly lower input latency) via the in-app toggle.
     command.env("SDL_RENDER_VSYNC", if vsync { "1" } else { "0" });
+    // Secret token goes ONLY to this checked patched child process, never
+    // to the user-visible CLI, config, log, or a global environment variable.
+    if let Some(token)=hq_token {command.env("MIRROLEAP_HQ_TOKEN",token);}
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
@@ -2560,7 +2596,24 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     let video_dir = prepare_recording_directory(&config, fallback_dir.as_deref())?
         .or(fallback_dir);
 
-    let exe_path = get_binary_path("scrcpy", config.scrcpy_path.clone());
+    if state.processes.lock().map_err(|e|e.to_string())?.contains_key(&config.device) {
+        return Err("This Android device is already being mirrored".into());
+    }
+    let mut exe_path = get_binary_path("scrcpy", config.scrcpy_path.clone());
+    #[cfg(target_os="windows")]
+    if config.hq_lens.unwrap_or(false) {
+        if let Ok(resources)=app_handle.path().resource_dir() {
+            let bundled=resources.join("scrcpy-hq-bin").join("scrcpy.exe");
+            if bundled.is_file() {exe_path=bundled.to_string_lossy().into_owned();}
+        }
+    }
+    // On packaged HQ Preview, always prefer the deliberately shipped patched
+    // core to the persisted official scrcpyPath. Standalone developers may
+    // choose their own patched folder when no preview core is bundled.
+    #[cfg(not(target_os="windows"))]
+    if config.hq_lens.unwrap_or(false) {
+        return Err("HQ decoded-frame preview requires Windows".into());
+    }
 
     // Log the session details for the user
     let mode_label = match config.session_mode.as_str() {
@@ -2581,7 +2634,13 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
         let _ = window.emit("scrcpy-log", format!("[SYSTEM] Recording enabled -> output to {}", path));
     }
 
-    let adb_exe_path = get_binary_path("adb", config.scrcpy_path.clone());
+    let mut adb_exe_path = get_binary_path("adb", config.scrcpy_path.clone());
+    #[cfg(target_os="windows")]
+    if config.hq_lens.unwrap_or(false) {
+        if let Some(candidate)=Path::new(&exe_path).parent().map(|p|p.join("adb.exe")) {
+            if candidate.is_file() {adb_exe_path=candidate.to_string_lossy().into_owned();}
+        }
+    }
     let server_path = if !exe_path.is_empty() && exe_path != "scrcpy" {
         Path::new(&exe_path).parent().map(|p| p.join("scrcpy-server").to_string_lossy().to_string())
     } else {
@@ -2629,6 +2688,21 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
         "device": config.device, "mode": "starting",
     }));
 
+    // Only explicit HQ sessions allocate the ~25 MiB mapping. The marker
+    // probe happens before launch and is strictly opt-in; normal sessions
+    // preserve their previous scrcpy binary and code path.
+    #[cfg(target_os="windows")]
+    let hq_owner=create_hq_session(&exe_path,&config).await?;
+    #[cfg(target_os="windows")]
+    let hq_token=hq_owner.as_ref().map(|owner|owner.child_env_token().to_string());
+    #[cfg(not(target_os="windows"))]
+    let hq_token:Option<String>=None;
+    #[cfg(target_os="windows")]
+    if let Some(owner)=hq_owner {
+        state.hq_sessions.lock().map_err(|e|e.to_string())?
+            .insert(config.device.clone(),owner);
+    }
+
     // First attempt: honour the user's audio codec choice. In "auto" mode this
     // launches without --audio-codec, matching the previous default behaviour.
     let initial_args = build_scrcpy_args_with_decoder(&config, video_dir.clone(), None, &decoder_decision);
@@ -2642,7 +2716,12 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
         server_path.as_deref(),
         &initial_args,
         config.vsync.unwrap_or(true),
-    ).await?;
+        hq_token.as_deref(),
+    ).await.map_err(|error| {
+        #[cfg(target_os="windows")]
+        if let Ok(mut sessions)=state.hq_sessions.lock() {sessions.remove(&config.device);}
+        error
+    })?;
 
     let initial_scrcpy_pid = child.id();
     state.processes.lock().unwrap().insert(config.device.clone(), child);
@@ -2672,6 +2751,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     let server_path_mon = server_path;
     let config_mon = config.clone();
     let initial_decoder_decision = decoder_decision;
+    let hq_token_mon=hq_token;
 
     // Position we asked scrcpy to open at this launch (if any). Used to learn
     // the decoration offset so the saved position round-trips exactly. See
@@ -2788,6 +2868,13 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                     // Give stream reader tasks a moment to flush remaining stderr
                     // lines (the audio error pattern may still be in flight).
                     tokio::time::sleep(Duration::from_millis(250)).await;
+                    // No writer may be alive when resetting the publication.
+                    // A retry reuses this token but must never display pixels
+                    // from the previous process/session generation.
+                    #[cfg(target_os="windows")]
+                    if let Ok(sessions)=app_handle_mon.state::<ScrcpyState>().hq_sessions.lock() {
+                        if let Some(owner)=sessions.get(&device_mon) {owner.reset_publication();}
+                    }
 
                     let audio_failed = current_audio_flag.load(Ordering::SeqCst);
                     let decoder_failed = current_decoder_error_flag.load(Ordering::SeqCst);
@@ -2812,6 +2899,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                             &window_mon, &device_mon, &exe_path_mon, &adb_exe_path_mon,
                             server_path_mon.as_deref(), &retry_args,
                             config_mon.vsync.unwrap_or(true),
+                            hq_token_mon.as_deref(),
                         ).await {
                             Ok((new_child, new_audio_flag, new_decoder_flag)) => {
                                 current_scrcpy_pid = new_child.id();
@@ -2862,6 +2950,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                             server_path_mon.as_deref(),
                             &new_args,
                             config_mon.vsync.unwrap_or(true),
+                            hq_token_mon.as_deref(),
                         ).await {
                             Ok((new_child, new_flag, new_decoder_flag)) => {
                                 current_scrcpy_pid = new_child.id();
@@ -2930,6 +3019,11 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
         let state_mon = app_handle_mon.state::<ScrcpyState>();
         if !state_mon.processes.lock().unwrap().contains_key(&device_mon) {
             state_mon.adb_paths.lock().unwrap().remove(&device_mon);
+            #[cfg(target_os="windows")]
+            {
+                crate::native_live_lens::stop(&device_mon);
+                state_mon.hq_sessions.lock().unwrap().remove(&device_mon);
+            }
         }
     });
 
@@ -2954,6 +3048,7 @@ mod tests {
             fullscreen: None,
             borderless: None,
             device_frame: None,
+            hq_lens: None,
             remember_window_position: None,
             record: None,
             record_path: None,
@@ -3565,6 +3660,11 @@ pub async fn stop_scrcpy_impl(
     }
     if let Some(path) = recording {
         emit_recording_file_result(app, &device, &path, graceful);
+    }
+    #[cfg(target_os="windows")]
+    {
+        crate::native_live_lens::stop(&device);
+        state.hq_sessions.lock().map_err(|e|e.to_string())?.remove(&device);
     }
     Ok(())
 }

@@ -86,6 +86,8 @@ export interface ScrcpyConfig {
     borderless?: boolean;
     /** Windows-only live native scrcpy view with a click-through phone shell. */
     deviceFrame?: boolean;
+    /** Experimental raw scrcpy v4.0 decoded-frame magnifier. OFF by default. */
+    hqLens?: boolean;
     record?: boolean;
     recordPath?: string;
     scrcpyPath?: string;
@@ -230,6 +232,7 @@ export function useScrcpy() {
         // New Windows installs present the native mirror in an iPhone-style shell.
         // It remains optional and does not affect camera/desktop/fullscreen modes.
         deviceFrame: typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent),
+        hqLens: false,
         recordPath: "",
         vdWidth: 1920,
         vdHeight: 1080,

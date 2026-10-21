@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Bounded static integration checks for MirroCreator HQ frame IPC prototype.
+"""Static guardrails for opt-in MirroCreator HQ decoded-frame preview.
 
-Does not download scrcpy, execute Android commands, or enable experimental HQ.
-On Windows CI, Rust itself additionally compiles and tests the mapping owner.
+Never downloads scrcpy, runs Android commands or enables a user session.
+On Windows CI, Rust compiles/tests the live native IPC and GDI reference lens.
 """
 from __future__ import annotations
 
@@ -111,17 +111,26 @@ assert "map_lens_to_decoded_frame" in pipeline
 assert "render_decoded_reference" in pipeline
 assert "synthetic_c_packed_nv12_mapping_flows_into_bgra_pixels" in pipeline
 assert "render_decoded_hq_preview" not in app, "experimental pixels must never run implicitly"
-# Stage-3 CPU diagnostic UI is intentionally isolated from normal MirroLeap
-# sessions. Real HQ requires GPU work and Android device validation.
+# CPU/GDI preview only becomes reachable after EXPLICIT user opt-in, verified
+# patched scrcpy version, and creation of the per-device mapping owner. GPU
+# production readiness still requires D3D11 and Android-device validation.
 circle=read("src-tauri/src/hq_cpu_lens_windows.rs")
 assert "mod hq_cpu_lens_windows" in lib
 assert "UpdateLayeredWindow" in circle and "EX_TRANSPARENT" in circle
 assert "circular_premultiplied_bgra" in circle
 assert "render_decoded_hq_preview" in circle
 assert "try_latest_with_publish_id" in circle
+assert "cached_frame" in circle and "latest_publish_id" in circle
 assert "lens_redraws_for_cursor_or_zoom_even_when_video_frame_is_unchanged" in circle
 assert "lens_position" in circle and "MAX_LENS:u32 = 720" in circle
-assert "hq_cpu_lens_windows::" not in app, "HQ preview must remain opt-in"
+native=read("src-tauri/src/native_live_lens.rs")
+phone=read("src-tauri/src/device_frame.rs")
+ui=read("src/components/DecoderPerformance.tsx")
+assert "hq_cpu_lens_windows::HqDecodedCpuLens" in native
+assert "start_with_hq(device,owner)" in phone
+assert "hqLens" in ui and "Experimental 2.35× decoded-frame lens" in ui
+assert "CPU/GDI preview, not D3D11 GPU" in ui
+assert "hqlens" not in producer.lower()
 
 
 
@@ -136,9 +145,14 @@ assert "128-bit" not in probe or "nonceBytes" in probe
 assert "[switch]$SelfTest" in probe and "[string]$PatchedScrcpy" in probe
 assert "No pixels stored" in probe
 
-# The client binary is still official by default; this source patch must not
-# auto-enable any second video stream or user-visible HQ status.
-assert "MIRROLEAP_HQ_TOKEN" not in app
+# Normal scrcpy is still unchanged by default. A unique '--version' marker
+# must be verified BEFORE passing the session-private HQ token to the child.
+assert "MIRROLEAP_HQ_TOKEN" in app
+assert "if let Some(token)=hq_token" in app
+assert "create_hq_session(&exe_path,&config).await?" in app
+assert "HQ_VERSION_MARKER" in app and "hq_lens.unwrap_or(false)" in app
+assert 'MIRROLEAP_HQ_TOKEN' not in read("src/hooks/useScrcpy.ts")
+assert "MirroLeap HQ decoded-frame v1 (experimental)" in patch_script
 assert "start_scrcpy" not in producer
 assert "http://" not in producer and "https://" not in producer
 assert "screencap" not in producer
@@ -158,6 +172,6 @@ except ValueError:
 else:
     raise AssertionError("wrong scrcpy source must be rejected")
 
-print("HQ v1 frame IPC: pinned source, opt-in second sink, Windows mapping owner, "
-      "YUV420P/NV12 layout, non-blocking frame handoff and fail-closed checks passed "
-      "(NO high-definition video renderer shipped)")
+print("HQ v1: pinned scrcpy client marker, per-device opt-in token, "
+      "bounded decoded frames, CPU/GDI circle and legacy fallback invariants passed "
+      "(NOT GPU and NOT Android-device end-to-end validated)")

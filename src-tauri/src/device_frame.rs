@@ -1921,8 +1921,10 @@ fn start_creator_click_sampler(app: AppHandle, device: String) {
 
 /// The real Windows Magnification control composites *every video frame*
 /// without Android screenshot polling. Returns an error if unsupported.
-fn start_native_video_magnifier(device:&str)->Result<(),String> {
-    crate::native_live_lens::start(device)
+fn start_native_video_magnifier(app:&AppHandle,device:&str)->Result<(),String> {
+    let owner=app.state::<ScrcpyState>().hq_sessions.lock()
+        .map_err(|e|e.to_string())?.get(device).cloned();
+    crate::native_live_lens::start_with_hq(device,owner)
 }
 
 pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<bool, String> {
@@ -2054,7 +2056,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
                     Ok(false)
                 } else {
                     set_presentation_mode(app,&device,"live").await?;
-                    match start_native_video_magnifier(&device) {
+                    match start_native_video_magnifier(app,&device) {
                         Ok(()) => Ok(true),
                         Err(error) => {
                             let _=set_presentation_mode(app,&device,"off").await;

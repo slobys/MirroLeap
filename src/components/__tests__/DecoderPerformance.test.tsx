@@ -51,6 +51,19 @@ describe('safe host hardware decoder controls', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Retrying compatible decoder');
   });
 
+  it('defaults the experimental HQ decoded-frame path to off and requires a conscious opt-in', () => {
+    const setConfig=vi.fn();
+    const {rerender}=render(<DecoderPerformance config={base} setConfig={setConfig}
+      support={windows5} running={false}/>);
+    const option=screen.getByLabelText(/Experimental 2.35× decoded-frame lens/);
+    expect(option).not.toBeChecked();
+    fireEvent.click(option);
+    expect(setConfig).toHaveBeenLastCalledWith({...base,hqLens:true});
+    rerender(<DecoderPerformance config={{...base,hqLens:true}} setConfig={setConfig}
+      support={windows5} running={true}/>);
+    expect(screen.getByText(/CPU\/GDI preview, not D3D11 GPU/)).toBeInTheDocument();
+  });
+
   it('warns about known Windows 5.0.0 H.265 compatibility and falls back on stale OS modes', () => {
     const oldWindows = {...windows5,scrcpyVersion:'5.0.0'};
     render(<DecoderPerformance config={{...base,codec:'h265',hardwareDecoder:'vaapi'}}

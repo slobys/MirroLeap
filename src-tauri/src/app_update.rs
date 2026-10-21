@@ -18,6 +18,10 @@ const ASSET_URL_BASE: &str = "https://github.com/slobys/MirroLeap/releases/downl
 const MAX_METADATA_BYTES: usize = 512 * 1024;
 const MAX_CHANGELOG_CHARS: usize = 4000;
 
+/// Preview packages have a separate Windows app identity and MUST NOT use
+/// stable MirroLeap's automatic installer/update channel.
+fn isolated_hq_preview()->bool {option_env!("MIRROLEAP_HQ_PREVIEW").is_some()}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseDownload {
@@ -238,6 +242,7 @@ pub async fn check_mirroleap_update(
 ) -> Result<AppUpdateInfo, String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
     let data = fetch_release_json(ALL_RELEASES_API).await?;
+    if isolated_hq_preview() {return Err("HQ preview does not join stable automatic updates".into());}
     let local = app_handle.package_info().version.to_string();
     interpret_latest_release(&local, &data)
 }
@@ -366,7 +371,8 @@ pub async fn download_official_release_asset(
     window: Window, app_handle: AppHandle, version: String, kind: String,
 ) -> Result<String, String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
-    if !release_download_kind(&kind) || stable_version(&version).is_none() ||
+    if !release_download_kind(&kind)    if isolated_hq_preview() {return Err("HQ preview cannot download stable installers".into());}
+ || stable_version(&version).is_none() ||
         version.starts_with('v') { return Err("Untrusted release download request".into()); }
     let _busy = ManualDownloadGuard::acquire()?;
     let local = app_handle.package_info().version.to_string();
@@ -442,6 +448,7 @@ pub async fn download_official_release_asset(
 pub async fn install_signed_update(
     window: Window, app_handle: AppHandle, version: String,
 ) -> Result<(), String> {
+    if isolated_hq_preview() {return Err("HQ preview cannot install stable updates".into());}
     if window.label() != "main" { return Err("main_window_only".into()); }
     #[cfg(not(target_os = "windows"))]
     { let _ = (app_handle, version); return Err("Signed one-click updates currently require Windows NSIS".into()); }
@@ -504,6 +511,7 @@ pub async fn check_mirroleap_preview_update(
 ) -> Result<AppUpdateInfo, String> {
     if window.label() != "main" { return Err("main_window_only".into()); }
     let data = fetch_release_json(PREVIEW_RELEASES_API).await?;
+    if isolated_hq_preview() {return Err("Use GitHub Releases to update an isolated HQ preview".into());}
     let local = app_handle.package_info().version.to_string();
     interpret_preview_releases(&local, &data)
 }

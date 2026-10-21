@@ -23,6 +23,11 @@ START_INCLUDE = '#include "screen.h"'
 START_STRUCT = "    struct sc_decoder video_decoder;"
 START_SINK = "            sc_frame_source_add_sink(src, &s->screen.frame_sink);"
 START_MESON = "        'src/sys/win/process.c',"
+START_VERSION = "        scrcpy_print_version();"
+VERSION_ADD = START_VERSION + '''
+#ifdef _WIN32
+        printf("MirroLeap HQ decoded-frame v1 (experimental)\\n");
+#endif'''
 
 INCLUDE_ADD = START_INCLUDE + """
 #ifdef _WIN32
@@ -66,8 +71,10 @@ def patch(checkout: Path) -> None:
         raise ValueError(f"Unsupported scrcpy source commit {head}; only v4.0 is pinned")
     scrcpy_path = checkout / "app/src/scrcpy.c"
     meson_path = checkout / "app/meson.build"
+    main_path = checkout / "app/src/main.c"
     scrcpy_src = scrcpy_path.read_text()
     meson_src = meson_path.read_text()
+    main_src = main_path.read_text()
     previously_patched = "mirroleap_hq_sink.h" in scrcpy_src
     if not previously_patched and command("git", "status", "--porcelain", cwd=checkout):
         raise ValueError("scrcpy checkout must be clean before first patch")
@@ -79,6 +86,7 @@ def patch(checkout: Path) -> None:
                 START_STRUCT, STRUCT_ADD, "struct"),
             START_SINK, SINK_ADD, "frame sink"),
         meson_path: add_once(meson_src, START_MESON, MESON_ADD, "Meson Windows files"),
+        main_path: add_once(main_src, START_VERSION, VERSION_ADD, "HQ version marker"),
     }
     for dst, result in expected.items():
         if dst.read_text() != result:

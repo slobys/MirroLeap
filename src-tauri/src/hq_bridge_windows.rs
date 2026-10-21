@@ -11,7 +11,7 @@
 use std::{
     ffi::c_void,
     ptr::{self, NonNull},
-    sync::atomic::{AtomicU32, Ordering},
+    sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
 use crate::hq_protocol::{
     self, FrameMetadata, OwnedFrame, HEADER_BYTES, MAPPING_BYTES, NO_FRAME,
@@ -57,7 +57,14 @@ pub struct HqMappingOwner {
     mapping:NonNull<c_void>,
     base:NonNull<u8>,
     token:String,
+    generation:AtomicU64,
 }
+// Windows mapping handles are valid across threads. The bytes belong to an
+// independent scrcpy process; consumers only use bounded atomic snapshots and
+// never expose a mutable Rust slice to the shared mapping.
+unsafe impl Send for HqMappingOwner {}
+unsafe impl Sync for HqMappingOwner {}
+
 impl HqMappingOwner {
     pub fn new()->Result<Self,&'static str> {
         for _ in 0..3 {
@@ -82,7 +89,7 @@ impl HqMappingOwner {
                 unsafe {CloseHandle(mapping.as_ptr());}
                 return Err("Windows could not map shared HQ video memory");
             };
-            let owner=Self{mapping,base,token};
+            let owner=Self{mapping,base,token,generation:AtomicU64::new(0)};
             owner.initialize();
             return Ok(owner);
         }
@@ -165,6 +172,34 @@ impl HqMappingOwner {
         Ok(Some((publish_after,OwnedFrame{metadata,data})))
     }
 
+    /// Cheap readiness probe: do not copy a 2K/4K frame every 16 ms when
+    /// scrcpy has not published anything new and the cursor is stationary.
+    pub fn latest_publish_id(&self)->Result<Option<u32>,&'static str> {
+        let mut header=[0u8;HEADER_BYTES];
+        unsafe {ptr::copy_nonoverlapping(self.base.as_ptr(),header.as_mut_ptr(),20);}
+        hq_protocol::validate_header_prefix(&header)?;
+        let sequence=self.atomic_u32(24);
+        let slot=self.atomic_u32(20);
+        if slot==NO_FRAME || sequence==0 {return Ok(None);}
+        if slot>=SLOT_COUNT as u32 {return Err("HQ slot index out of bounds");}
+        Ok(Some(sequence))
+    }
+
+    /// Distinguish a restarted producer's publish id=1 from the old id=1.
+    pub fn generation(&self)->u64 {self.generation.load(Ordering::Acquire)}
+
+    /// Call only after the previous patched scrcpy process fully exited,
+    /// before a decoder/audio retry can publish into this same session.
+    pub fn reset_publication(&self) {
+        unsafe {
+            (*(self.base.as_ptr().add(20) as *const AtomicU32))
+                .store(NO_FRAME,Ordering::Release);
+            (*(self.base.as_ptr().add(24) as *const AtomicU32))
+                .store(0,Ordering::Release);
+        }
+        self.generation.fetch_add(1,Ordering::AcqRel);
+    }
+
     pub fn try_latest(&self)->Result<Option<OwnedFrame>,&'static str> {
         Ok(self.try_latest_with_publish_id()?.map(|(_,frame)|frame))
     }
@@ -196,6 +231,13 @@ mod tests {
         assert_ne!(a.child_env_token(),b.child_env_token());
         assert!(a.try_latest().unwrap().is_none());
         assert!(b.try_latest().unwrap().is_none());
+        assert_eq!(a.latest_publish_id().unwrap(),None);
+        assert_eq!(b.latest_publish_id().unwrap(),None);
+        let before=a.generation();
+        a.reset_publication();
+        assert_eq!(a.generation(),before+1);
+        assert_eq!(a.latest_publish_id().unwrap(),None);
+        assert_eq!(b.generation(),0);
     }
     fn stage_mock_nv12(owner:&HqMappingOwner, slot:u32, publish_id:u32) {
         assert!(slot<2);

@@ -1,0 +1,17 @@
+{
+  "productName": "MirroLeap HQ Preview",
+  "identifier": "com.slobys.mirroleap-hq-preview",
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "resources": {
+      "hq-preview-core/scrcpy-hq-bin": "scrcpy-hq-bin"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/slobys/MirroLeap/releases/download/hq-preview-channel/latest.json"
+      ]
+    }
+  }
+}
