@@ -41,6 +41,28 @@ gcc -std=c11 -D_WIN32 -Wall -Wextra -Werror -Ihq/tests/stubs -Ihq/include \
 /tmp/hq-sink-test
 ```
 
+## 开发者可选端到端数据链诊断（不会接管正常 MirroLeap）
+
+本次新增 `windows-frame-probe.ps1`，它只在开发者指定实验性 scrcpy 路径后：
+
+1. 用 Windows CSPRNG 创建不可猜测的当前用户专用映射；
+2. 只向当前测试 scrcpy **子进程环境变量**传递会话 token，不输出到日志；
+3. 持续约 15 秒读取全局发布序号、槽位元数据和解码帧宽高/PTS，输出观察到的更新频率，**不记录图像、音频或账号内容**；
+4. 结束后关闭测试客户端并销毁映射。未发现有效帧则提示失败，正常 MirroLeap 不受影响。
+
+只可在有真实 Android 设备的 Windows 测试机器、使用已验证的实验性构建时运行：
+
+```powershell
+# 无需连接手机的 IPC 自检（GitHub Windows CI 自动执行）
+pwsh -NoProfile -File hq/windows-frame-probe.ps1 -SelfTest
+
+# 经独立 scrcpy HQ workflow 构建并确认来源的测试版 scrcpy.exe
+pwsh -NoProfile -File hq/windows-frame-probe.ps1 `
+  -PatchedScrcpy "C:\path\to\hq-test\scrcpy.exe" -Serial "DEVICE_SERIAL" -Seconds 15
+```
+
+上述输出仅能证明**原始解码帧确实抵达共享内存**，还不能证明 GPU 高清放大镜已经完成。
+
 ## 共享内存安全与生命周期
 
 必须由 MirroLeap **先**在 Windows 当前登录会话中创建 `Local\\MirroLeapHQ_<32位随机hex>`，然后显式传给经过版本验证的自定义 scrcpy 子进程：

@@ -46,6 +46,9 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-ffmpeg
             mingw-w64-ucrt-x86_64-sdl3
+      - name: Verify Windows HQ shared-memory probe without Android
+        shell: pwsh
+        run: ./hq/windows-frame-probe.ps1 -SelfTest
       - name: Build upstream scrcpy client with opt-in HQ sink (NO Android server)
         shell: msys2 {0}
         run: |

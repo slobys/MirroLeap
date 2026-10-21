@@ -126,6 +126,16 @@ assert "hq_cpu_lens_windows::" not in app, "HQ preview must remain opt-in"
 
 
 
+# Manual-only Windows session probe is a deterministic producer-side
+# diagnostic; without explicit -PatchedScrcpy it must not start a client.
+probe = read("hq/windows-frame-probe.ps1")
+assert "MIRROLEAP_HQ_TOKEN" in probe
+assert "MemoryMappedFile" in probe
+assert "Get-LatestValidFrame" in probe and "ReadUInt32(24)" in probe
+assert "128-bit" not in probe or "nonceBytes" in probe
+assert "[switch]$SelfTest" in probe and "[string]$PatchedScrcpy" in probe
+assert "No pixels stored" in probe
+
 # The client binary is still official by default; this source patch must not
 # auto-enable any second video stream or user-visible HQ status.
 assert "MIRROLEAP_HQ_TOKEN" not in app
