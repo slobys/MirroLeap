@@ -136,8 +136,10 @@ assert "start_with_hq(device,owner)" in phone
 assert "video_hwnd:hwnd.0 as usize" in phone
 assert "preview.maintain_visible" in native
 assert "lens.display(view); // immediate working magnifier fallback" in native
-assert "hqLens" in ui and "2.35× live lens (smooth: keep regular scrcpy)" in ui
-assert "Experimental raw-frame HQ" in ui
+assert "hqLens" in ui and "Original-frame HQ" in ui
+assert "2.35× live lens (smooth: keep regular scrcpy)" not in ui
+assert "onHqToggle" not in ui
+assert "Original-frame HQ" in ui
 assert "Raw-frame mode switches the ENTIRE next mirror" in ui
 assert "hqlens" not in producer.lower()
 
