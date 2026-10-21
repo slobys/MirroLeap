@@ -86,6 +86,10 @@ assert "Local\\\\MirroLeapHQ_" in bridge and 'MLHQ_MAP_PREFIX' in header
 assert "BCryptGenRandom" in bridge and "GetLastError()" in bridge
 assert "Try" not in sink_header or "frame_sink" in sink_header
 assert "try_latest" in bridge and "Ordering::Acquire" in bridge
+assert "try_latest_with_publish_id" in bridge
+assert "publish_before" in bridge and "publish_after" in bridge
+assert "validate_header_prefix" in rust
+assert "global_publish_id_advances_even_when_two_slots_have_equal_local_sequence" in bridge
 assert "first!=second" in bridge and "validate_frame_header" in bridge
 assert "mod hq_protocol" in lib and "mod hq_bridge_windows" in lib
 # Stage 2 CPU reference crop proves source-resolution math before any GPU
@@ -107,6 +111,18 @@ assert "map_lens_to_decoded_frame" in pipeline
 assert "render_decoded_reference" in pipeline
 assert "synthetic_c_packed_nv12_mapping_flows_into_bgra_pixels" in pipeline
 assert "render_decoded_hq_preview" not in app, "experimental pixels must never run implicitly"
+# Stage-3 CPU diagnostic UI is intentionally isolated from normal MirroLeap
+# sessions. Real HQ requires GPU work and Android device validation.
+circle=read("src-tauri/src/hq_cpu_lens_windows.rs")
+assert "mod hq_cpu_lens_windows" in lib
+assert "UpdateLayeredWindow" in circle and "EX_TRANSPARENT" in circle
+assert "circular_premultiplied_bgra" in circle
+assert "render_decoded_hq_preview" in circle
+assert "try_latest_with_publish_id" in circle
+assert "lens_redraws_for_cursor_or_zoom_even_when_video_frame_is_unchanged" in circle
+assert "lens_position" in circle and "MAX_LENS:u32 = 720" in circle
+assert "hq_cpu_lens_windows::" not in app, "HQ preview must remain opt-in"
+
 
 
 

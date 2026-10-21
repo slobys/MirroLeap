@@ -100,6 +100,7 @@ jobs:
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_geometry::tests
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_reference_render::tests
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_pipeline::tests
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib hq_cpu_lens_windows::tests
       - name: Stage extract-and-run portable version
         shell: pwsh
         run: ./scripts/windows-stage-portable.ps1

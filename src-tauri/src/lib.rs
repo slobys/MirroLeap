@@ -12,6 +12,9 @@ mod hq_pipeline;
 #[cfg(target_os = "windows")]
 #[allow(dead_code)]
 mod hq_bridge_windows;
+#[cfg(target_os = "windows")]
+#[allow(dead_code)]
+mod hq_cpu_lens_windows;
 mod app_update;
 mod android_rotation;
 mod capture_compositor;

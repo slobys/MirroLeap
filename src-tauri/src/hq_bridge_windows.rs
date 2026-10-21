@@ -117,15 +117,28 @@ impl HqMappingOwner {
     /// Returns None while the producer is busy, no frame is available,
     /// or a slot was concurrently replaced; the UI should keep its previous
     /// frame rather than waiting on the producer.
-    pub fn try_latest(&self)->Result<Option<OwnedFrame>,&'static str> {
-        let global=unsafe {
-            std::slice::from_raw_parts(self.base.as_ptr(),MAPPING_BYTES)
-        };
-        hq_protocol::validate_header(global)?;
+    ///
+    /// IMPORTANT: the slot sequence is local to each of two slots (both can
+    /// initially be 2), so do NOT use it to determine whether the visible
+    /// image is newer. The global publish ID at header offset 24 uniquely
+    /// advances for each committed frame.
+    pub fn try_latest_with_publish_id(
+        &self,
+    )->Result<Option<(u32,OwnedFrame)>,&'static str> {
+        // Only copy the immutable 0..20 bytes of the shared header. Creating
+        // &[u8] over the entire mapping while C updates the frame slots
+        // would produce unsound read-only aliases of mutating shared pixels.
+        let mut fixed=[0u8;HEADER_BYTES];
+        unsafe {
+            ptr::copy_nonoverlapping(self.base.as_ptr(),fixed.as_mut_ptr(),20);
+        }
+        hq_protocol::validate_header_prefix(&fixed)?;
+        let publish_before=self.atomic_u32(24);
         let slot=self.atomic_u32(20);
         if slot==NO_FRAME {return Ok(None);}
         if slot>=SLOT_COUNT as u32 {return Err("HQ slot index out of bounds");}
-        let slot_start=HEADER_BYTES + slot as usize * (SLOT_HEADER_BYTES+SLOT_CAPACITY);
+        if publish_before==0 {return Ok(None);}
+        let slot_start=HEADER_BYTES + slot as usize*(SLOT_HEADER_BYTES+SLOT_CAPACITY);
         let first=self.atomic_u32(slot_start);
         if first==0 || first&1!=0 {return Ok(None);}
         let mut header=[0u8;SLOT_HEADER_BYTES];
@@ -143,8 +156,17 @@ impl HqMappingOwner {
             );
         }
         let second=self.atomic_u32(slot_start);
-        if first!=second || second&1!=0 {return Ok(None);}
-        Ok(Some(OwnedFrame{metadata,data}))
+        let last_slot=self.atomic_u32(20);
+        let publish_after=self.atomic_u32(24);
+        if first!=second || second&1!=0 || last_slot!=slot ||
+            publish_before!=publish_after {
+            return Ok(None);
+        }
+        Ok(Some((publish_after,OwnedFrame{metadata,data})))
+    }
+
+    pub fn try_latest(&self)->Result<Option<OwnedFrame>,&'static str> {
+        Ok(self.try_latest_with_publish_id()?.map(|(_,frame)|frame))
     }
 }
 impl Drop for HqMappingOwner {
@@ -175,6 +197,61 @@ mod tests {
         assert!(a.try_latest().unwrap().is_none());
         assert!(b.try_latest().unwrap().is_none());
     }
+    fn stage_mock_nv12(owner:&HqMappingOwner, slot:u32, publish_id:u32) {
+        assert!(slot<2);
+        let start=HEADER_BYTES+slot as usize*(SLOT_HEADER_BYTES+SLOT_CAPACITY);
+        unsafe {
+            ptr::write_bytes(owner.base.as_ptr().add(start),0,SLOT_HEADER_BYTES+24);
+            owner.store_header(start,2); // both slots independently begin at seq 2
+            owner.store_header(start+4,2); // NV12
+            owner.store_header(start+8,4);
+            owner.store_header(start+12,4);
+            owner.store_header(start+24,4); // Y stride
+            owner.store_header(start+28,4); // UV stride
+            owner.store_header(start+36,0);
+            owner.store_header(start+40,16);
+            owner.store_header(start+48,16);
+            owner.store_header(start+52,8);
+            owner.store_header(start+60,24);
+            ptr::write_bytes(owner.base.as_ptr().add(start+SLOT_HEADER_BYTES),
+                             publish_id as u8,24);
+            owner.store_header(20,slot);
+            owner.store_header(24,publish_id);
+        }
+    }
+
+    #[test]
+    fn global_publish_id_advances_even_when_two_slots_have_equal_local_sequence() {
+        let owner=HqMappingOwner::new().expect("HQ owner");
+        stage_mock_nv12(&owner,0,1);
+        let (first_id,first)=owner.try_latest_with_publish_id()
+            .expect("valid").expect("first source frame");
+        assert_eq!(first_id,1);
+        assert_eq!(first.metadata.sequence,2);
+        assert_eq!(first.data[0],1);
+        stage_mock_nv12(&owner,1,2);
+        let (second_id,second)=owner.try_latest_with_publish_id()
+            .expect("valid").expect("second source frame");
+        assert_eq!(second_id,2);
+        // Each slot still has the SAME slot-local sequence. A renderer
+        // deduplicating solely by sequence would freeze every other frame!
+        assert_eq!(second.metadata.sequence,2);
+        assert_ne!(first_id,second_id);
+        assert_eq!(second.data[0],2);
+        assert_eq!(second.data.len(),24);
+    }
+
+    #[test]
+    fn header_check_does_not_alias_live_mutating_slots() {
+        let owner=HqMappingOwner::new().unwrap();
+        stage_mock_nv12(&owner,0,1);
+        assert!(owner.try_latest().unwrap().is_some());
+        unsafe {owner.store_header(HEADER_BYTES,3);}
+        assert!(owner.try_latest_with_publish_id().unwrap().is_none());
+        unsafe {owner.store_header(HEADER_BYTES,2);}
+        assert!(owner.try_latest().unwrap().is_some());
+    }
+
     #[test]
     fn reader_never_exposes_uncommitted_or_malformed_frames() {
         let owner=HqMappingOwner::new().expect("HQ map");

@@ -1,6 +1,6 @@
-# MirroCreator HQ：解码帧旁路与源像素参考渲染 · Stage 1–2
+# MirroCreator HQ：原始帧旁路、源像素参考渲染与圆形窗口原型 · Stage 1–3
 
-**状态：实验性 C/Rust 双槽传输、Win32 上游 scrcpy 客户端编译与源分辨率参考取样已实现；Windows GPU 高清镜头和真正的 Android 实机端到端数据链尚未接入，当前软件不会自动启用 HQ。**
+**状态：实验性 C/Rust 双槽传输、Windows scrcpy 4.0 编译、源像素参考取样及鼠标穿透的圆形 GDI 画面窗口原型已实现；Windows GPU 高清镜头与真实 Android 端到端验证仍未完成。正式应用不会自动启用 HQ。**
 
 本阶段保留默认 **2.35×**。当前 Windows Magnification.dll 仍放大桌面 SDL 投屏画面，尚不能等同于真正的高分辨率解码帧放大。不要将本分支打包宣传为“高清 2.35 倍已经实现”。
 
@@ -21,6 +21,9 @@ scrcpy 客户端在 libavcodec 解码后使用 frame_source 向 screen.frame_sin
 - `../src-tauri/src/hq_geometry.rs`：根据真实 Windows 视频矩形（物理像素）、鼠标坐标与源 AVFrame 分辨率，以 **2.35×** 映射竖屏、横屏和 90°/180°/270° 旋转；圆圈在靠边 App 处不会选错源像素。
 - `../src-tauri/src/hq_reference_render.rs`：采用 YUV420P/NV12 原始解码像素、CPU 双线性插值输出限定尺寸 BGRA 局部镜头，作为将来 GPU 镜头的**对照基准**，默认应用绝不调用。颜色转换暂按 BT.709 limited-range 估算，不能在尚未获取真实 frame colorspace 元数据时当作颜色精准渲染。
 - `../src-tauri/src/hq_pipeline.rs`：贯通“校验过的解码帧 → 源帧位置映射 → 2.35× 原始像素取样 → 限定尺寸 BGRA 画面”的**实验性参考管线**；从 C 生产者实际写出的 NV12 二进制帧进行跨语言测试，不通过已经被 SDL 缩放的桌面像素。尚未产生 Windows GPU 窗口，也不在默认投屏中运行。
+- `../src-tauri/src/hq_cpu_lens_windows.rs`：**独立、默认关闭的实验性 Windows 显示窗口**，使用 GDI 32-bit DIB + `UpdateLayeredWindow` 显示来自原始解码帧的 BGRA 像素，圆形抗锯齿边缘、透明/鼠标穿透及退出释放资源。它不是用户正式可用的 HQ 模式，也不是最终 GPU 渲染器；CPU 参考插值/逐帧复制可能影响高 FPS，暂不挂到主界面。
+- Windows mapping reader 现在同时读取**全局帧发布编号**和槽内原子提交序号。两个槽位的提交序号可以相同，过去仅靠槽序号识别新帧会漏掉每隔一帧。窗口也会在暂停帧时根据鼠标、倍率、圆圈大小的变化重新绘制。源端元数据损坏会隐藏旧画面而不是继续显示不可信内容。
+
 
 - `apply_scrcpy_v4.py`：仅接受固定 git 提交，安全改动 app/meson.build 和 app/src/scrcpy.c，再安装新增 sink 源文件。重复执行不插入两次，拒绝未知上游版本。
 - `tests/test_sink.c`：Linux CI 利用 Windows/FFmpeg API stubs 运行 YUV420P/NV12 打包、stride、PTS、双槽提交、无效格式回退，并把 C 写出的二进制帧交给 Rust 跨语言解析；**stubs 不能代替 Windows 真机渲染测试**。上游 scrcpy v4.0 已在 [Windows MSYS2 CI](https://github.com/slobys/MirroLeap/actions/runs/39473209338) 完成 FFmpeg/SDL3 真正编译及 `scrcpy.exe --version` 启动验证，但尚未连接真实 Android 设备传帧。
@@ -56,7 +59,7 @@ MIRROLEAP_HQ_TOKEN=<128-bit CSPRNG hex>
 
 1. **Windows scrcpy 客户端原生编译**：在固定 scrcpy 4.0 MSYS2/FFmpeg/SDL3 环境中构建修改后 EXE，独立于当前官方核心存放，核验 Windows 版权/签名及是否能正常退出。目前已通过独立 [MSYS2 Windows 构建和客户端版本启动](https://github.com/slobys/MirroLeap/actions/runs/39473209338)，仍不能宣称完成手机实机解码流端到端验证，也不得自动替换用户的 scrcpy-bin。
 2. **端到端 IPC**：Tauri 按需创建映射并传 env，验证真正自定义客户端从一台手机提供 1080P/2K 实时解码帧、PTS 和会话隔离，不允许影响任何未开启 HQ 的设备。当前只有真实 C 测试帧→Rust 消费端的跨语言验证，不能算 Android 实机验证。
-3. **GPU HQ 镜头**：独立 Windows D3D11 GPU 渲染源帧采样区域，保持 2.35 倍/滚轮大小、旋转与 DPI 映射，和旧桌面放大镜作 A/B 对比。无有效 HQ 帧时回退 Windows 原生镜头，但不谎称源像素无损。
+3. **GPU HQ 镜头**：现有 GDI 圆形窗口只是离线参考原型；下一步独立实现 Windows D3D11 GPU 渲染源帧采样区域，保持 2.35 倍/滚轮大小、旋转与 DPI 映射，和旧桌面放大镜作 A/B 对比。无有效 HQ 帧时回退 Windows 原生镜头，但不谎称源像素无损。
 4. **长测**：USB/Wi-Fi 30/60fps、H264/H265、双设备、视频运动、旋转、最小化、DRM、Windows 100/125/150% DPI，记录实际 CPU/GPU、掉帧、延迟；完全通过后再考虑预览包。
 
 更多设计及安全边界见 [`MIRROCREATOR_HQ_RENDERING_CN.md`](../MIRROCREATOR_HQ_RENDERING_CN.md)。

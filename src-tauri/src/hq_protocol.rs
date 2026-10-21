@@ -51,8 +51,11 @@ fn read_i64(data:&[u8],offset:usize)->Result<i64,&'static str> {
     Ok(i64::from_le_bytes(bytes.try_into().unwrap()))
 }
 
-pub fn validate_header(data:&[u8])->Result<(),&'static str> {
-    if data.len()!=MAPPING_BYTES {return Err("wrong HQ mapping size");}
+/// Validate the immutable 64-byte global prefix. The live reader must
+/// not construct an immutable Rust slice over the entire memory mapping:
+/// the C producer concurrently writes the frame-slot region.
+pub fn validate_header_prefix(data:&[u8])->Result<(),&'static str> {
+    if data.len()!=HEADER_BYTES {return Err("wrong HQ header size");}
     if data.get(..4)!=Some(MAGIC.as_slice()) {return Err("HQ magic mismatch");}
     if read_u32(data,4)?!=VERSION {return Err("HQ protocol version unsupported");}
     if read_u32(data,8)? as usize != MAPPING_BYTES
@@ -61,6 +64,11 @@ pub fn validate_header(data:&[u8])->Result<(),&'static str> {
         return Err("HQ mapping geometry mismatch");
     }
     Ok(())
+}
+
+pub fn validate_header(data:&[u8])->Result<(),&'static str> {
+    if data.len()!=MAPPING_BYTES {return Err("wrong HQ mapping size");}
+    validate_header_prefix(&data[..HEADER_BYTES])
 }
 
 fn slot_start(index:usize)->Result<usize,&'static str> {
@@ -183,6 +191,13 @@ mod tests {
         assert!(validate_header(&b).is_err());
         set32(&mut b,4,1);set32(&mut b,12,1);
         assert!(validate_header(&b).is_err());
+    }
+    #[test]
+    fn global_prefix_can_be_checked_without_aliasing_a_mutating_frame_slot() {
+        let data=build(PixelFormat::Nv12,4,4);
+        assert!(validate_header_prefix(&data[..HEADER_BYTES]).is_ok());
+        assert!(validate_header_prefix(&data[..HEADER_BYTES-1]).is_err());
+        assert!(validate_header_prefix(&data[..HEADER_BYTES+1]).is_err());
     }
     #[test]
     fn last_published_slot_has_validated_packed_420_layout() {
