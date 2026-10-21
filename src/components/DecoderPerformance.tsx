@@ -147,7 +147,7 @@ export default function DecoderPerformance({config, setConfig, support, observed
       {config.hqLens && <p role="note" className="text-xs text-amber-600">
         {zh ? '注意：HQ 实验核心基于 scrcpy 4.0，不支持普通 5.0.1 的 --hwdec=d3d11va。上方 D3D11 选项只适用于普通核心；HQ CPU 抗锯齿不是 GPU 视频解码，也不代表启用了硬解。'
             : 'HQ uses experimental scrcpy 4.0 and cannot use the normal 5.0.1 --hwdec=d3d11va flag. The D3D11 selector describes your regular core only; CPU lens antialiasing is NOT GPU video decoding.'}
-      </p>
+      </p>}
       {config.hqLens && <p role="note" className="text-xs text-amber-600">
         {zh ? 'HQ 核心已就绪，普通投屏仍使用轻量默认核心。下次启动投屏后，从悬浮栏开启实时放大。HQ 当前为 CPU/GDI 原始帧预览，并非最终 D3D11 GPU 版本；无有效帧时会回退旧镜头。' :
           'Optional HQ core ready. Normal mirroring stays lightweight. Start a new mirror and enable live zoom in the hover rail. This is CPU/GDI decoded-frame preview, not final D3D11; it falls back if frames are unavailable.'}
