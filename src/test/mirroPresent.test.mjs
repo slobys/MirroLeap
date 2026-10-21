@@ -153,6 +153,8 @@ describe('MirroPresent real phone-frame Canvas behavior', () => {
     operations.length=0;
     expect(lens.updatePrivacyCircle(null)).toBe(true);
     expect(operations.some(row=>row[0]==='presentation' && row[1]==='ellipse')).toBe(false);
+    expect(operations.some(row=>row[0]==='presentation' && row[1]==='fillRect' &&
+      row[2]===0 && row[3]===0 && row[4]===300 && row[5]===500)).toBe(true);
     lens.setMode('off');
     expect(lens.privacy()).toBe('off');
     dom.window.close();

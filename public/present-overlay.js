@@ -46,14 +46,18 @@
     // Native live lens/HQ circle draws ON TOP of this mouse-through canvas.
     // Use native geometry, not pointermove (which is intentionally disabled).
     if (mode === 'live') {
-      if (privacy === 'off' || !liveCircle) return;
+      if (privacy === 'off') return;
       ctx.save();
       drawShade(w, h);
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.beginPath();
-      ctx.ellipse(liveCircle.cx * w, liveCircle.cy * h,
-        liveCircle.rx * w, liveCircle.ry * h, 0, 0, Math.PI * 2);
-      ctx.fill();
+      // Without a visible native lens, keep the screen covered. Never
+      // reveal the full phone just because the pointer left its viewport.
+      if (liveCircle) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        ctx.ellipse(liveCircle.cx * w, liveCircle.cy * h,
+          liveCircle.rx * w, liveCircle.ry * h, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
       return;
     }
