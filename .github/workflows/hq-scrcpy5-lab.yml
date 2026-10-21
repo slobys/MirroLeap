@@ -34,6 +34,15 @@ jobs:
             -Ihq/tests/stubs -Ihq/include \
             hq/tests/test_sink_v5.c -o /tmp/mirroleap-hq-v5-test
           /tmp/mirroleap-hq-v5-test
+      - name: Prevent cross-translation-unit sink memory corruption
+        run: |
+          gcc -std=c11 -D_WIN32 -Wall -Wextra -Werror \
+            -Ihq/tests/stubs -Ihq/include hq/tests/test_sink_layout.c \
+            -o /tmp/mlhq-layout-host
+          gcc -std=c11 -D_WIN32 -DMLHQ_ENABLE_D3D11 -Wall -Wextra -Werror \
+            -Ihq/tests/stubs -Ihq/include hq/tests/test_sink_layout.c \
+            -o /tmp/mlhq-layout-d3d11
+          test "$(/tmp/mlhq-layout-host)" = "$(/tmp/mlhq-layout-d3d11)"
 
   windows-patched-scrcpy5:
     name: Pinned Windows D3D11VA decoder client, not an application installer

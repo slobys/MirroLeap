@@ -17,7 +17,9 @@ use sha2::{Digest,Sha256};
 use tauri::{AppHandle,Emitter,Manager};
 use tokio::io::AsyncWriteExt;
 
-const ROOT_NAME:&str="hq-runtime-scrcpy501-v3";
+// Each distinct signed optional-core digest receives its own cache directory.
+// Never reuse v5.3.4's broken scrcpy.exe after an app-only v5.3.5 update.
+const ROOT_PREFIX:&str="hq-runtime-scrcpy501-v3-";
 const CACHE_MARKER:&str=".mirroleap-hq-installed";
 const CLIENT_MARKER:&str="MirroLeap HQ scrcpy5 raw-frame v3 (experimental)";
 const MAX_DOWNLOAD:u64=110*1024*1024;
@@ -40,13 +42,18 @@ struct TempRoot(PathBuf);
 impl Drop for TempRoot {
     fn drop(&mut self) {let _=fs::remove_dir_all(&self.0);}
 }
-fn root(app:&AppHandle)->Result<PathBuf,String> {
-    let home=app.path().app_local_data_dir()
-        .map_err(|_|"无法获取高清核心的本地数据目录")?;
-    Ok(home.join(ROOT_NAME))
-}
 fn valid_sha256(hash:&str)->bool {
     hash.len()==64 && hash.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+fn cache_folder_name(sha:&str)->Result<String,String> {
+    if !valid_sha256(sha) {return Err("HQ 核心校验值无效".into());}
+    Ok(format!("{ROOT_PREFIX}{}",&sha[..16]))
+}
+fn root(app:&AppHandle)->Result<PathBuf,String> {
+    let (_,sha)=verified_source()?;
+    let home=app.path().app_local_data_dir()
+        .map_err(|_|"无法获取高清核心的本地数据目录")?;
+    Ok(home.join(cache_folder_name(sha)?))
 }
 fn verified_source()->Result<(&'static str,&'static str),String> {
     let url=option_env!("MIRROLEAP_HQ_CORE_URL")
@@ -64,18 +71,21 @@ fn verified_source()->Result<(&'static str,&'static str),String> {
     }
     Ok((url,sha))
 }
-fn complete(dir:&Path)->bool {
+fn marker_matches(actual:&str,expected:&str)->bool {
+    valid_sha256(expected) && actual.trim()==format!("hq5.0.1-protocol-v2:{expected}")
+}
+fn complete(dir:&Path,expected_sha:&str)->bool {
     let marker=fs::read_to_string(dir.join(CACHE_MARKER)).ok();
-    marker.as_deref().is_some_and(|v|v.starts_with("hq5.0.1-protocol-v2:") &&
-        valid_sha256(v.trim().strip_prefix("hq5.0.1-protocol-v2:").unwrap_or("")))
+    marker.as_deref().is_some_and(|v|marker_matches(v,expected_sha))
         && ["scrcpy.exe","adb.exe","scrcpy-server"].iter()
             .all(|file|dir.join(file).is_file())
 }
-/// No network or new process. Used to find an already verified/cached
-/// runtime when the user explicitly chooses source-frame magnification.
+/// No network or new process. Only the exact SHA-pinned runtime for THIS
+/// application build is eligible; previous releases remain untouched.
 pub fn installed_client(app:&AppHandle)->Option<PathBuf> {
+    let (_,sha)=verified_source().ok()?;
     let dir=root(app).ok()?;
-    complete(&dir).then(||dir.join("scrcpy.exe"))
+    complete(&dir,sha).then(||dir.join("scrcpy.exe"))
 }
 fn emit_progress(app:&AppHandle,stage:&str,percent:u64) {
     let _=app.emit("mirroleap-hq-core-progress",
@@ -212,7 +222,7 @@ pub async fn ensure(app:&AppHandle)->Result<PathBuf,String> {
     // Do not replace or delete existing runtime folders if Windows is using
     // their DLLs. The only successful destination is a fresh, complete cache.
     if destination.exists() {
-        if complete(&destination) {
+        if complete(&destination,expected) {
             return Ok(destination.join("scrcpy.exe"));
         }
         return Err("已有损坏的 HQ 核心缓存，请关闭投屏后清理缓存再重试。".into());
@@ -240,6 +250,17 @@ mod tests {
         assert!(validated_archive_entry("scrcpy-hq-bin/scrcpy.exe",None,100).is_ok());
         assert!(validated_archive_entry("scrcpy-hq-bin/link",Some(0o120777),1).is_err());
         assert!(validated_archive_entry("scrcpy-hq-bin/big.dll",None,MAX_EXTRACT+1).is_err());
+    }
+    #[test]
+    fn cache_never_reuses_a_previous_release_hq_binary() {
+        let old="a".repeat(64);
+        let updated="b".repeat(64);
+        assert_ne!(cache_folder_name(&old).unwrap(),cache_folder_name(&updated).unwrap());
+        assert!(cache_folder_name(&"x".repeat(64)).is_err());
+        let old_marker=format!("hq5.0.1-protocol-v2:{old}");
+        assert!(marker_matches(&old_marker,&old));
+        assert!(!marker_matches(&old_marker,&updated));
+        assert!(!marker_matches("hq5.0.1-protocol-v2:not-a-hash",&old));
     }
     #[test]
     fn optional_core_requires_pinned_digest_and_exact_normal_release_tag() {
