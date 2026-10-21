@@ -192,11 +192,22 @@ jobs:
           New-Item -ItemType Directory -Force $out | Out-Null
           $hashes = @()
           foreach ($artifact in @($exes[0], $msis[0])) {
-            Copy-Item -LiteralPath $artifact.FullName -Destination $out
-            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $artifact.FullName).Hash.ToLowerInvariant()
-            $hashes += "$hash *$($artifact.Name)"
+            # GitHub Release normalizes spaces in uploaded asset names to dots.
+            # Stage using the FINAL published name before hashing so users can
+            # run sha256sum -c against their actual downloaded files.
+            $publishedName = $artifact.Name.Replace(' ', '.')
+            $publishedPath = Join-Path $out $publishedName
+            Copy-Item -LiteralPath $artifact.FullName -Destination $publishedPath
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $publishedPath).Hash.ToLowerInvariant()
+            $hashes += "$hash *$publishedName"
           }
           $hashes | Set-Content -LiteralPath "$out/SHA256SUMS.txt" -Encoding ascii
+          foreach ($line in (Get-Content -LiteralPath "$out/SHA256SUMS.txt")) {
+            $entry = [regex]::Match($line, '^([0-9a-f]{64}) \*(.+)$')
+            if (-not $entry.Success) { throw 'Malformed preview checksum entry' }
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $out $entry.Groups[2].Value)).Hash.ToLowerInvariant()
+            if ($actual -ne $entry.Groups[1].Value) { throw 'Preview release SHA256 checksum verification failed' }
+          }
           Copy-Item -LiteralPath 'hq/HQ_PREVIEW_NOTES.md' -Destination "$out/README_HQ_PREVIEW.md"
           Get-ChildItem $out | Select-Object Name, Length
       - uses: actions/upload-artifact@v4
