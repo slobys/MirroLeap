@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/mirrocreator-hq-lens-235
+      - feat/hq-scrcpy501-rawframe
   workflow_dispatch:
 
 permissions:
@@ -41,6 +42,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Web frontend build failed" }
           python scripts/check_hq_bridge.py
           if ($LASTEXITCODE -ne 0) { throw "HQ IPC check failed" }
+          python scripts/check_hq_v5_bridge.py
+          if ($LASTEXITCODE -ne 0) { throw "HQ v5 hardware-frame safety checks failed" }
           python scripts/check_app_update.py
           if ($LASTEXITCODE -ne 0) { throw "Update guard check failed" }
           python scripts/check_v5_integration.py
@@ -59,16 +62,16 @@ jobs:
             cargo test --locked --manifest-path src-tauri/Cargo.toml --lib $test
             if ($LASTEXITCODE -ne 0) { throw "Windows Rust test failed: $test" }
           }
-      - name: Clone EXACT reviewed scrcpy 4.0 upstream commit
+      - name: Clone EXACT reviewed scrcpy 5.0.1 upstream commit
         shell: pwsh
         run: |
-          git clone --depth 1 --branch v4.0 https://github.com/Genymobile/scrcpy.git hq/upstream-src
+          git clone --depth 1 --branch v5.0.1 https://github.com/Genymobile/scrcpy.git hq/upstream-src
           if ($LASTEXITCODE -ne 0) { throw "Upstream scrcpy clone failed" }
           $head = (git -C hq/upstream-src rev-parse HEAD).Trim()
-          if ($head -ne '2322868e9e256eb5fce0b3d659ab2a409f29bae1') {
+          if ($head -ne 'a60891aea193d92e7e5c3942700eca63f9d19a5f') {
             throw "Unreviewed scrcpy upstream revision"
           }
-          python hq/apply_scrcpy_v4.py hq/upstream-src
+          python hq/apply_scrcpy_v5.py hq/upstream-src
           if ($LASTEXITCODE -ne 0) { throw "Pinned HQ sink patch failed" }
       - uses: msys2/setup-msys2@v2
         with:
@@ -89,23 +92,23 @@ jobs:
             --buildtype=release -Dcompile_server=false \
             -Dcompile_app=true -Dusb=false -Dv4l2=false -Dportable=true
           meson compile -C hq/upstream-build
-          ./hq/upstream-build/app/scrcpy.exe --version | grep -F 'MirroLeap HQ decoded-frame v2 (experimental)'
-      - name: Download SHA256-pinned OFFICIAL scrcpy v4.0 Windows runtime
+          ./hq/upstream-build/app/scrcpy.exe --version | grep -F 'MirroLeap HQ scrcpy5 raw-frame v3 (experimental)'
+      - name: Download SHA256-pinned OFFICIAL scrcpy 5.0.1 Windows runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $url = 'https://github.com/Genymobile/scrcpy/releases/download/v4.0/scrcpy-win64-v4.0.zip'
-          $archive = 'hq/scrcpy-win64-v4.0.zip'
+          $url = 'https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/scrcpy-win64-v5.0.1.zip'
+          $archive = 'hq/scrcpy-win64-v5.0.1.zip'
           Invoke-WebRequest -Uri $url -OutFile $archive
           $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
-          $expected = '75dbeb5b00e6f64292f26f70900ae55ca397786bdfb0b9bbeb481a0549047457'
+          $expected = 'b12a2c4ee8be317422451fc7dcf8ee20a71b5ea7ef9ad73ddd825a25316227a5'
           if ($actual -ne $expected) { throw 'Official scrcpy runtime SHA256 mismatch' }
           Expand-Archive -LiteralPath $archive -DestinationPath hq/original-win
           $root = (Get-ChildItem hq/original-win -Directory | Select-Object -First 1).FullName
           if (-not $root) { throw 'Official scrcpy archive directory missing' }
           $target = 'src-tauri/hq-preview-core/scrcpy-hq-bin'
           New-Item -ItemType Directory -Force $target | Out-Null
-          # The official archive contains prebuilt SDL3 and FFmpeg libraries.
+          # The verified official archive contains prebuilt SDL3 and FFmpeg libraries.
           # Those are ABI-incompatible with the patched UCRT64 build; copying
           # them AND UCRT64's replacements caused the 50-70 MB preview files.
           # Preserve only real ADB/server/runtime assets; resolve patched DLLs
@@ -137,7 +140,7 @@ jobs:
           target=src-tauri/hq-preview-core/scrcpy-hq-bin
           test -f "$target/scrcpy.exe"
           # The patched client was linked against the MSYS2 UCRT64 ABI.
-          # Official scrcpy v4.0's verified ZIP supplies adb/server/docs,
+          # Official scrcpy 5.0.1's verified ZIP supplies adb/server/docs,
           # but may contain FFmpeg/SDL DLLs with DIFFERENT import versions.
           # Walk PE imports recursively and copy the exact UCRT64 build DLLs.
           declare -A seen=()
@@ -200,8 +203,8 @@ jobs:
           $target = 'src-tauri/hq-preview-core/scrcpy-hq-bin'
           $probe = & (Join-Path $target 'scrcpy.exe') --version 2>&1 | Out-String
           Write-Host "HQ --version exit code: $LASTEXITCODE"
-          Write-Host "HQ preview marker present: $($probe.Contains('MirroLeap HQ decoded-frame v2 (experimental)'))"
-          if ($LASTEXITCODE -ne 0 -or -not $probe.Contains('MirroLeap HQ decoded-frame v2 (experimental)')) {
+          Write-Host "HQ preview marker present: $($probe.Contains('MirroLeap HQ scrcpy5 raw-frame v3 (experimental)'))"
+          if ($LASTEXITCODE -ne 0 -or -not $probe.Contains('MirroLeap HQ scrcpy5 raw-frame v3 (experimental)')) {
             throw 'Assembled preview scrcpy client failed: verify bundled UCRT64 dependencies'
           }
           $adbProbe = & (Join-Path $target 'adb.exe') version 2>&1 | Out-String
@@ -227,7 +230,7 @@ jobs:
           $tag = "v${version}"
           $coreDir = 'src-tauri/hq-preview-core/scrcpy-hq-bin'
           $archiveDir = 'hq-optional-core'
-          $filename = 'MirroLeap.HQ.Core_v2_x64.zip'
+          $filename = 'MirroLeap.HQ.Core_v3_x64.zip'
           New-Item -ItemType Directory -Force $archiveDir | Out-Null
           $zip = Join-Path $archiveDir $filename
           Compress-Archive -LiteralPath $coreDir -DestinationPath $zip -CompressionLevel Optimal
@@ -308,7 +311,7 @@ jobs:
           }
           $out = 'mirroleap-release'
           New-Item -ItemType Directory -Force $out | Out-Null
-          $core = Get-Item 'hq-optional-core/MirroLeap.HQ.Core_v2_x64.zip'
+          $core = Get-Item 'hq-optional-core/MirroLeap.HQ.Core_v3_x64.zip'
           if (-not $core -or $core.Length -le 1000000) {
             throw 'Separate verified HQ runtime asset missing'
           }

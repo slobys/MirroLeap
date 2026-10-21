@@ -25,6 +25,8 @@ struct sc_mirroleap_hq_sink {
     uint32_t next_slot;
 #ifdef MLHQ_ENABLE_D3D11
     volatile LONG last_enqueued_at; // bounded GPU texture refs on decode thread
+    volatile LONG gpu_slow_count;
+    volatile LONG gpu_readback_disabled; // fail closed, never stalls normal playback indefinitely
 #endif
 };
 void sc_mirroleap_hq_sink_init(struct sc_mirroleap_hq_sink *sink);

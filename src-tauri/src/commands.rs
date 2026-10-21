@@ -1693,7 +1693,8 @@ pub struct ScrcpyConfig {
     device_frame: Option<bool>,
     /// Experimental raw decoded-frame lens; opt-in per launch, Windows only.
     hq_lens: Option<bool>,
-    /// SECOND explicit opt-in: use optional raw-frame scrcpy 4.0 instead of normal 5.x.
+    /// SECOND explicit opt-in: use pinned scrcpy 5.0.1 with an additional
+    /// bounded D3D11-capable source-frame sink. Normal video remains scrcpy 5.x.
     hq_experimental_core: Option<bool>,
     remember_window_position: Option<bool>,
     record: Option<bool>,
@@ -1745,7 +1746,7 @@ pub struct ScrcpyConfig {
 /// Only a deliberately patched scrcpy v4.0 client prints this stable marker
 /// on --version. A normal official binary must never receive an HQ token.
 #[cfg(target_os="windows")]
-const HQ_VERSION_MARKER:&str="MirroLeap HQ decoded-frame v2 (experimental)";
+const HQ_VERSION_MARKER:&str="MirroLeap HQ scrcpy5 raw-frame v3 (experimental)";
 
 // Existing hqLens=true configuration does not consent to switching video
 // engines. Preserve normal scrcpy 5.x unless BOTH switches are enabled.
@@ -1763,7 +1764,7 @@ async fn create_hq_session(
         return Err("HQ 预览只支持带手机边框的 Windows 普通窗口投屏。".into());
     }
     if !Path::new(exe_path).is_file() {
-        return Err("未找到实验版 scrcpy 4.0 客户端，已拒绝启用 HQ。".into());
+        return Err("未找到实验版 scrcpy 5.0.1 客户端，已拒绝启用原始帧高清。".into());
     }
     let mut command=create_command(exe_path);
     command.arg("--version");
@@ -1771,9 +1772,9 @@ async fn create_hq_session(
         .map_err(|_|"HQ 客户端版本检查超时")?
         .map_err(|_|"无法启动 HQ 客户端版本检查")?;
     let text=String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() || !text.contains("scrcpy 4.0") ||
+    if !output.status.success() || !text.contains("scrcpy 5.0.1") ||
        !text.contains(HQ_VERSION_MARKER) {
-        return Err("此客户端不是已标记的实验版 scrcpy 4.0，请先安装 HQ 预览核心；普通 scrcpy 不会自动修改。".into());
+        return Err("此客户端不是固定版本的 scrcpy 5.0.1 原始帧实验核心；普通投屏引擎不会受到影响。".into());
     }
     crate::hq_bridge_windows::HqMappingOwner::new()
         .map(Arc::new).map(Some).map_err(str::to_string)
@@ -2913,7 +2914,10 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                     // from the previous process/session generation.
                     #[cfg(target_os="windows")]
                     if let Ok(sessions)=app_handle_mon.state::<ScrcpyState>().hq_sessions.lock() {
-                        if let Some(owner)=sessions.get(&device_mon) {owner.reset_publication();}
+                        if let Some(owner)=sessions.get(&device_mon) {
+                            owner.reset_publication();
+                            owner.clear_producer_health_for_new_process();
+                        }
                     }
 
                     let audio_failed = current_audio_flag.load(Ordering::SeqCst);
@@ -3776,7 +3780,7 @@ pub fn device_frame_capture_ack(
 }
 
 /// Explicit HQ opt-in from the main settings panel: only this command may
-/// download the optional pinned scrcpy 4.0 experimental runtime. Ordinary
+/// download the optional pinned scrcpy 5.0.1 experimental runtime. Ordinary
 /// projection and automatic app update never download this optional module.
 #[tauri::command]
 pub async fn ensure_hq_runtime(

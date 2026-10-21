@@ -17,9 +17,9 @@ use sha2::{Digest,Sha256};
 use tauri::{AppHandle,Emitter,Manager};
 use tokio::io::AsyncWriteExt;
 
-const ROOT_NAME:&str="hq-runtime-v2";
+const ROOT_NAME:&str="hq-runtime-scrcpy501-v3";
 const CACHE_MARKER:&str=".mirroleap-hq-installed";
-const CLIENT_MARKER:&str="MirroLeap HQ decoded-frame v2 (experimental)";
+const CLIENT_MARKER:&str="MirroLeap HQ scrcpy5 raw-frame v3 (experimental)";
 const MAX_DOWNLOAD:u64=110*1024*1024;
 const MAX_EXTRACT:u64=500*1024*1024;
 const MAX_ENTRIES:usize=750;
@@ -56,7 +56,7 @@ fn verified_source()->Result<(&'static str,&'static str),String> {
     // Pin both version and canonical published tag.  The normal MirroLeap
     // installer must never accept an HQ-preview separate-app archive.
     let required=format!(
-        "https://github.com/slobys/MirroLeap/releases/download/v{}/MirroLeap.HQ.Core_v2_x64.zip",
+        "https://github.com/slobys/MirroLeap/releases/download/v{}/MirroLeap.HQ.Core_v3_x64.zip",
         env!("CARGO_PKG_VERSION")
     );
     if url!=required || !valid_sha256(sha) {
@@ -66,8 +66,8 @@ fn verified_source()->Result<(&'static str,&'static str),String> {
 }
 fn complete(dir:&Path)->bool {
     let marker=fs::read_to_string(dir.join(CACHE_MARKER)).ok();
-    marker.as_deref().is_some_and(|v|v.starts_with("hq4.0-protocol-v2:") &&
-        valid_sha256(v.trim().strip_prefix("hq4.0-protocol-v2:").unwrap_or("")))
+    marker.as_deref().is_some_and(|v|v.starts_with("hq5.0.1-protocol-v2:") &&
+        valid_sha256(v.trim().strip_prefix("hq5.0.1-protocol-v2:").unwrap_or("")))
         && ["scrcpy.exe","adb.exe","scrcpy-server"].iter()
             .all(|file|dir.join(file).is_file())
 }
@@ -130,7 +130,7 @@ fn unpack(archive:&Path,stage:&Path,sha:&str)->Result<PathBuf,String> {
         return Err("HQ runtime is missing the patched client, adb or server".into());
     }
     fs::write(files.join(CACHE_MARKER),
-        format!("hq4.0-protocol-v2:{sha}"))
+        format!("hq5.0.1-protocol-v2:{sha}"))
         .map_err(|e|e.to_string())?;
     Ok(files)
 }
@@ -141,8 +141,8 @@ async fn verify_client(exe:&Path)->Result<(),String> {
         .map_err(|e|format!("HQ 实验核心缺失 DLL 或无法运行: {e}"))?;
     if !output.status.success() || 
         !String::from_utf8_lossy(&output.stdout).contains(CLIENT_MARKER) ||
-        !String::from_utf8_lossy(&output.stdout).contains("scrcpy 4.0") {
-        return Err("下载的 HQ 核心没有通过 scrcpy 4.0 原始帧身份验证".into());
+        !String::from_utf8_lossy(&output.stdout).contains("scrcpy 5.0.1") {
+        return Err("下载的 HQ 核心没有通过 scrcpy 5.0.1 原始帧身份验证".into());
     }
     Ok(())
 }

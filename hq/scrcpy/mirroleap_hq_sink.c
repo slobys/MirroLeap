@@ -132,13 +132,33 @@ mlhq_publish_hw_or_cpu(struct sc_mirroleap_hq_sink *sink,
         mlhq_publish(sink, frame);
         return;
     }
-    if (!mlhq_hw_frame_supported(frame)) {return;}
+    if (!mlhq_hw_frame_supported(frame) ||
+        InterlockedCompareExchange(&sink->gpu_readback_disabled,0,0)) {
+        return;
+    }
     AVFrame *cpu = av_frame_alloc();
     if (!cpu) {return;}
-    if (av_hwframe_transfer_data(cpu, frame, 0) >= 0 &&
+    const DWORD started=GetTickCount();
+    const int transferred=av_hwframe_transfer_data(cpu, frame, 0);
+    const DWORD readback_ms=(DWORD)(GetTickCount()-started);
+    // Hardware D3D11VA reads can starve SDL's own renderer. After TWO slow
+    // transfers stop sampling for the session and report a recoverable HQ
+    // failure so the old desktop lens remains available without video lag.
+    if (readback_ms>45u) {
+        if (InterlockedIncrement(&sink->gpu_slow_count)>=2 &&
+            !InterlockedExchange(&sink->gpu_readback_disabled,1)) {
+            InterlockedExchange((volatile LONG *)(void *)
+                (sink->memory+MLHQ_G_GPU_READBACK_SLOW),1);
+            LOGW("MirroLeap HQ GPU readback too slow; "
+                 "disabling source bypass to protect normal scrcpy video");
+        }
+    } else {
+        InterlockedExchange(&sink->gpu_slow_count,0);
+    }
+    if (!sink->gpu_readback_disabled && transferred>=0 &&
         mlhq_frame_supported(cpu)) {
-        cpu->pts = frame->pts;
-        mlhq_publish(sink, cpu);
+        cpu->pts=frame->pts;
+        mlhq_publish(sink,cpu);
     }
     av_frame_free(&cpu);
 }
@@ -320,6 +340,11 @@ mlhq_push(struct sc_frame_sink *receiver,const AVFrame *frame) {
     struct sc_mirroleap_hq_sink *sink=
         (struct sc_mirroleap_hq_sink*)receiver;
     if (!sink->worker || !mlhq_consumer_active(sink)) {return MLHQ_PUSH_OK;}
+#ifdef MLHQ_ENABLE_D3D11
+    if (InterlockedCompareExchange(&sink->gpu_readback_disabled,0,0)) {
+        return MLHQ_PUSH_OK;
+    }
+#endif
 #ifdef MLHQ_ENABLE_D3D11
     if (!mlhq_frame_supported(frame) && !mlhq_hw_frame_supported(frame)) {
         return MLHQ_PUSH_OK;

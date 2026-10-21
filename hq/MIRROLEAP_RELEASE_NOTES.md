@@ -1,4 +1,15 @@
-# MirroLeap v5.3.2 · 默认实时放大不再占用设置页
+# MirroLeap v5.3.3 · D3D11 硬解 + 原始帧接收实验（真机待验收）
+
+## v5.3.3 · 解决旧 scrcpy 4.0 核心切换问题
+
+- 普通 MirroLeap 不变：5 MB 左右主 EXE、原名称与安装身份、签名一键更新、默认 2.35 倍悬浮放大仍不在设置中重复出现。
+- 只有选择「原始帧高清（实验功能）」才按需下载独立的 `MirroLeap.HQ.Core_v3_x64.zip`。本版改为固定 Genymobile/scrcpy **5.0.1**、提交 `a60891aea193d92e7e5c3942700eca63f9d19a5f`，而不是旧版 4.0；支持 scrcpy 5.x 的 `--hwdec=d3d11va` 和“Video decoding”日志。
+- 通过 FFmpeg `AVFrame` 的 GPU 纹理引用把解码帧传给可选后台工作线程，而不是在解码主线程做 GPU→CPU 传输。仅读取圆形放大镜需要的源帧，至多 8 次/秒 D3D11VA 全帧 GPU 读回，并保持原有 YUV420P/NV12 双槽 IPC。
+- 每次 GPU 下载计时，连续两次超过 45ms 时禁用本次会话的原始帧旁路并由旧 Windows 实时放大镜回退。目标是防止 GPU 镜头拖慢正常视频。
+- **技术边界：** D3D11VA 视频硬解≠D3D11 GPU 高清圆圈；目前依旧需要整帧 GPU→CPU 下载及 CPU/GDI 局部插值，尚未实现 GPU ROI 或跨进程纹理共享，不能保证抖音视频流畅或消除锯齿。Windows 编译/桌面测试不能代替真实 Android 视频验收。
+- 旧缓存 `hq-runtime-v2` 不会被自动信任或覆盖，新核心单独安装 `hq-runtime-scrcpy501-v3`；失败不影响默认 MirroLeap 投屏。
+
+## v5.3.2 · 隐藏固定 2.35 倍设置
 
 ## v5.3.2 · 隐藏固定 2.35 倍设置
 
@@ -24,7 +35,7 @@
 
 ## 你可以直接从 MirroLeap v5.2.3 更新
 
-- v5.2.3 原程序会检索仓库中的 `vX.Y.Z` 版本，并检查是否有完整的 NSIS 安装包、minisign 签名与 `latest.json`。本次使用正常的 `v5.3.2` 标签和 `MirroLeap_5.3.2_x64-setup.exe` 文件名。
+- v5.2.3 原程序会检索仓库中的 `vX.Y.Z` 版本，并检查是否有完整的 NSIS 安装包、minisign 签名与 `latest.json`。本次使用正常的 `v5.3.3` 标签和 `MirroLeap_5.3.3_x64-setup.exe` 文件名。
 - 已安装的 NSIS EXE：启动时检测新版，弹窗由用户确认后，下载并验证固定公钥签名再安装；不是静默升级。
 - MSI、便携 ZIP：可以收到新版提示，但出于安装方式安全边界，需要自行下载安装对应的新版本，不能被 NSIS 自动覆盖。
 - 注意仅存在于旧 “HQ Preview” 独立程序中的旧标识不自动合并或卸载；原来的 MirroLeap v5.2.3 更新链完全延续。
@@ -50,7 +61,7 @@
 
 - 主安装包 **没有**打入实验性 scrcpy 4.0、FFmpeg/SDL3 或 ADB；EXE 目标回归约 5 MB。仍旧保持 USB、Wi-Fi、手机边框、画笔、截屏与创作者功能。
 - 平常投屏仍按原方式使用已经安装的 scrcpy 引擎，不在软件启动和普通投屏时下载可选 HQ 核心。
-- 只有在设置中明确勾选“可选 2.35× 高清放大”时，软件才下载单独的 `MirroLeap.HQ.Core_v2_x64.zip`，比对编译时固定的 SHA256，再校验 ZIP 结构和 scrcpy 4.0 补丁标志后保存到个人应用数据目录。中断、文件损坏或校验失败不会替换正常 scrcpy。
+- 只有在设置中明确勾选“可选 2.35× 高清放大”时，软件才下载单独的 `MirroLeap.HQ.Core_v3_x64.zip`，比对编译时固定的 SHA256，再校验 ZIP 结构和 scrcpy 4.0 补丁标志后保存到个人应用数据目录。中断、文件损坏或校验失败不会替换正常 scrcpy。
 - 可选 HQ 会使用同一个 Android 视频流中的原始解码帧，经双槽共享内存与 2.35 倍局部采样显示独立 Windows CPU/GDI 圆形镜头；无帧时保留原有桌面实时放大作为回退。
 - 增强的点击光圈、较长的可见时间和真实桌面像素 CI 验证，以及自适应抗混叠和画质来源提示，也包含在此版 MirroLeap 内。
 
@@ -60,10 +71,10 @@ Windows Actions 会执行 Rust/前端测试、实验 scrcpy 4.0 真正编译、W
 
 ## 下载内容
 
-- `MirroLeap_5.3.2_x64-setup.exe`：同名、同安装标识的轻量 NSIS 更新版，推荐。
-- `MirroLeap_5.3.2_x64_en-US.msi`：MSI 安装版，后续仍手动更新。
-- `MirroLeap_5.3.2_x64_Portable.zip`：免安装、解压运行。
-- `MirroLeap.HQ.Core_v2_x64.zip`：**单独的可选核心**，普通用户不需下载；开启 HQ 后由软件自动安装。
-- `latest.json` / `MirroLeap_5.3.2_x64-setup.exe.sig` / `SHA256SUMS.txt`：签名自动更新清单与文件完整性校验。
+- `MirroLeap_5.3.3_x64-setup.exe`：同名、同安装标识的轻量 NSIS 更新版，推荐。
+- `MirroLeap_5.3.3_x64_en-US.msi`：MSI 安装版，后续仍手动更新。
+- `MirroLeap_5.3.3_x64_Portable.zip`：免安装、解压运行。
+- `MirroLeap.HQ.Core_v3_x64.zip`：**单独的可选核心**，普通用户不需下载；开启 HQ 后由软件自动安装。
+- `latest.json` / `MirroLeap_5.3.3_x64-setup.exe.sig` / `SHA256SUMS.txt`：签名自动更新清单与文件完整性校验。
 
 实验 scrcpy 部件固定 Genymobile/scrcpy v4.0、提交 `2322868e9e256eb5fce0b3d659ab2a409f29bae1`。补丁源码及相关依赖许可详见仓库 `hq/`。本版本在本机内处理帧，不上传手机画面。

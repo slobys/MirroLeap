@@ -16,6 +16,7 @@ use std::{
 use crate::hq_protocol::{
     self, FrameMetadata, OwnedFrame, HEADER_BYTES, MAPPING_BYTES, NO_FRAME,
     SLOT_CAPACITY, SLOT_COUNT, SLOT_HEADER_BYTES, VERSION, CONSUMER_ACTIVE_OFFSET,
+    PRODUCER_HEALTH_OFFSET,
 };
 
 const PAGE_READWRITE: u32=0x04;
@@ -158,6 +159,9 @@ impl HqMappingOwner {
             ptr::copy_nonoverlapping(self.base.as_ptr(),fixed.as_mut_ptr(),20);
         }
         hq_protocol::validate_header_prefix(&fixed)?;
+        if self.atomic_u32(PRODUCER_HEALTH_OFFSET)!=0 {
+            return Err("HQ GPU source disabled after slow hardware readback");
+        }
         let publish_before=self.atomic_u32(24);
         let slot=self.atomic_u32(20);
         if slot==NO_FRAME {return Ok(None);}
@@ -196,11 +200,23 @@ impl HqMappingOwner {
         let mut header=[0u8;HEADER_BYTES];
         unsafe {ptr::copy_nonoverlapping(self.base.as_ptr(),header.as_mut_ptr(),20);}
         hq_protocol::validate_header_prefix(&header)?;
+        if self.atomic_u32(PRODUCER_HEALTH_OFFSET)!=0 {
+            return Err("HQ GPU readback too slow; using desktop magnifier");
+        }
         let sequence=self.atomic_u32(24);
         let slot=self.atomic_u32(20);
         if slot==NO_FRAME || sequence==0 {return Ok(None);}
         if slot>=SLOT_COUNT as u32 {return Err("HQ slot index out of bounds");}
         Ok(Some(sequence))
+    }
+
+    /// Called only AFTER the previous producer exited and before a fresh
+    /// experimental process starts. UI toggling alone must NOT clear a
+    /// slow-GPU flag because the same v5 worker will stay disabled.
+    pub fn clear_producer_health_for_new_process(&self) {
+        let health=unsafe {&*(self.base.as_ptr().add(PRODUCER_HEALTH_OFFSET)
+            as *const AtomicU32)};
+        health.store(0,Ordering::Release);
     }
 
     /// Distinguish a restarted producer's publish id=1 from the old id=1.
@@ -256,6 +272,10 @@ mod tests {
         assert!(b.try_latest().unwrap().is_none());
         assert_eq!(a.latest_publish_id().unwrap(),None);
         assert_eq!(b.latest_publish_id().unwrap(),None);
+        unsafe {a.store_header(PRODUCER_HEALTH_OFFSET,1);}
+        assert!(a.latest_publish_id().is_err());
+        a.clear_producer_health_for_new_process();
+        assert_eq!(a.latest_publish_id().unwrap(),None);
         let before=a.generation();
         a.reset_publication();
         assert_eq!(a.generation(),before+1);

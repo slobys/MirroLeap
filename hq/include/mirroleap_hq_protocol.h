@@ -43,6 +43,7 @@
 #define MLHQ_G_LATEST_SEQ   24u /* optional monotonic frame counter */
 #define MLHQ_G_CONSUMER_ACTIVE 28u /* v2: 0=idle, 1=visible HQ lens, atomic */
 #define MLHQ_G_RESERVED     32u
+#define MLHQ_G_GPU_READBACK_SLOW 32u /* optional v5 extension: 0=ok, 1=disable HQ */
 #define MLHQ_MIN_PUBLISH_MS 50u /* bounded copies while live */
 
 /* Each 80-byte slot header is followed by slot_capacity bytes. */

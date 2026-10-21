@@ -76,8 +76,8 @@ export default function DecoderPerformance({config, setConfig, support, observed
       <span className="ml-muted text-xs">
         {zh ? '投屏核心' : 'scrcpy core'}：
         {support?.scrcpyVersion ? (usingRawCore ?
-          (zh ? `普通 v${support.scrcpyVersion} · HQ 使用 scrcpy 4.0` :
-                `Normal v${support.scrcpyVersion} · HQ uses scrcpy 4.0`) :
+          (zh ? `普通 v${support.scrcpyVersion} · 原始帧实验 v5.0.1` :
+                `Normal v${support.scrcpyVersion} · raw-frame lab v5.0.1`) :
           `v${support.scrcpyVersion}`) : (zh ? '未检测' : 'Not detected')}
       </span>
     </div>
@@ -91,7 +91,7 @@ export default function DecoderPerformance({config, setConfig, support, observed
     </label>
     <select id="ml-hwdec" className="ml-select"
       value={selected}
-      disabled={!supported || usingRawCore}
+      disabled={!supported}
       onChange={(event) => setConfig({
         ...config,
         hardwareDecoder: event.target.value as ScrcpyConfig['hardwareDecoder'],
@@ -135,8 +135,8 @@ export default function DecoderPerformance({config, setConfig, support, observed
           checked={usingRawCore}
           disabled={hqBusy}
           onChange={(event)=>void onRawHqToggle(event.target.checked)}/>
-        {zh ? '原始帧高清（实验功能，切换 scrcpy 4.0，可能卡顿）' :
-          'Original-frame HQ (experimental; switches to scrcpy 4.0, may stutter)'}
+        {zh ? '原始帧高清（实验功能，scrcpy 5.0.1 D3D11）' :
+          'Original-frame HQ (experimental scrcpy 5.0.1 D3D11)'}
       </label>
       {hqBusy && <p role="status" className="text-xs ml-muted">
         {zh ? '正在校验并安装实验原始帧核心' : 'Installing experimental raw-frame core'}
@@ -146,12 +146,12 @@ export default function DecoderPerformance({config, setConfig, support, observed
         {zh ? '高清核心暂时无法启用：' : 'HQ core not enabled: '}{hqError}
       </p>}
       {usingRawCore && <p role="note" className="text-xs text-amber-600">
-        {zh ? '注意：HQ 实验核心基于 scrcpy 4.0，不支持普通 5.0.1 的 --hwdec=d3d11va。上方 D3D11 选项只适用于普通核心；HQ CPU 抗锯齿不是 GPU 视频解码，也不代表启用了硬解。'
-            : 'HQ uses experimental scrcpy 4.0 and cannot use the normal 5.0.1 --hwdec=d3d11va flag. The D3D11 selector describes your regular core only; CPU lens antialiasing is NOT GPU video decoding.'}
+        {zh ? '实验核心已更新为 scrcpy 5.0.1，支持继续请求 D3D11VA 视频硬解。但目前 HQ 仍在后台限频读取 GPU 帧，圆形放大使用 CPU/GDI，尚不是 GPU 局部高清渲染；实际是否硬解请看下方 scrcpy 日志。'
+            : 'The experimental core now uses scrcpy 5.0.1 and supports D3D11VA decoding. HQ frame downloads are limited and run on a worker; the circular lens is still CPU/GDI, NOT a zero-copy D3D11 lens. Confirm actual decoding from the scrcpy log below.'}
       </p>}
       {usingRawCore && <p role="note" className="text-xs text-amber-600">
-        {zh ? '原始帧模式下一次启动投屏会改用实验 scrcpy 4.0，整个视频可能变卡；不是真正的 D3D11 GPU 高清镜头。关掉此实验开关并重新投屏即可回到流畅的普通核心。' :
-          'Raw-frame mode switches the ENTIRE next mirror to experimental scrcpy 4.0, which may stutter. It is not a D3D11 GPU lens. Uncheck this experiment and restart mirroring to restore the regular engine.'}
+        {zh ? '下一次投屏将使用固定版本的 scrcpy 5.0.1 + 实验原始帧接收端。GPU 读回若连续过慢会停用原始帧通道并回退旧放大镜，优先保持视频流畅；真实安卓设备的性能尚未验收。' :
+          'Next session uses pinned scrcpy 5.0.1 plus the optional raw-frame sink. Slow GPU readback disables the HQ bypass and falls back to desktop magnification to protect video. Real Android performance is not yet validated.'}
       </p>}
     </>}
     {running && <p className="ml-muted text-xs">

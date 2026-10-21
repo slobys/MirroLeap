@@ -37,10 +37,14 @@ assert 'NOT release' in workflow
 assert 'scrcpy-win64-v5.0.1.zip' in workflow
 assert 'b12a2c4ee8be317422451fc7dcf8ee20a71b5ea7ef9ad73ddd825a25316227a5' in workflow
 assert 'actions/upload-artifact' in workflow
+assert 'MLHQ_G_GPU_READBACK_SLOW' in read("hq/include/mirroleap_hq_protocol.h")
+assert 'gpu_readback_disabled' in producer and 'MLHQ_G_GPU_READBACK_SLOW' in producer
+assert 'PRODUCER_HEALTH_OFFSET' in read("src-tauri/src/hq_bridge_windows.rs")
+assert 'MirroLeap.HQ.Core_v3_x64.zip' in read(".github/workflows/mirroleap-continuity.yml")
 # Original user application MUST NOT be affected by a lab-only branch.
 conf=read("src-tauri/tauri.conf.json")
 command=read("src-tauri/src/commands.rs")
-assert '"version": "5.3.2"' in conf
-assert 'const HQ_VERSION_MARKER:&str="MirroLeap HQ decoded-frame v2 (experimental)";' in command
+assert '"version": "5.3.3"' in conf
+assert 'const HQ_VERSION_MARKER:&str="MirroLeap HQ scrcpy5 raw-frame v3 (experimental)";' in command
 assert 'experimental_hq_selected' in command
 print("PASS: pinned scrcpy5 lab remains isolated, D3D11 refs bounded and v5 push result truthful")

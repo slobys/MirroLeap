@@ -39,7 +39,8 @@ HANDLE CreateThread(void *a,SIZE_T b,DWORD (WINAPI *c)(LPVOID),LPVOID d,
     (void)a;(void)b;(void)c;(void)d;(void)e;(void)f;return NULL;
 }
 DWORD WaitForSingleObject(HANDLE a,DWORD b) {(void)a;(void)b;return 0;}
-DWORD GetTickCount(void) {return 1000;}
+static DWORD mock_tick_ms=1000;
+DWORD GetTickCount(void) {return mock_tick_ms;}
 int CloseHandle(HANDLE a) {(void)a;return 1;}
 int UnmapViewOfFile(const void *a) {(void)a;return 1;}
 int SetEvent(HANDLE a) {(void)a;return 1;}

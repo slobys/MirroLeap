@@ -7,6 +7,7 @@
 
 pub const VERSION: u32 = 2;
 pub const CONSUMER_ACTIVE_OFFSET:usize = 28;
+pub const PRODUCER_HEALTH_OFFSET:usize = 32; // optional v5 GPU readback fail-safe
 pub const HEADER_BYTES: usize = 64;
 pub const SLOT_HEADER_BYTES: usize = 80;
 pub const SLOT_COUNT: usize = 2;

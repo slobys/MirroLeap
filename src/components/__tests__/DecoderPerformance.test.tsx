@@ -85,9 +85,12 @@ describe('safe host hardware decoder controls', () => {
     const raw={...base,hqLens:true,hqExperimentalCore:true};
     rerender(<DecoderPerformance config={raw} setConfig={setConfig}
       support={windows5} observedMode="unreported" running={true}/>);
-    expect(screen.getByText(/HQ uses experimental scrcpy 4.0 and cannot use/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Host video decoder')).toBeDisabled();
+    expect(screen.getByText(/The experimental core now uses scrcpy 5.0.1/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Host video decoder')).toBeEnabled();
     expect(screen.getByRole('status')).toHaveTextContent('Core did not report its decoder (GPU unconfirmed)');
+    rerender(<DecoderPerformance config={raw} setConfig={setConfig}
+      support={windows5} observedMode="d3d11va" running={true}/>);
+    expect(screen.getByRole('status')).toHaveTextContent('d3d11va');
     fireEvent.click(screen.getByLabelText(/Original-frame HQ/));
     expect(setConfig).toHaveBeenLastCalledWith({...raw,hqLens:false,hqExperimentalCore:false});
   });

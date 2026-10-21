@@ -9,6 +9,7 @@
 #undef main
 
 static unsigned hw_transfers;
+static bool slow_gpu_readback;
 static uint8_t sample_y[4*8];
 static uint8_t sample_uv[2*8];
 AVFrame *av_frame_alloc(void) {
@@ -17,6 +18,7 @@ AVFrame *av_frame_alloc(void) {
 int av_hwframe_transfer_data(AVFrame *dst,const AVFrame *src,int flags) {
     (void)flags;
     hw_transfers++;
+    if (slow_gpu_readback) mock_tick_ms+=60;
     if (src->format!=AV_PIX_FMT_D3D11 || !src->hw_frames_ctx) {return -1;}
     dst->format=AV_PIX_FMT_NV12;
     dst->width=src->width;
@@ -76,11 +78,29 @@ int main(int argc,char **argv) {
     CHECK(!mlhq_hw_frame_supported(&frame));
     mlhq_publish_hw_or_cpu(&sink,&frame);
     CHECK(hw_transfers==1);
+    // Two deliberately slow hardware transfers must stop the source bypass
+    // and set an IPC status that the Rust viewer can use to fall back to its
+    // smooth desktop lens. Normal scrcpy decoding may continue unhindered.
+    hardware.sw_format=AV_PIX_FMT_NV12;
+    slow_gpu_readback=true;
+    mlhq_publish_hw_or_cpu(&sink,&frame);
+    CHECK(hw_transfers==2);
+    CHECK(!sink.gpu_readback_disabled);
+    mlhq_publish_hw_or_cpu(&sink,&frame);
+    CHECK(hw_transfers==3);
+    CHECK(sink.gpu_readback_disabled);
+    CHECK(mlhq_read_u32(shared,MLHQ_G_GPU_READBACK_SLOW)==1);
+    const unsigned clones_when_disabled=clone_count;
+    CHECK(sink.frame_sink.ops->push(&sink.frame_sink,&frame)==SC_SINK_OK);
+    CHECK(clone_count==clones_when_disabled);
+    // All further GPU downloads are disabled for this session.
+    mlhq_publish_hw_or_cpu(&sink,&frame);
+    CHECK(hw_transfers==3);
     // Disabling the circular lens must stop all frame refs and transfers.
     mlhq_u32(shared,MLHQ_G_CONSUMER_ACTIVE,0);
     CHECK(sink.frame_sink.ops->push(&sink.frame_sink,&frame)==SC_SINK_OK);
     CHECK(clone_count==initial_clones+1);
-    CHECK(hw_transfers==1);
+    CHECK(hw_transfers==3);
     // No connected map = ordinary scrcpy still accepts frames.
     sink.memory=NULL;
     CHECK(sink.frame_sink.ops->push(&sink.frame_sink,&frame)==SC_SINK_OK);

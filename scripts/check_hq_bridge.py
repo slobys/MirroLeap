@@ -75,7 +75,8 @@ assert "InterlockedExchangePointer" in producer
 assert "MemoryBarrier()" in producer and "InterlockedIncrement(sequence)" in producer
 assert "AV_PIX_FMT_YUV420P" in producer and "AV_PIX_FMT_NV12" in producer
 assert "av_frame_clone(frame)" in producer and "SetEvent(sink->ready)" in producer
-assert "return true; // HQ failures MUST NOT terminate normal scrcpy playback" in producer
+assert "return MLHQ_PUSH_OK; // HQ failures MUST NOT terminate normal scrcpy playback" in producer
+assert "SC_SINK_OK" in producer and "MLHQ_PUSH_RESULT" in producer
 assert "struct sc_frame_sink frame_sink" in sink_header
 assert "sc_frame_source_add_sink(&s->video_decoder.frame_source," in patch_script
 assert "PINNED_COMMIT" in patch_script and "2322868e9e256eb5fce0b3d659ab2a409f29bae1" in patch_script
@@ -140,7 +141,7 @@ assert "hqLens" in ui and "Original-frame HQ" in ui
 assert "2.35× live lens (smooth: keep regular scrcpy)" not in ui
 assert "onHqToggle" not in ui
 assert "Original-frame HQ" in ui
-assert "Raw-frame mode switches the ENTIRE next mirror" in ui
+assert "Next session uses pinned scrcpy 5.0.1" in ui
 assert "hqlens" not in producer.lower()
 
 
@@ -181,7 +182,7 @@ assert 'onHqToggle' not in read('src/components/DecoderPerformance.tsx')
 assert '"hq-preview-core/scrcpy-hq-bin"' not in mirroleap_config
 assert '"productName": "MirroLeap"' in mirroleap_config
 assert '"identifier": "com.kb.scrcpy-gui-v3"' in mirroleap_config
-assert '"version": "5.3.2"' in mirroleap_config
+assert '"version": "5.3.3"' in mirroleap_config
 assert 'write-updater-manifest.mjs' in workflow
 assert 'MirroLeap_${version}_x64-setup.exe' in workflow
 assert 'MIRROLEAP_HQ_CORE_SHA256' in runtime
@@ -189,7 +190,10 @@ assert 'MIRROLEAP_HQ_CORE_URL' in runtime
 assert 'validated_archive_entry' in runtime and 'MAX_EXTRACT' in runtime
 assert 'ensure_hq_runtime' in app and "crate::hq_runtime::ensure" in app
 assert "mirroleap-hq-core-progress" in runtime
-assert 'MirroLeap.HQ.Core_v2_x64.zip' in workflow
+assert 'MirroLeap.HQ.Core_v3_x64.zip' in workflow
+assert 'MirroLeap HQ scrcpy5 raw-frame v3 (experimental)' in workflow
+assert 'HQ scrcpy5 raw-frame v3 (experimental)' in read('hq/apply_scrcpy_v5.py')
+assert 'PRODUCER_HEALTH_OFFSET' in read('src-tauri/src/hq_bridge_windows.rs')
 assert 'Lightweight EXE exceeds 9 MB' in workflow
 assert "start_scrcpy" not in producer
 assert "http://" not in producer and "https://" not in producer
