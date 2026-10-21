@@ -112,9 +112,53 @@ jobs:
               throw "Preview core is missing $file"
             }
           }
+          Write-Host 'Verified the official scrcpy runtime archive and staged the patched HQ executable.'
+      - name: Bundle MATCHING MSYS2/UCRT64 FFmpeg and SDL runtime dependencies
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          target=src-tauri/hq-preview-core/scrcpy-hq-bin
+          test -f "$target/scrcpy.exe"
+          # The patched client was linked against the MSYS2 UCRT64 ABI.
+          # Official scrcpy v4.0's verified ZIP supplies adb/server/docs,
+          # but may contain FFmpeg/SDL DLLs with DIFFERENT import versions.
+          # Walk PE imports recursively and copy the exact UCRT64 build DLLs.
+          declare -A seen=()
+          pending=("$target/scrcpy.exe")
+          copied=0
+          for ((i=0; i<${#pending[@]}; i++)); do
+            binary="${pending[$i]}"
+            while IFS= read -r dll; do
+              [[ -n "$dll" ]] || continue
+              key="${dll,,}"
+              if [[ -v 'seen[$key]' ]]; then continue; fi
+              seen[$key]=1
+              match="$(find /ucrt64/bin -maxdepth 1 -type f -iname "$dll" -print -quit)"
+              if [[ -n "$match" ]]; then
+                cp -f "$match" "$target/"
+                pending+=("$target/$(basename "$match")")
+                copied=$((copied+1))
+              fi
+            done < <(objdump -p "$binary" | sed -n 's/^[[:space:]]*DLL Name: //p')
+          done
+          if (( copied < 4 )); then
+            echo "Not enough matched UCRT64 runtime DLL dependencies: $copied"
+            exit 1
+          fi
+          if [[ -d /ucrt64/share/licenses ]]; then
+            mkdir -p "$target/msys2-thirdparty-licenses"
+            cp -R /ucrt64/share/licenses/. "$target/msys2-thirdparty-licenses/"
+          fi
+          printf 'Matched UCRT64 build-time DLLs copied: %s\\n' "$copied"
+      - name: Verify assembled HQ Windows binary runs OUTSIDE MSYS2 shell
+        shell: pwsh
+        run: |
+          $target = 'src-tauri/hq-preview-core/scrcpy-hq-bin'
           $probe = & (Join-Path $target 'scrcpy.exe') --version 2>&1 | Out-String
+          Write-Host "HQ --version exit code: $LASTEXITCODE"
+          Write-Host "HQ preview marker present: $($probe.Contains('MirroLeap HQ decoded-frame v1 (experimental)'))"
           if ($LASTEXITCODE -ne 0 -or -not $probe.Contains('MirroLeap HQ decoded-frame v1 (experimental)')) {
-            throw 'Assembled preview scrcpy client is not runnable or is not HQ patched'
+            throw 'Assembled preview scrcpy client failed: verify bundled UCRT64 dependencies'
           }
           Write-Host 'The assembled pinned Windows HQ runtime passed its launch and identity check.'
       - name: Validate Windows native layered circle in a GUI desktop
