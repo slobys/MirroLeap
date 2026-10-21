@@ -12,6 +12,13 @@
 #include "../scrcpy/mirroleap_hq_sink.c"
 
 #define CHECK(cond) do {if (!(cond)) {fprintf(stderr, "HQ C sink invariant failed at line %d: %s\n", __LINE__, #cond);abort();}}while(0)
+// scrcpy 4.x push() returns bool true; scrcpy 5.x push() returns
+// enum SC_SINK_OK=0. Checking truthiness on v5 would invert success.
+#ifdef MLHQ_ENABLE_D3D11
+# define MLHQ_TEST_PUSH_ACCEPTED(value) ((value)==SC_SINK_OK)
+#else
+# define MLHQ_TEST_PUSH_ACCEPTED(value) (value)
+#endif
 
 /* Win32 stubs: no actual hardware/ADB calls. These unused lifecycle
  * functions must link but are never called by this packing unit test. */
@@ -143,10 +150,10 @@ main(int argc,char **argv) {
     preview.memory=shared;
     preview.worker=(HANDLE)(uintptr_t)1; // only test push, no worker thread
     const unsigned before=clone_count;
-    CHECK(preview.frame_sink.ops->push(&preview.frame_sink,&frame));
+    CHECK(MLHQ_TEST_PUSH_ACCEPTED(preview.frame_sink.ops->push(&preview.frame_sink,&frame)));
     CHECK(clone_count==before);
     mlhq_u32(shared,MLHQ_G_CONSUMER_ACTIVE,1);
-    CHECK(preview.frame_sink.ops->push(&preview.frame_sink,&frame));
+    CHECK(MLHQ_TEST_PUSH_ACCEPTED(preview.frame_sink.ops->push(&preview.frame_sink,&frame)));
     CHECK(clone_count==before+1);
     AVFrame *queued=InterlockedExchangePointer((void*volatile*)&preview.newest,NULL);
     CHECK(queued!=NULL);
@@ -157,8 +164,8 @@ main(int argc,char **argv) {
     sc_mirroleap_hq_sink_init(&not_connected);
     CHECK(not_connected.frame_sink.ops->open(
         &not_connected.frame_sink,NULL,NULL));
-    CHECK(not_connected.frame_sink.ops->push(
-        &not_connected.frame_sink,&frame));
+    CHECK(MLHQ_TEST_PUSH_ACCEPTED(not_connected.frame_sink.ops->push(
+        &not_connected.frame_sink,&frame)));
     not_connected.frame_sink.ops->close(&not_connected.frame_sink);
 
     if (argc>1) {

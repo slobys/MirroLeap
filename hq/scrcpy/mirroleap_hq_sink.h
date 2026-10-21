@@ -23,6 +23,9 @@ struct sc_mirroleap_hq_sink {
     volatile LONG stopping;
     void * volatile newest; /* owned AVFrame* via InterlockedExchangePointer */
     uint32_t next_slot;
+#ifdef MLHQ_ENABLE_D3D11
+    volatile LONG last_enqueued_at; // bounded GPU texture refs on decode thread
+#endif
 };
 void sc_mirroleap_hq_sink_init(struct sc_mirroleap_hq_sink *sink);
 #endif

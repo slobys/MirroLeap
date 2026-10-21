@@ -1,0 +1,162 @@
+name: Experimental scrcpy 5.0.1 HQ hardware-frame lab (NOT release)
+
+on:
+  push:
+    branches:
+      - feat/hq-scrcpy501-rawframe
+    paths:
+      - 'hq/**'
+      - 'scripts/check_hq_v5_bridge.py'
+      - '.github/workflows/hq-scrcpy5-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  c-reference-stubs:
+    name: CPU YUV and simulated D3D11 hardware-frame C unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the v5 source patch does not alter installed MirroLeap
+        run: python3 scripts/check_hq_v5_bridge.py
+      - name: Compile existing v4 protocol tests -Werror
+        run: |
+          gcc -std=c11 -D_WIN32 -Wall -Wextra -Werror \
+            -Ihq/tests/stubs -Ihq/include \
+            hq/tests/test_sink.c -o /tmp/mirroleap-hq-v4-test
+          /tmp/mirroleap-hq-v4-test
+      - name: Compile scrcpy v5 enum and fake D3D11 frame sink -Werror
+        run: |
+          gcc -std=c11 -D_WIN32 -Wall -Wextra -Werror \
+            -Ihq/tests/stubs -Ihq/include \
+            hq/tests/test_sink_v5.c -o /tmp/mirroleap-hq-v5-test
+          /tmp/mirroleap-hq-v5-test
+
+  windows-patched-scrcpy5:
+    name: Pinned Windows D3D11VA decoder client, not an application installer
+    runs-on: windows-latest
+    timeout-minutes: 85
+    needs: c-reference-stubs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Clone precisely reviewed scrcpy 5.0.1
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch v5.0.1 https://github.com/Genymobile/scrcpy.git hq/upstream-v5
+          if ($LASTEXITCODE -ne 0) { throw 'Clone of pinned scrcpy v5.0.1 failed' }
+          $head = (git -C hq/upstream-v5 rev-parse HEAD).Trim()
+          if ($head -ne 'a60891aea193d92e7e5c3942700eca63f9d19a5f') {
+            throw 'Unreviewed upstream scrcpy revision'
+          }
+          python hq/apply_scrcpy_v5.py hq/upstream-v5
+          if ($LASTEXITCODE -ne 0) { throw 'scrcpy5 HQ source patch failed' }
+          python scripts/check_hq_v5_bridge.py
+          if ($LASTEXITCODE -ne 0) { throw 'HQ C bridge guards failed' }
+      - name: Windows v2 shared-frame handshake probe without Android
+        shell: pwsh
+        run: ./hq/windows-frame-probe.ps1 -SelfTest
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-sdl3
+      - name: Build REAL scrcpy 5.0.1 with patched D3D11-safe secondary frame sink
+        shell: msys2 {0}
+        run: |
+          meson setup hq/upstream-v5-build hq/upstream-v5 \
+            --buildtype=release -Dcompile_server=false \
+            -Dcompile_app=true -Dusb=false -Dv4l2=false -Dportable=true
+          meson compile -C hq/upstream-v5-build
+          ./hq/upstream-v5-build/app/scrcpy.exe --version | grep -F 'MirroLeap HQ scrcpy5 raw-frame v3 (experimental)'
+      - name: Verify official runtime SHA256 and assemble separate developer-only client
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip='hq/scrcpy-win64-v5.0.1.zip'
+          Invoke-WebRequest -Uri 'https://github.com/Genymobile/scrcpy/releases/download/v5.0.1/scrcpy-win64-v5.0.1.zip' -OutFile $zip
+          $sha=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected='b12a2c4ee8be317422451fc7dcf8ee20a71b5ea7ef9ad73ddd825a25316227a5'
+          if ($sha -ne $expected) { throw 'Official scrcpy 5.0.1 runtime ZIP hash mismatch' }
+          Expand-Archive -LiteralPath $zip -DestinationPath hq/verified-runtime
+          $src=(Get-ChildItem hq/verified-runtime -Directory | Select-Object -First 1).FullName
+          if (-not $src) { throw 'Runtime root folder missing' }
+          $dst='hq/lab-scrcpy5'
+          New-Item -ItemType Directory -Force $dst | Out-Null
+          Copy-Item -Path (Join-Path $src '*') -Destination $dst -Recurse -Force
+          Copy-Item hq/upstream-v5-build/app/scrcpy.exe -Destination "$dst/scrcpy.exe" -Force
+          foreach ($required in @('scrcpy.exe','adb.exe','scrcpy-server')) {
+            if (-not (Test-Path "$dst/$required")) {throw "Missing $required"}
+          }
+      - name: Include exact UCRT64 dependencies used by patched client
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          target=hq/lab-scrcpy5
+          declare -A seen=()
+          pending=("$target/scrcpy.exe")
+          for ((i=0; i<${#pending[@]}; i++)); do
+            binary="${pending[$i]}"
+            while IFS= read -r dll; do
+              [[ -n "$dll" ]] || continue
+              key="${dll,,}"
+              if [[ -v 'seen[$key]' ]]; then continue; fi
+              seen[$key]=1
+              match="$(find /ucrt64/bin -maxdepth 1 -type f -iname "$dll" -print -quit)"
+              if [[ -n "$match" ]]; then
+                cp -f "$match" "$target/"
+                pending+=("$target/$(basename "$match")")
+              fi
+            done < <(objdump -p "$binary" | sed -n 's/^[[:space:]]*DLL Name: //p')
+          done
+      - name: Launch patched scrcpy5 OUTSIDE MSYS2 and verify identity + D3D11 flag
+        shell: pwsh
+        run: |
+          $exe='hq/lab-scrcpy5/scrcpy.exe'
+          $version=(& $exe --version 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0 -or
+              -not $version.Contains('scrcpy 5.0.1') -or
+              -not $version.Contains('MirroLeap HQ scrcpy5 raw-frame v3 (experimental)')) {
+            throw 'Patched scrcpy 5.0.1 version/launch check failed'
+          }
+          $help=(& $exe --help 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0 -or -not $help.Contains('--hwdec')) {
+            throw 'Modern scrcpy --hwdec option missing'
+          }
+      - name: Package portable developer validation artifact - NOT MirroLeap updater
+        shell: pwsh
+        run: |
+          $out='hq-lab-output'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          @'
+          EXPERIMENT ONLY: patched scrcpy 5.0.1 D3D11VA-aware decoded frames
+          This binary is not signed, not a MirroLeap update, not a GPU HQ lens,
+          and has NOT been tested with a live Android device in this CI.
+          Never overwrite your stable scrcpy.exe or install into Program Files.
+          Run only for controlled frame receiver developer testing.
+          '@ | Set-Content -LiteralPath "$out/README-EXPERIMENT.txt"
+          Compress-Archive -Path 'hq/lab-scrcpy5/*' -DestinationPath "$out/scrcpy5-hq-lab.zip" -CompressionLevel Optimal
+          Get-FileHash "$out/scrcpy5-hq-lab.zip" -Algorithm SHA256 | ForEach-Object {
+            "$($_.Hash.ToLowerInvariant()) *scrcpy5-hq-lab.zip" |
+              Set-Content -LiteralPath "$out/SHA256SUMS.txt" -Encoding ascii
+          }
+          Get-ChildItem $out | Select-Object Name,Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scrcpy5-HQ-D3D11-lab-NOT-APP-INSTALLER
+          path: hq-lab-output/*
+          if-no-files-found: error
+      # Absolutely no GitHub Release, main branch update, app installer,
+      # auto-update manifest or user-facing success claim from this lab.

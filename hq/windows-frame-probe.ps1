@@ -1,11 +1,12 @@
 # MirroLeap experimental scrcpy HQ IPC probe (manual Windows diagnostic).
 # Copyright (c) 2026 MirroLeap contributors (MIT).
-# Requires the isolated, v4.0-pinned patched scrcpy.exe built by HQ CI.
+# Supports isolated pinned v4.0/v5.0.1 HQ clients; v5 + D3D11 is LAB ONLY.
 # NEVER enables HQ in the normal MirroLeap app or writes video to disk.
 param(
     [string]$PatchedScrcpy = "",
     [string]$Serial = "",
     [int]$Seconds = 15,
+    [switch]$D3D11,
     [switch]$SelfTest
 )
 Set-StrictMode -Version Latest
@@ -68,11 +69,12 @@ try {
 
     [byte[]]$magic = 0x4d, 0x4c, 0x48, 0x51
     $access.WriteArray([long]0, $magic, 0, 4)
-    Set-U32 $access 4 ([uint32]1)
+    Set-U32 $access 4 ([uint32]2)  # shared-memory protocol v2
     Set-U32 $access 8 ([uint32]$capacity)
     Set-U32 $access 12 ([uint32]$slotBytes)
     Set-U32 $access 16 ([uint32]2)
     Set-U32 $access 20 $noFrame
+    Set-U32 $access 28 ([uint32]1) # real probe explicitly consumes frames
 
     if ($SelfTest) {
         # Simulate two producer publications with the SAME slot-local
@@ -98,7 +100,7 @@ try {
     }
 
     if ([string]::IsNullOrWhiteSpace($PatchedScrcpy)) {
-        throw "Specify -PatchedScrcpy with the TEST-ONLY scrcpy v4.0 executable."
+        throw "Specify -PatchedScrcpy with a verified experimental HQ v4.0/v5.0.1 client."
     }
     if ($Seconds -lt 3 -or $Seconds -gt 120) {
         throw "Probe interval must be 3..120 seconds."
@@ -111,14 +113,25 @@ try {
         [IO.Path]::GetFileName($resolved) -ne 'scrcpy.exe') {
         throw "This diagnostic requires an explicit patched scrcpy.exe file."
     }
+    # Fail closed if a normal/unmodified client was accidentally supplied.
+    # The version probe does not receive a frame token or touch phone data.
+    $identity = (& $resolved --version 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0 -or -not (
+        $identity.Contains('MirroLeap HQ decoded-frame v2 (experimental)') -or
+        $identity.Contains('MirroLeap HQ scrcpy5 raw-frame v3 (experimental)')
+    )) { throw 'The selected scrcpy client has not passed experimental HQ identity validation' }
+    if ($D3D11 -and -not $identity.Contains('scrcpy 5.0.1')) {
+        throw '-D3D11 requires the pinned scrcpy 5.0.1 experimental client'
+    }
     $info = New-Object Diagnostics.ProcessStartInfo
     $info.FileName = $resolved
     $info.WorkingDirectory = [IO.Path]::GetDirectoryName($resolved)
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $false
-    $info.Arguments = if ($Serial -ne '') {
-        '--serial ' + $Serial
-    } else { '' }
+    $clientArgs = @()
+    if ($D3D11) {$clientArgs += '--hwdec=d3d11va'}
+    if ($Serial -ne '') {$clientArgs += ('--serial ' + $Serial)}
+    $info.Arguments = $clientArgs -join ' '
     $info.EnvironmentVariables['MIRROLEAP_HQ_TOKEN'] = $nonce
     $process = [Diagnostics.Process]::Start($info)
     if (-not $process) {throw "Patched scrcpy could not be launched."}

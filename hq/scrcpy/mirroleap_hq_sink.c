@@ -8,6 +8,9 @@
 
 #include <libavutil/frame.h>
 #include <libavutil/pixfmt.h>
+#ifdef MLHQ_ENABLE_D3D11
+# include <libavutil/hwcontext.h>
+#endif
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,6 +95,54 @@ mlhq_frame_supported(const AVFrame *frame) {
     }
     return false;
 }
+
+// The hardware helper calls this YUV writer after the FFmpeg transfer.
+static void mlhq_publish(struct sc_mirroleap_hq_sink *sink,
+                         const AVFrame *frame);
+
+#ifdef MLHQ_ENABLE_D3D11
+// v5 D3D11VA AVFrame.data[0] is a GPU texture (slice in data[1]),
+// NOT a CPU YUV plane. The reader's old memcpy path must NEVER touch it.
+// FFmpeg hardware transfer is carried out only on our bounded worker, not
+// on the decoder's full-rate thread. Unavailable formats fall back to the
+// original Windows desktop lens instead of interrupting normal scrcpy video.
+static bool
+mlhq_hw_frame_supported(const AVFrame *frame) {
+    if (!frame || frame->format != AV_PIX_FMT_D3D11 ||
+        !frame->data[0] || !frame->hw_frames_ctx ||
+        frame->width < 2 || frame->height < 2 ||
+        (frame->width & 1) || (frame->height & 1) ||
+        (uint64_t)frame->width * (uint64_t)frame->height > MLHQ_MAX_PIXELS ||
+        frame->width > (int)MLHQ_MAX_WIDTH ||
+        frame->height > (int)MLHQ_MAX_HEIGHT) {
+        return false;
+    }
+    const AVHWFramesContext *frames =
+        (const AVHWFramesContext *)frame->hw_frames_ctx->data;
+    return frames && frames->sw_format == AV_PIX_FMT_NV12;
+}
+
+// GPU→CPU transfer is never performed on the scrcpy decoder / SDL threads.
+// Running it for the ENTIRE full-resolution frame is an interim fallback,
+// not the future GPU ROI/zero-copy magnifier.
+static void
+mlhq_publish_hw_or_cpu(struct sc_mirroleap_hq_sink *sink,
+                       const AVFrame *frame) {
+    if (frame->format != AV_PIX_FMT_D3D11) {
+        mlhq_publish(sink, frame);
+        return;
+    }
+    if (!mlhq_hw_frame_supported(frame)) {return;}
+    AVFrame *cpu = av_frame_alloc();
+    if (!cpu) {return;}
+    if (av_hwframe_transfer_data(cpu, frame, 0) >= 0 &&
+        mlhq_frame_supported(cpu)) {
+        cpu->pts = frame->pts;
+        mlhq_publish(sink, cpu);
+    }
+    av_frame_free(&cpu);
+}
+#endif
 
 static void
 mlhq_copy_rows(unsigned char *dest, const uint8_t *src,
@@ -185,7 +236,11 @@ mlhq_worker(LPVOID context) {
                 // decoder, SDL and Android FPS stay entirely independent.
                 if (!last_copied_at ||
                     (DWORD)(now-last_copied_at)>=MLHQ_MIN_PUBLISH_MS) {
+#ifdef MLHQ_ENABLE_D3D11
+                    mlhq_publish_hw_or_cpu(sink,frame);
+#else
                     mlhq_publish(sink,frame);
+#endif
                     last_copied_at=now ? now : 1;
                 }
             }
@@ -251,21 +306,45 @@ mlhq_open(struct sc_frame_sink *receiver,const AVCodecContext *ctx,
     return true;
 }
 
-static bool
+// scrcpy 4.0 expects bool frame_sink.push; scrcpy 5.x expects
+// enum sc_sink_result where SC_SINK_OK is ZERO (returning true is an error!).
+#ifdef MLHQ_ENABLE_D3D11
+# define MLHQ_PUSH_RESULT enum sc_sink_result
+# define MLHQ_PUSH_OK SC_SINK_OK
+#else
+# define MLHQ_PUSH_RESULT bool
+# define MLHQ_PUSH_OK true
+#endif
+static MLHQ_PUSH_RESULT
 mlhq_push(struct sc_frame_sink *receiver,const AVFrame *frame) {
     struct sc_mirroleap_hq_sink *sink=
         (struct sc_mirroleap_hq_sink*)receiver;
-    if (!sink->worker || !mlhq_consumer_active(sink) ||
-        !mlhq_frame_supported(frame)) {return true;}
-    // Reference-counted buffer clone only: copying frame pixels is exclusively
-    // the worker's job, never a blocking operation on decoder / SDL threads.
+    if (!sink->worker || !mlhq_consumer_active(sink)) {return MLHQ_PUSH_OK;}
+#ifdef MLHQ_ENABLE_D3D11
+    if (!mlhq_frame_supported(frame) && !mlhq_hw_frame_supported(frame)) {
+        return MLHQ_PUSH_OK;
+    }
+    // D3D11VA frame refs are queued at <= 8fps and software frames at <=
+    // 20fps. No video decoder or SDL thread waits for a GPU→CPU transfer.
+    DWORD now=GetTickCount();
+    DWORD interval=frame->format==AV_PIX_FMT_D3D11 ? 125u :
+        MLHQ_MIN_PUBLISH_MS;
+    DWORD last=(DWORD)InterlockedCompareExchange(&sink->last_enqueued_at,0,0);
+    if (last && (DWORD)(now-last)<interval) {return MLHQ_PUSH_OK;}
+#else
+    if (!mlhq_frame_supported(frame)) {return MLHQ_PUSH_OK;}
+#endif
+    // Reference-counted GPU/CPU frame only, never a pixel copy here.
     AVFrame *clone=av_frame_clone(frame);
-    if (!clone) {return true;}
+    if (!clone) {return MLHQ_PUSH_OK;}
+#ifdef MLHQ_ENABLE_D3D11
+    InterlockedExchange(&sink->last_enqueued_at,(LONG)(now ? now : 1u));
+#endif
     AVFrame *stale=InterlockedExchangePointer(
         (void *volatile *)&sink->newest,clone);
     if (stale) {av_frame_free(&stale);} // latest-frame-wins
     SetEvent(sink->ready);
-    return true; // HQ failures MUST NOT terminate normal scrcpy playback
+    return MLHQ_PUSH_OK; // HQ failures MUST NOT terminate normal scrcpy playback
 }
 
 void
