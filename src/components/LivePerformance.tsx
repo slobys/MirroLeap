@@ -27,8 +27,10 @@ export default function LivePerformance({locale, device, running, config, setCon
     const available = running && performance && now - performance.observedAt < 12_000;
     const fps = available ? performance.fps.toFixed(1) : '—';
     const samples = available ? performance.samples.slice(-20) : [];
-    const decoderName = running && decoder && !['unknown','starting','retrying'].includes(decoder)
-        ? decoder : '—';
+    const decoderName = running && decoder === 'unreported'
+        ? (zh ? '核心未报告（无法确认）' : 'Not reported (unconfirmed)')
+        : running && decoder && !['unknown','starting','retrying'].includes(decoder)
+            ? decoder : '—';
 
     return <section className="ml-card flex flex-col gap-3" aria-label={zh ? '实时性能监控' : 'Live performance monitor'}>
         <h2 className="flex gap-2 items-center font-bold text-sm">

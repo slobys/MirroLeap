@@ -13,11 +13,20 @@
 
 use std::ffi::c_void;
 use std::ptr::{self, NonNull};
+use std::time::{Duration,Instant};
 use crate::hq_bridge_windows::HqMappingOwner;
 use crate::hq_geometry::ScreenViewport;
 use crate::hq_pipeline::render_decoded_hq_preview;
 
 const MAX_LENS:u32 = 720;
+// The CPU reference is opt-in: cap its redraws independently of scrcpy's
+// full-rate decoded video. HQ GPU work remains a future D3D11 stage.
+const HQ_MIN_PAINT_INTERVAL:Duration=Duration::from_millis(50);
+const HQ_MAX_PAINT_INTERVAL:Duration=Duration::from_millis(160);
+fn cpu_paint_interval(render_time:Duration)->Duration {
+    render_time.saturating_mul(3).clamp(HQ_MIN_PAINT_INTERVAL,HQ_MAX_PAINT_INTERVAL)
+}
+
 const EX_LAYERED:u32 = 0x0008_0000;
 const EX_TRANSPARENT:u32 = 0x0000_0020;
 const EX_TOOLWINDOW:u32 = 0x0000_0080;
@@ -192,6 +201,8 @@ pub struct HqDecodedCpuLens {
     cached_frame:Option<(u32,crate::hq_protocol::OwnedFrame)>,
     last_generation:u64,
     presented_rect:Option<(i32,i32,u32)>,
+    last_paint:Option<Instant>,
+    paint_interval:Duration,
 }
 
 impl HqDecodedCpuLens {
@@ -217,6 +228,7 @@ impl HqDecodedCpuLens {
             default_bitmap:NonNull::dangling(),
             bitmap:None,pixels:None,dimension:0,previous_key:None,cached_frame:None,
             last_generation:0,presented_rect:None,
+            last_paint:None,paint_interval:HQ_MIN_PAINT_INTERVAL,
         })
     }
 
@@ -373,6 +385,8 @@ impl HqDecodedCpuLens {
         unsafe {ShowWindow(self.hwnd.as_ptr(),0);}
         self.previous_key=None;
         self.presented_rect=None;
+        self.last_paint=None;
+        self.paint_interval=HQ_MIN_PAINT_INTERVAL;
     }
 
     /// True only after a complete valid source frame was rendered.
@@ -414,6 +428,13 @@ impl HqDecodedCpuLens {
         // Paused/static Android images keep full source resolution as the
         // pointer moves, without allocating/copying ~12 MiB every idle tick.
         if self.previous_key==Some(key) {return Ok(false);}
+        // Never copy a full-resolution frame or rerun expensive CPU YUV
+        // antialiasing before the per-frame CPU budget has elapsed. Latest
+        // frame wins; the SDL video pipeline is not limited by this cap.
+        if self.last_paint.is_some_and(|at|at.elapsed()<self.paint_interval) {
+            return Ok(false);
+        }
+        let started=Instant::now();
         if self.cached_frame.as_ref().map(|(id,_)|*id)!=Some(publish_id) {
             let next=match owner.try_latest_with_publish_id() {
                 Ok(frame)=>frame,
@@ -431,6 +452,8 @@ impl HqDecodedCpuLens {
         self.present_bgra(&image.bgra,left,top,lens_diameter)
             .inspect_err(|_|self.hide())?;
         self.previous_key=Some(key);
+        self.paint_interval=cpu_paint_interval(started.elapsed());
+        self.last_paint=Some(Instant::now());
         Ok(true)
     }
 }
@@ -579,6 +602,16 @@ mod tests {
         eprintln!("HQ composited round window: visible_pixels={first}, restored_pixels={corrected}");
         hq.hide();
     }
+    #[test]
+    fn hq_cpu_pacer_bounds_load_without_capping_the_scrcpy_video_stream() {
+        assert_eq!(cpu_paint_interval(Duration::from_millis(4)),
+            Duration::from_millis(50));
+        assert_eq!(cpu_paint_interval(Duration::from_millis(28)),
+            Duration::from_millis(84));
+        assert_eq!(cpu_paint_interval(Duration::from_millis(100)),
+            Duration::from_millis(160));
+    }
+
     #[test]
     fn lens_redraws_for_cursor_or_zoom_even_when_video_frame_is_unchanged() {
         let viewport=ScreenViewport{x:20,y:30,width:360,height:640};

@@ -2476,10 +2476,18 @@ async fn spawn_scrcpy_streams(
 
     let audio_error_flag = Arc::new(AtomicBool::new(false));
     let decoder_error_flag = Arc::new(AtomicBool::new(false));
+    // scrcpy v4 may emit FPS without ever reporting the host decoder. Show
+    // "not reported" rather than an endless startup spinner or an invented
+    // D3D11VA success. Later actual-decoder log messages override this.
+    let decoder_observed=Arc::new(AtomicBool::new(false));
+    let missing_decoder_reported=Arc::new(AtomicBool::new(false));
+    let experimental_hq_core=hq_token.is_some();
 
     let window_stdout = window.clone();
     let stdout_device = device.to_string();
     let stdout_decoder_error = decoder_error_flag.clone();
+    let stdout_decoder_observed=decoder_observed.clone();
+    let stdout_missing_decoder=missing_decoder_reported.clone();
     tokio::spawn(async move {
         let reader = BufReader::new(stdout);
         let mut lines = reader.lines();
@@ -2495,11 +2503,19 @@ async fn spawn_scrcpy_streams(
                                 stdout_decoder_error.store(true, Ordering::SeqCst);
                             }
                             if let Some(actual) = video_decoder::observed_decoder(&line) {
+                                stdout_decoder_observed.store(true,Ordering::Release);
                                 let _ = window_stdout.emit("scrcpy-video-decoder", json!({
                                     "device": stdout_device.as_str(), "mode": actual,
                                 }));
                             }
                             if let Some(fps) = video_decoder::parse_reported_fps(&line) {
+                                if experimental_hq_core &&
+                                   !stdout_decoder_observed.load(Ordering::Acquire) &&
+                                   !stdout_missing_decoder.swap(true,Ordering::AcqRel) {
+                                    let _=window_stdout.emit("scrcpy-video-decoder",json!({
+                                        "device":stdout_device.as_str(),"mode":"unreported",
+                                    }));
+                                }
                                 let _ = window_stdout.emit("scrcpy-performance", json!({
                                     "device": stdout_device.as_str(), "fps": fps,
                                     "skipped": video_decoder::parse_skipped_frames(&line),
@@ -2529,6 +2545,8 @@ async fn spawn_scrcpy_streams(
     let flag_clone = audio_error_flag.clone();
     let stderr_device = device.to_string();
     let stderr_decoder_error = decoder_error_flag.clone();
+    let stderr_decoder_observed=decoder_observed.clone();
+    let stderr_missing_decoder=missing_decoder_reported.clone();
     tokio::spawn(async move {
         let reader = BufReader::new(stderr);
         let mut lines = reader.lines();
@@ -2547,11 +2565,19 @@ async fn spawn_scrcpy_streams(
                                 stderr_decoder_error.store(true, Ordering::SeqCst);
                             }
                             if let Some(actual) = video_decoder::observed_decoder(&line) {
+                                stderr_decoder_observed.store(true,Ordering::Release);
                                 let _ = window_stderr.emit("scrcpy-video-decoder", json!({
                                     "device": stderr_device.as_str(), "mode": actual,
                                 }));
                             }
                             if let Some(fps) = video_decoder::parse_reported_fps(&line) {
+                                if experimental_hq_core &&
+                                   !stderr_decoder_observed.load(Ordering::Acquire) &&
+                                   !stderr_missing_decoder.swap(true,Ordering::AcqRel) {
+                                    let _=window_stderr.emit("scrcpy-video-decoder",json!({
+                                        "device":stderr_device.as_str(),"mode":"unreported",
+                                    }));
+                                }
                                 let _ = window_stderr.emit("scrcpy-performance", json!({
                                     "device": stderr_device.as_str(), "fps": fps,
                                     "skipped": video_decoder::parse_skipped_frames(&line),

@@ -61,7 +61,8 @@ export default function DecoderPerformance({config, setConfig, support, observed
   const modes = supported ? support?.modes || [] : [];
   const requested = config.hardwareDecoder || 'auto';
   const selected = modes.includes(requested) ? requested : 'auto';
-  const actual = observedMode && !['starting', 'retrying', 'unknown'].includes(observedMode)
+  const decoderUnreported=observedMode==='unreported';
+  const actual = observedMode && !['starting', 'retrying', 'unknown', 'unreported'].includes(observedMode)
     ? observedMode : null;
   const h265OldWindows = config.codec === 'h265' && support?.hostOs === 'windows' &&
     support.scrcpyVersion === '5.0.0';
@@ -73,7 +74,10 @@ export default function DecoderPerformance({config, setConfig, support, observed
       </h2>
       <span className="ml-muted text-xs">
         {zh ? '投屏核心' : 'scrcpy core'}：
-        {support?.scrcpyVersion ? `v${support.scrcpyVersion}` : (zh ? '未检测' : 'Not detected')}
+        {support?.scrcpyVersion ? (config.hqLens ?
+          (zh ? `普通 v${support.scrcpyVersion} · HQ 使用 scrcpy 4.0` :
+                `Normal v${support.scrcpyVersion} · HQ uses scrcpy 4.0`) :
+          `v${support.scrcpyVersion}`) : (zh ? '未检测' : 'Not detected')}
       </span>
     </div>
     <p className="ml-muted text-xs leading-relaxed">
@@ -141,6 +145,10 @@ export default function DecoderPerformance({config, setConfig, support, observed
         {zh ? '高清核心暂时无法启用：' : 'HQ core not enabled: '}{hqError}
       </p>}
       {config.hqLens && <p role="note" className="text-xs text-amber-600">
+        {zh ? '注意：HQ 实验核心基于 scrcpy 4.0，不支持普通 5.0.1 的 --hwdec=d3d11va。上方 D3D11 选项只适用于普通核心；HQ CPU 抗锯齿不是 GPU 视频解码，也不代表启用了硬解。'
+            : 'HQ uses experimental scrcpy 4.0 and cannot use the normal 5.0.1 --hwdec=d3d11va flag. The D3D11 selector describes your regular core only; CPU lens antialiasing is NOT GPU video decoding.'}
+      </p>
+      {config.hqLens && <p role="note" className="text-xs text-amber-600">
         {zh ? 'HQ 核心已就绪，普通投屏仍使用轻量默认核心。下次启动投屏后，从悬浮栏开启实时放大。HQ 当前为 CPU/GDI 原始帧预览，并非最终 D3D11 GPU 版本；无有效帧时会回退旧镜头。' :
           'Optional HQ core ready. Normal mirroring stays lightweight. Start a new mirror and enable live zoom in the hover rail. This is CPU/GDI decoded-frame preview, not final D3D11; it falls back if frames are unavailable.'}
       </p>}
@@ -153,7 +161,9 @@ export default function DecoderPerformance({config, setConfig, support, observed
       <Activity size={15} className={actual ? 'text-emerald-600' : 'ml-primary'}/>
       {zh ? '实际解码情况（来自 scrcpy 日志）：' : 'Observed decoder (scrcpy log): '}
       <span className="font-semibold">
-        {actual || (observedMode === 'retrying'
+        {actual || (decoderUnreported
+          ? (zh ? '核心未报告实际解码方式（无法确认 GPU）' : 'Core did not report its decoder (GPU unconfirmed)')
+          : observedMode === 'retrying'
           ? (zh ? '已触发兼容回退' : 'Retrying compatible decoder')
           : observedMode === 'starting'
             ? (zh ? '等待 scrcpy 输出' : 'Waiting for scrcpy log')

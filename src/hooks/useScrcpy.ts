@@ -443,8 +443,18 @@ export function useScrcpy() {
 
         const unlistenDecoder = listen<{device:string, mode:string}>(
             'scrcpy-video-decoder', ({payload}) => {
-                if (payload?.device && /^(starting|retrying|d3d11va|vaapi|videotoolbox|software|unknown)$/.test(payload.mode)) {
-                    setObservedDecoders(prev => ({...prev, [payload.device]:payload.mode}));
+                if (payload?.device && /^(starting|retrying|unreported|d3d11va|vaapi|videotoolbox|software|unknown)$/.test(payload.mode)) {
+                    setObservedDecoders(prev => {
+                        // Status from asynchronous stdout/stderr tasks may
+                        // arrive out of order. "Unreported" must never erase
+                        // a confirmed D3D11VA/software decoder report.
+                        const confirmed=prev[payload.device];
+                        if (payload.mode === 'unreported' && confirmed &&
+                            !['starting','retrying','unknown','unreported'].includes(confirmed)) {
+                            return prev;
+                        }
+                        return {...prev,[payload.device]:payload.mode};
+                    });
                 }
             }
         );

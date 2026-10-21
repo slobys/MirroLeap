@@ -454,6 +454,7 @@ fn work_loop(
     // If the desktop compositor refuses it, keep Magnification.dll working.
     let mut hq=owner.as_ref().and_then(|_|HqDecodedCpuLens::create().ok());
     let mut hq_hard_failures=0u8;
+    let mut hq_consumer_active=false;
     let _=started.send(Ok(()));
     loop {
         match rx.recv_timeout(Duration::from_millis(16)) {
@@ -475,6 +476,18 @@ fn work_loop(
             }
         }
         lens.apply_wheel(hq.as_ref().is_none_or(|preview|!preview.is_presenting()));
+        // The patched decoder is attached for the lifetime of this session,
+        // but it must NOT copy 2K YUV pixels until the real user actively
+        // opens the HQ lens AND the pointer is within the foreground phone.
+        // Turning the preview off returns scrcpy to its unmodified workload.
+        let wants_frames=hq.is_some() && lens.view.is_some_and(|view|
+            view.active && lens_geometry(view,lens.settings).is_some());
+        if wants_frames!=hq_consumer_active {
+            if let Some(owner)=owner.as_ref() {
+                owner.set_consumer_active(wants_frames);
+            }
+            hq_consumer_active=wants_frames;
+        }
         let mut presented_source=None;
         let mut deactivate_hq=false;
         if let (Some(owner),Some(preview),Some(view))=(owner.as_ref(),hq.as_mut(),lens.view) {
@@ -526,6 +539,10 @@ fn work_loop(
             // Repeated compositor failure: keep Magnification.dll operational
             // rather than hiding the entire live zoom for this session.
             hq=None;
+            if let Some(owner)=owner.as_ref() {
+                owner.set_consumer_active(false);
+            }
+            hq_consumer_active=false;
         }
         // Report real HWND presentation state without copying or logging
         // any device-frame bytes, screen coordinates, tokens or thumbnails.
@@ -540,6 +557,7 @@ fn work_loop(
         }
         lens.refresh();
     }
+    if let Some(owner)=owner.as_ref() {owner.set_consumer_active(false);}
     actual_mode.store(0,Ordering::Release);
     source_size.store(0,Ordering::Release);
     WHEEL_ACTIVE.store(0,Ordering::SeqCst);
