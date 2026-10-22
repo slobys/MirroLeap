@@ -173,6 +173,7 @@ pub fn run() {
             commands::open_official_community_link,
             commands::device_frame_ack,
             commands::device_frame_page_ready,
+            commands::device_frame_lens_aperture,
             commands::device_frame_capture_ack,
             commands::recenter_scrcpy_window,
             commands::set_active_device,

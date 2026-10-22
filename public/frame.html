@@ -131,16 +131,10 @@
       const last = stroke.points[stroke.points.length - 1];
       const x1 = first.x * w, y1 = first.y * h;
       const x2 = last.x * w, y2 = last.y * h;
-      if (stroke.tool === 'rect' || stroke.tool === 'mask') {
+      if (stroke.tool === 'rect') {
         const x = Math.min(x1, x2), y = Math.min(y1, y2);
         const width = Math.abs(x2 - x1), height = Math.abs(y2 - y1);
-        if (stroke.tool === 'mask') {
-          // On-screen shield; raw scrcpy recording/OBS may be unredacted.
-          ctx.fillStyle = '#090e19';
-          ctx.fillRect(x, y, Math.max(1,width), Math.max(1,height));
-        } else {
-          ctx.strokeRect(x, y, width, height);
-        }
+        ctx.strokeRect(x, y, width, height);
       } else if (stroke.tool === 'arrow') {
         const angle = Math.atan2(y2-y1, x2-x1);
         const tip = Math.max(12,Math.min(w,h)*.026);
@@ -206,7 +200,7 @@
     canvas.addEventListener('pointermove', event => {
       if (!enabled || !drawing) return;
       event.preventDefault();
-      if (['rect','arrow','mask'].includes(drawing.tool)) {
+      if (['rect','arrow'].includes(drawing.tool)) {
         drawing.points[1] = currentPoint(event);
       } else if (drawing.tool !== 'step') {
         drawing.points.push(currentPoint(event));
@@ -267,7 +261,7 @@
         if (!enabled) { drawing = null; redraw(); }
         return enabled;
       },
-      setTool(value) { if (['pen','erase','arrow','rect','step','mask'].includes(value)) tool = value; },
+      setTool(value) { if (['pen','erase','arrow','rect','step'].includes(value)) tool = value; },
       currentTool() { return tool; },
       setColor(value) {
         if (['#ffd54b', '#ff5252', '#ffffff', '#40e0d0'].includes(value)) {

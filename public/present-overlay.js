@@ -24,6 +24,23 @@
   };
 
   let drawPending = false;
+  let lastNativeCircleKey = '';
+  let lastNativeCircleAt = 0;
+  function publishSnapshotCircle(lensX,lensY,radius,w,h) {
+    const invoke=window.__TAURI__?.core?.invoke;
+    if (typeof invoke !== 'function' || mode !== 'magnifier' || !snapshot) return;
+    // Pass ONLY normalized geometry, never screenshot pixels. The native
+    // Win32 bezel punches a hole under SDL video and restores just this circle.
+    const centerX=lensX/w, centerY=lensY/h, radiusRatio=radius/Math.min(w,h);
+    const key=[centerX,centerY,radiusRatio].map(v=>Math.round(v*10000)).join(':');
+    const now=performance.now();
+    if (key===lastNativeCircleKey ||
+        (lastNativeCircleKey && now-lastNativeCircleAt<28)) return;
+    lastNativeCircleKey=key;
+    lastNativeCircleAt=now;
+    void invoke('device_frame_lens_aperture',{centerX,centerY,radiusRatio})
+      .catch(()=>{if(lastNativeCircleKey===key)lastNativeCircleKey='';});
+  }
   const minRadiusRatio = .11;
   const maxRadiusRatio = .43;
   const defaultRadiusRatio = .22;
@@ -71,6 +88,7 @@
       ? adjustable(x, radius + margin, w - radius - margin) : x;
     const lensY = mode === 'magnifier'
       ? adjustable(y, radius + margin, h - radius - margin) : y;
+    if (mode==='magnifier') publishSnapshotCircle(lensX,lensY,radius,w,h);
     ctx.save();
     if (mode === 'spotlight') {
       ctx.fillStyle = 'rgba(5,9,20,.73)';
@@ -127,7 +145,9 @@
       ctx.strokeStyle = '#07121b';
       ctx.lineWidth = 3;
       const label = snapshot ? '定格放大 · 非实时' : '请刷新放大快照';
-      const yText = lensY + radius + 24 < h ? lensY + radius + 18 : lensY - radius - 12;
+      // Keep this hint INSIDE the circular native HWND opening, otherwise
+      // WebView2's fallback surface can reveal a white strip behind it.
+      const yText = lensY + radius - 15;
       ctx.strokeText(label, lensX, yText, Math.max(60,w - 20));
       ctx.fillText(label, lensX, yText, Math.max(60,w - 20));
       ctx.restore();
@@ -204,6 +224,17 @@
     ready: true,
     mode() { return mode; },
     focusPoint() { return {...point}; },
+    // HWND-native aperture does not receive pointer events outside the
+    // snapshot circle. The Windows follower sends the actual screen cursor
+    // so the frozen lens can still move without ever painting a white sheet.
+    setPointerFromNative(x,y) {
+      if (mode!=='magnifier' || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+      const next={x:clamp(x),y:clamp(y)};
+      if (Math.abs(point.x-next.x)<.001 && Math.abs(point.y-next.y)<.001) return true;
+      point=next;
+      redraw();
+      return true;
+    },
     size() { return radiusRatio; },
     zoom() { return zoomFactor; },
     privacy() { return privacy; },
@@ -241,6 +272,7 @@
         snapshotToken++;
         privacy = 'off'; // never persist shielding across modes/devices
         liveCircle = null;
+        lastNativeCircleKey='';
       }
       mode = value;
       // Only these modes intentionally capture the pointer. The native

@@ -185,12 +185,13 @@ assert "DURATION_MS:u64=600" in native_click
 assert "ripple_completes_in_600ms_including_fade" in native_click
 
 
-for name in ("arrow", "rect", "step", "mask"):
+for name in ("arrow", "rect", "step"):
     assert "ink_" + name in frame_native, name
     assert "creator-" + name in phone_toolbar, name
     assert "stroke.tool === '" + name + "'" in frame_page, name
 assert 'scrcpy 原始录像' in read("README.md")
-assert '原始录屏/OBS' in phone_toolbar
+assert 'creator-mask' not in phone_toolbar and 'ink_mask" => Some(' not in frame_native
+assert '防窥' in phone_toolbar  # independent opt-in spotlight shade remains
 assert 'refresh_presenter_image(app, &device, None)' in frame_native, 'Snapshot mode must still refresh ADB stills'
 # Screen video must be magnified natively by Windows instead of polling
 # Android PNG screenshots, and never intercept taps or capture in background.

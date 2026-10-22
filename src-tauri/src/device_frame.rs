@@ -18,9 +18,10 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindo
 use tauri::webview::PageLoadEvent;
 use windows::Win32::Foundation::{HWND, POINT, RECT, LPARAM, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject,
+    ClientToScreen, CombineRgn, CreateEllipticRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject,
     GetMonitorInfoW, GetRgnBox, GetWindowRgn, PtInRegion,
-    MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ, RGN_AND, SetWindowRgn,
+    MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ,
+    RGN_AND, RGN_DIFF, RGN_OR, SetWindowRgn,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD,
@@ -34,7 +35,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindow, GetAncestor, GA_ROOT,
     GetWindowRect, GW_HWNDPREV, GetWindowThreadProcessId, WindowFromPoint,
     IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow,
-    GetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOPMOST, HWND_TOPMOST, HWND_NOTOPMOST,
+    GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, GWL_STYLE,
+    WS_CAPTION, WS_THICKFRAME, WS_SYSMENU, SWP_FRAMECHANGED,
+    WS_EX_TOPMOST, HWND_TOPMOST, HWND_NOTOPMOST,
     HWND_TOP, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
     SW_MINIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
 };
@@ -49,6 +52,55 @@ use crate::ScrcpyState;
 static ACTIVE_DRAGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static PRESENTATION_MODES: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
 static PRESENTATION_BUSY: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+/// Native HWND clipping is the last line of defense against an opaque
+/// WebView2 surface: never permit white pixels in the Android video aperture.
+/// A snapshot magnifier explicitly opens only its moving circular area.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+struct SnapshotCircle {x:u16,y:u16,r:u16} // values in ten-thousandths
+impl Default for SnapshotCircle {
+    fn default()->Self {Self{x:5000,y:5000,r:2200}}
+}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+enum ShellClip {Whole, VideoAperture, SnapshotCircle(SnapshotCircle)}
+static SNAPSHOT_CIRCLES: OnceLock<Mutex<HashMap<String,SnapshotCircle>>> = OnceLock::new();
+fn snapshot_circles()->&'static Mutex<HashMap<String,SnapshotCircle>> {
+    SNAPSHOT_CIRCLES.get_or_init(||Mutex::new(HashMap::new()))
+}
+fn shell_clip(device:&str)->ShellClip {
+    let mode=presentation_mode(device);
+    if is_inking(device) || mode=="spotlight" || presentation_privacy(device)!="off" {
+        ShellClip::Whole // deliberately visible pen strokes / explicit dimming
+    } else if mode=="magnifier" {
+        ShellClip::SnapshotCircle(snapshot_circles().lock().ok()
+            .and_then(|circles|circles.get(device).copied()).unwrap_or_default())
+    } else {
+        ShellClip::VideoAperture // normal mirror and separate live native lens
+    }
+}
+/// Geometry comes only from the active, local transparent phone frame.
+/// Avoid trusting a device serial or arbitrary HWND supplied by browser code.
+pub(crate) fn update_snapshot_circle(app:&AppHandle,caller:&tauri::Window,
+    center_x:f64,center_y:f64,radius_ratio:f64)->Result<(),String> {
+    let name=caller.label();
+    if !name.starts_with("phone-frame-") || !center_x.is_finite() ||
+       !center_y.is_finite() || !radius_ratio.is_finite() ||
+       !(0.0..=1.0).contains(&center_x) || !(0.0..=1.0).contains(&center_y) ||
+       !(0.10..=0.44).contains(&radius_ratio) {
+        return Err("Untrusted snapshot magnifier geometry".into());
+    }
+    let active=app.get_webview_window(name).ok_or("Phone frame no longer exists")?;
+    if active.hwnd().map_err(|e|e.to_string())? != caller.hwnd().map_err(|e|e.to_string())? {
+        return Err("Stale phone-frame lens geometry".into());
+    }
+    let device=app.state::<ScrcpyState>().processes.lock().map_err(|e|e.to_string())?
+        .keys().find(|d|label(d)==name).cloned()
+        .ok_or("No running phone owns the frame")?;
+    if presentation_mode(&device)!="magnifier" {return Err("Snapshot lens is inactive".into());}
+    let circle=SnapshotCircle{x:(center_x*10000.).round() as u16,
+        y:(center_y*10000.).round() as u16,r:(radius_ratio*10000.).round() as u16};
+    snapshot_circles().lock().map_err(|e|e.to_string())?.insert(device,circle);
+    Ok(())
+}
 // Visual-only per-device shading; never redacts raw scrcpy captures.
 static PRESENTATION_PRIVACY: OnceLock<Mutex<HashMap<String,&'static str>>> = OnceLock::new();
 fn privacy_levels()->&'static Mutex<HashMap<String,&'static str>> {
@@ -367,6 +419,7 @@ fn update_presentation_mode(app: &AppHandle, device: &str, mode: &'static str) {
     // The front-end setMode() clears its own shade and stale lens geometry.
     if presentation_mode(device) != mode || mode == "off" {
         if let Ok(mut levels)=privacy_levels().lock() {levels.remove(device);}
+        if let Ok(mut circles)=snapshot_circles().lock(){circles.remove(device);}
     }
     if let Ok(mut modes) = presentation_modes().lock() {
         if mode == "off" { modes.remove(device); }
@@ -583,21 +636,91 @@ fn native_outer_bezel_region(hwnd: HWND) -> Option<(RECT, i32, i32)> {
     },rx,ry))
 }
 
-fn apply_native_outer_bezel_clip(hwnd: HWND) -> Result<(), String> {
-    let (bounds,rx,ry) = native_outer_bezel_region(hwnd)
+/// The native window must never occupy the SDL pixels just because WebView2
+/// paints an opaque white fallback. Keep only the metal bezel (native region
+/// minus the Android client aperture). A frozen screenshot magnifier has one
+/// explicit circular exception; native live magnification uses another HWND.
+fn snapshot_circle_bounds(aperture:RECT,circle:SnapshotCircle)->RECT {
+    let width=(aperture.right-aperture.left).max(1);
+    let height=(aperture.bottom-aperture.top).max(1);
+    let cx=aperture.left+(width as i64 * circle.x as i64/10000) as i32;
+    let cy=aperture.top+(height as i64 * circle.y as i64/10000) as i32;
+    // Canvas uses radiusRatio * min(canvas.width,canvas.height).
+    let radius=(width.min(height) as i64*circle.r as i64/10000) as i32;
+    // Keep the teal ring and anti-alias shadow without exposing the page.
+    RECT {left:cx-radius-5,top:cy-radius-5,
+          right:cx+radius+6,bottom:cy+radius+6}
+}
+fn native_frame_without_caption(hwnd:HWND)->Result<(),String> {
+    // WebView2 may momentarily restore WS_CAPTION during native activation,
+    // making the visible "Device frame" titlebar and white inset appear.
+    let flags=(WS_CAPTION.0 | WS_THICKFRAME.0 | WS_SYSMENU.0) as isize;
+    let current=unsafe{GetWindowLongPtrW(hwnd,GWL_STYLE)};
+    if current&flags!=0 {
+        unsafe{SetWindowLongPtrW(hwnd,GWL_STYLE,current&!flags)};
+        unsafe{SetWindowPos(hwnd,None,0,0,0,0,
+            SWP_NOACTIVATE|SWP_NOZORDER|SWP_NOMOVE|SWP_NOSIZE|SWP_FRAMECHANGED)}
+            .map_err(|e|format!("Could not remove native phone frame titlebar: {e}"))?;
+    }
+    Ok(())
+}
+fn apply_native_outer_bezel_clip(hwnd: HWND,screen:ScreenRect,mode:ShellClip)->Result<(),String> {
+    let (bounds,rx,ry)=native_outer_bezel_region(hwnd)
         .ok_or("Phone frame HWND geometry is not ready for rounded clipping")?;
-    let region = unsafe { CreateRoundRectRgn(
-        bounds.left, bounds.top, bounds.right, bounds.bottom, 2*rx, 2*ry,
-    ) };
-    if region.0.is_null() { return Err("Could not allocate outer handset mask".into()); }
-    if unsafe { SetWindowRgn(hwnd, Some(region), true) } == 0 {
-        let _ = unsafe { DeleteObject(HGDIOBJ(region.0)) };
-        return Err("Windows refused the physical phone bezel shape".into());
+    let outer=unsafe{CreateRoundRectRgn(
+        bounds.left,bounds.top,bounds.right,bounds.bottom,2*rx,2*ry)};
+    if outer.0.is_null() {return Err("Could not allocate outer handset region".into());}
+    if mode!=ShellClip::Whole {
+        let aperture=match clip_window_rect(hwnd,screen) {
+            Ok(aperture)=>aperture,
+            Err(error)=>{
+                let _=unsafe{DeleteObject(HGDIOBJ(outer.0))};
+                return Err(error);
+            }
+        };
+        let Some((crx,cry))=native_clip_radius(screen.width,screen.height) else {
+            let _=unsafe{DeleteObject(HGDIOBJ(outer.0))};
+            return Err("Invalid native Android screen radius".into());
+        };
+        // Subtract the full screen area at OS-level, not CSS alpha-level.
+        // Even an entirely white WebView2 page cannot cover the video.
+        let hole=unsafe{CreateRoundRectRgn(
+            aperture.left-2,aperture.top-2,aperture.right+3,aperture.bottom+3,
+            2*(crx+2),2*(cry+2))};
+        if hole.0.is_null() {
+            let _=unsafe{DeleteObject(HGDIOBJ(outer.0))};
+            return Err("Could not allocate transparent video aperture".into());
+        }
+        let carved=unsafe{CombineRgn(Some(outer),Some(outer),Some(hole),RGN_DIFF)}.0>=2;
+        let _=unsafe{DeleteObject(HGDIOBJ(hole.0))};
+        if !carved {
+            let _=unsafe{DeleteObject(HGDIOBJ(outer.0))};
+            return Err("Could not carve out opaque video pixels".into());
+        }
+        if let ShellClip::SnapshotCircle(circle)=mode {
+            let region=snapshot_circle_bounds(aperture,circle);
+            let ring=unsafe{CreateEllipticRgn(region.left,region.top,region.right,region.bottom)};
+            if ring.0.is_null() {
+                let _=unsafe{DeleteObject(HGDIOBJ(outer.0))};
+                return Err("Could not create snapshot magnifier opening".into());
+            }
+            let joined=unsafe{CombineRgn(Some(outer),Some(outer),Some(ring),RGN_OR)}.0>=2;
+            let _=unsafe{DeleteObject(HGDIOBJ(ring.0))};
+            if !joined {
+                let _=unsafe{DeleteObject(HGDIOBJ(outer.0))};
+                return Err("Could not combine circular magnifier with bezel".into());
+            }
+        }
+    }
+    if unsafe{SetWindowRgn(hwnd,Some(outer),true)}==0 {
+        let _=unsafe{DeleteObject(HGDIOBJ(outer.0))};
+        return Err("Windows refused the native no-white-video aperture".into());
     }
     Ok(())
 }
 
-fn native_outer_bezel_clip_intact(hwnd: HWND) -> bool {
+
+fn native_outer_bezel_clip_intact(hwnd: HWND,screen:ScreenRect,mode:ShellClip) -> bool {
     let Some((bounds,rx,ry)) = native_outer_bezel_region(hwnd) else { return false };
     let region = unsafe { CreateRectRgn(0,0,0,0) };
     if region.0.is_null() { return false; }
@@ -618,8 +741,21 @@ fn native_outer_bezel_clip_intact(hwnd: HWND) -> bool {
             && !unsafe { PtInRegion(region,bounds.right-2,bounds.top) }.as_bool()
             && !unsafe { PtInRegion(region,bounds.left,bounds.bottom-2) }.as_bool()
             && !unsafe { PtInRegion(region,bounds.right-2,bounds.bottom-2) }.as_bool()
-            && unsafe { PtInRegion(region,
-                (bounds.right+bounds.left)/2,(bounds.bottom+bounds.top)/2) }.as_bool();
+            && match mode {
+                ShellClip::Whole => unsafe{PtInRegion(region,
+                    (bounds.right+bounds.left)/2,(bounds.bottom+bounds.top)/2)}.as_bool(),
+                ShellClip::VideoAperture => clip_window_rect(hwnd,screen).is_ok_and(|a|{
+                    !unsafe{PtInRegion(region,(a.left+a.right)/2,(a.top+a.bottom)/2)}.as_bool()
+                }),
+                ShellClip::SnapshotCircle(circle) => clip_window_rect(hwnd,screen).is_ok_and(|a|{
+                    let lens=snapshot_circle_bounds(a,circle);
+                    let cx=(lens.left+lens.right)/2;
+                    let cy=(lens.top+lens.bottom)/2;
+                    let outside_x=if cx<(a.left+a.right)/2 {a.right-6} else {a.left+6};
+                    unsafe{PtInRegion(region,cx,cy)}.as_bool() &&
+                    !unsafe{PtInRegion(region,outside_x,(a.top+a.bottom)/2)}.as_bool()
+                }),
+            };
         // Four distant samples *along* the quarter-ellipse, not only the
         // absolute corners: catch partial rectangular black protrusions.
         // At radius/6 from both sides, a true rounded corner is still
@@ -787,7 +923,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     // SDL overwrites Windows DWM non-client attributes when leaving fullscreen.
     let mut dwm_checked_at: Option<Instant> = None;
     let mut last_dwm_report: Option<String> = None;
-    let mut last_outer_mask_geometry: Option<(usize,i32,i32)> = None;
+    let mut last_outer_mask_geometry: Option<(usize,i32,i32,ShellClip)> = None;
     let mut outer_mask_checked_at: Option<Instant> = None;
     let mut outer_mask_warned = false;
 
@@ -804,6 +940,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
     let mut topmost_checked_at: Option<Instant> = None;
     let mut clip_retry_reported = false;
     let mut last_privacy_circle: Option<crate::native_live_lens::PrivacyCircle> = None;
+    let mut last_snapshot_pointer: Option<(i32,i32)> = None;
     let mut ticker = tokio::time::interval(Duration::from_millis(50));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -1033,6 +1170,9 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             toolbar_position_checked_at=None;
             continue;
         }
+        // The cutout is mandatory: unlike a CSS mask, an OS HWND region
+        // cannot paint white pixels in the excluded SDL client at all.
+        let desired_shell_clip=shell_clip(&device);
         let actual_visible = overlay.hwnd().ok()
             .map(|h| unsafe { IsWindowVisible(h).as_bool() }).unwrap_or(false);
         let needs_restore = !shell_visible || !actual_visible;
@@ -1043,6 +1183,20 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
             if let Err(error)=overlay.set_decorations(false) {
                 let _=app.emit("scrcpy-log",format!(
                     "[FRAME] Transparent shell chrome not ready: {error}"));
+                continue;
+            }
+            let prepare=(||->Result<(),String>{
+                let shell=overlay.hwnd().map_err(|e|e.to_string())?;
+                native_frame_without_caption(shell)?;
+                // Move while HIDDEN so the native aperture uses the actual
+                // SDL client coordinates on the correct monitor and DPI.
+                place_overlay(&overlay,hwnd,frame)?;
+                if !fullscreen {apply_native_outer_bezel_clip(shell,screen,desired_shell_clip)?;}
+                Ok(())
+            })();
+            if let Err(error)=prepare {
+                let _=app.emit("scrcpy-log",format!(
+                    "[FRAME] No-white video region not ready; keeping overlay hidden: {error}"));
                 continue;
             }
             if overlay.show().is_ok() {
@@ -1115,13 +1269,13 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         } else if shell_visible {
             if let Some(shell) = shell_hwnd {
                 let geometry = native_outer_bezel_region(shell)
-                    .map(|(r,_,_)| (shell.0 as usize, r.right-r.left, r.bottom-r.top));
+                    .map(|(r,_,_)| (shell.0 as usize, r.right-r.left, r.bottom-r.top,desired_shell_clip));
                 let check_due = outer_mask_checked_at.is_none_or(|time|
                     time.elapsed() >= Duration::from_millis(350));
                 let mask_lost = geometry == last_outer_mask_geometry
-                    && check_due && !native_outer_bezel_clip_intact(shell);
+                    && check_due && !native_outer_bezel_clip_intact(shell,screen,desired_shell_clip);
                 if geometry.is_some() && (geometry != last_outer_mask_geometry || mask_lost) {
-                    match apply_native_outer_bezel_clip(shell) {
+                    match apply_native_outer_bezel_clip(shell,screen,desired_shell_clip) {
                         Ok(()) => {
                             if mask_lost {
                                 let _ = app.emit("scrcpy-log",
@@ -1166,7 +1320,7 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
                 let shell_chrome = crate::win_chrome::neutralize(shell);
                 diag.push_str(" | ");
                 diag.push_str(&crate::win_chrome::describe(
-                    "phone bezel", native_outer_bezel_clip_intact(shell),
+                    "phone bezel", native_outer_bezel_clip_intact(shell,screen,desired_shell_clip),
                     &shell_chrome,
                 ));
                 if crate::win_chrome::needs_chrome_repair(
@@ -1190,6 +1344,23 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
         // until a narrow desktop margin requires a compact stacked layout.
         let cursor = pointer();
         let dragging = is_dragging(&device);
+        // The OS region excludes all SDL pixels outside the still circle,
+        // which also excludes WebView pointer events there. Sync cursor
+        // geometry from Win32 instead of relying on Chromium hit-testing.
+        if presentation_mode(&device)=="magnifier" && shell_visible && !dragging {
+            if let Some((cx,cy))=cursor.filter(|(x,y)|
+                *x>=screen.x && *x<screen.x+screen.width &&
+                *y>=screen.y && *y<screen.y+screen.height) {
+                let normalized=((cx-screen.x)*10000/screen.width,
+                    (cy-screen.y)*10000/screen.height);
+                if last_snapshot_pointer!=Some(normalized) {
+                    last_snapshot_pointer=Some(normalized);
+                    let _=overlay.eval(format!(
+                        "window.scrcpyPresent?.setPointerFromNative({:.5},{:.5})",
+                        normalized.0 as f64/10000.,normalized.1 as f64/10000.));
+                }
+            }
+        } else {last_snapshot_pointer=None;}
         // This circular native HWND tracks the SDL screen; Windows' desktop
         // compositor refreshes the magnified movie frames independently
         // of pointer movement. Android never receives synthesized input.
@@ -1392,7 +1563,6 @@ fn ink_action_script(action: &str) -> Option<&'static str> {
         "ink_arrow" => Some("window.scrcpyInk?.setTool('arrow')"),
         "ink_rect" => Some("window.scrcpyInk?.setTool('rect')"),
         "ink_step" => Some("window.scrcpyInk?.setTool('step')"),
-        "ink_mask" => Some("window.scrcpyInk?.setTool('mask')"),
         "ink_color_yellow" => Some("window.scrcpyInk?.setColor('#ffd54b')"),
         "ink_color_red" => Some("window.scrcpyInk?.setColor('#ff5252')"),
         "ink_color_white" => Some("window.scrcpyInk?.setColor('#ffffff')"),
@@ -2402,6 +2572,7 @@ pub fn start(
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }
     if let Ok(mut present) = presenter_panels().lock() { present.remove(device); }
     if let Ok(mut clicks)=creator_clicks().lock(){clicks.remove(device);}
+    if let Ok(mut circles)=snapshot_circles().lock(){circles.remove(device);}
     if let Ok(mut ready)=frame_first_paints().lock(){ready.remove(&label(device));}
     cancel_live_zoom(device);
     cancel_creator_sampler(device);
@@ -2510,6 +2681,7 @@ pub fn close(app: &AppHandle, device: &str) {
     if let Ok(mut present) = presenter_panels().lock() { present.remove(device); }
     if let Ok(mut set) = ink_sessions().lock() { set.remove(device); }
     if let Ok(mut set) = ink_ready().lock() { set.remove(device); }
+    if let Ok(mut circles)=snapshot_circles().lock(){circles.remove(device);}
     if let Ok(mut ready)=frame_first_paints().lock(){ready.remove(&label(device));}
     update_presentation_mode(app, device, "off");
     if let Some(shell) = app.get_webview_window(&label(device)) { let _ = shell.close(); }
@@ -2519,6 +2691,26 @@ pub fn close(app: &AppHandle, device: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_cutout_and_snapshot_circle_follow_physical_screen_geometry() {
+        // 720p portrait/landscape, including a shifted lens near an edge.
+        for aperture in [
+            RECT{left:12,top:6,right:732,bottom:1286},
+            RECT{left:6,top:12,right:1286,bottom:732},
+        ] {
+            let default=snapshot_circle_bounds(aperture,SnapshotCircle::default());
+            let center_x=(aperture.left+aperture.right)/2;
+            let center_y=(aperture.top+aperture.bottom)/2;
+            assert!(default.left<center_x && default.right>center_x);
+            assert!(default.top<center_y && default.bottom>center_y);
+            let edge=snapshot_circle_bounds(aperture,
+                SnapshotCircle{x:8800,y:1300,r:1100});
+            assert!(edge.left>=aperture.left);
+            assert!(edge.top>=aperture.top-4);
+            assert!(edge.right<=aperture.right+11);
+        }
+    }
 
     #[test]
     fn frame_remains_hidden_until_native_and_webview_first_paint_are_both_ready() {
@@ -2581,7 +2773,7 @@ mod tests {
         assert!(ink_action_script("ink_arrow").is_some());
         assert!(ink_action_script("ink_rect").is_some());
         assert!(ink_action_script("ink_step").is_some());
-        assert!(ink_action_script("ink_mask").is_some());
+        assert!(ink_action_script("ink_mask").is_none());
         assert!(ink_action_script("ink_size_9").is_some());
         assert!(ink_action_script("ink_color_' + alert(1)").is_none());
         assert!(ink_action_script("exit").is_none());

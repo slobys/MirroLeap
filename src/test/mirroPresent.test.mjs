@@ -160,6 +160,26 @@ describe('MirroPresent real phone-frame Canvas behavior', () => {
     dom.window.close();
   });
 
+  it('publishes only bounded native lens geometry and follows the physical mouse through a WebView hole',async()=>{
+    const {dom,window}=boot();
+    const calls=[];
+    window.__TAURI__={core:{invoke:async(command,args)=>calls.push({command,args})}};
+    const lens=window.scrcpyPresent;
+    lens.setMode('magnifier');
+    await lens.loadSnapshot('data:image/png;base64,YWJj','portrait');
+    expect(calls.some(c=>c.command==='device_frame_lens_aperture')).toBe(true);
+    const info=calls.find(c=>c.command==='device_frame_lens_aperture').args;
+    expect(info.centerX).toBeCloseTo(.5);
+    expect(info.centerY).toBeCloseTo(.5);
+    expect(info.radiusRatio).toBeCloseTo(.22);
+    expect(lens.setPointerFromNative(.8,.3)).toBe(true);
+    expect(lens.focusPoint()).toEqual({x:.8,y:.3});
+    expect(lens.setPointerFromNative(Infinity,.2)).toBe(false);
+    lens.setMode('off');
+    expect(lens.setPointerFromNative(.2,.2)).toBe(false);
+    dom.window.close();
+  });
+
   it('clears snapshots on rotation and does not mutate existing pen marks', async () => {
     const {dom,window} = boot();
     const ink=window.document.getElementById('annotation');

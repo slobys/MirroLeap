@@ -3736,6 +3736,20 @@ pub async fn download_scrcpy(
 }
 
 
+/// Trusted local frame publishes only its moving frozen-circle geometry;
+/// native HWND clipping prevents white WebView2 pixels covering SDL video.
+#[tauri::command]
+pub fn device_frame_lens_aperture(
+    window:Window,app_handle:tauri::AppHandle,
+    center_x:f64,center_y:f64,radius_ratio:f64,
+)->Result<(),String> {
+    #[cfg(target_os="windows")]
+    {crate::device_frame::update_snapshot_circle(&app_handle,&window,center_x,center_y,radius_ratio)}
+    #[cfg(not(target_os="windows"))]
+    {let _=(window,app_handle,center_x,center_y,radius_ratio);
+     Err("Native video aperture requires Windows".into())}
+}
+
 /// Only the local phone-frame page may report SVG + transparent first paint.
 /// The active HWND/label is verified natively; JS supplies no device or URL.
 #[tauri::command]

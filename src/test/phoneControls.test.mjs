@@ -127,15 +127,14 @@ describe('real Tauri phone-controls HTML', () => {
     await nextTask();
     expect(document.body.dataset.inkPage).toBe('creator');
     expect(actions).toContain('ink_arrow');
-    for (const action of ['rect','step','mask']) {
+    for (const action of ['rect','step']) {
       document.getElementById('creator-'+action).click();
       await nextTask();
       expect(actions).toContain('ink_'+action);
       expect(document.body.dataset.inkTool).toBe(action);
     }
-    expect(document.getElementById('ink-privacy-note').textContent)
-      .toMatch(/原始录屏\/OBS/);
-    expect(document.getElementById('creator-mask').getAttribute('aria-pressed')).toBe('true');
+    expect(document.getElementById('creator-mask')).toBeNull();
+    expect(actions).not.toContain('ink_mask');
     document.getElementById('ink-basic-tab').click();
     await nextTask();
     expect(document.body.dataset.inkTool).toBe('pen');

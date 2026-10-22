@@ -184,7 +184,7 @@ assert 'onHqToggle' not in read('src/components/DecoderPerformance.tsx')
 assert '"hq-preview-core/scrcpy-hq-bin"' not in mirroleap_config
 assert '"productName": "MirroLeap"' in mirroleap_config
 assert '"identifier": "com.kb.scrcpy-gui-v3"' in mirroleap_config
-assert '"version": "5.3.7"' in mirroleap_config
+assert '"version": "5.3.8"' in mirroleap_config
 assert 'write-updater-manifest.mjs' in workflow
 assert 'MirroLeap_${version}_x64-setup.exe' in workflow
 assert 'MIRROLEAP_HQ_CORE_SHA256' in runtime

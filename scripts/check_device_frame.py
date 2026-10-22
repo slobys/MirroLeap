@@ -154,9 +154,18 @@ assert "left: -overscan, top: -overscan" in backend
 assert "frame.x-window_rect.left-overscan" in backend
 assert "native_corner_mask_respects_svg_antialias_at_common_windows_dpi" in rust
 assert "bezel_outer_clip_radii(" in rust and "native_outer_bezel_clip_intact(" in backend
-assert "apply_native_outer_bezel_clip(shell)" in backend
+assert "apply_native_outer_bezel_clip(shell,screen,desired_shell_clip)" in backend
 assert "last_outer_mask_geometry" in backend
 assert "GetWindowRgn(hwnd,region)" in backend
+assert "RGN_DIFF" in backend and "CreateEllipticRgn" in backend and "RGN_OR" in backend
+assert "native_frame_without_caption(shell)" in backend
+assert "if mode!=ShellClip::Whole" in backend
+assert "ShellClip::VideoAperture" in backend and "ShellClip::SnapshotCircle" in backend
+assert "device_frame_lens_aperture" in (root/'src-tauri/src/commands.rs').read_text()
+assert "setPointerFromNative" in (root/'public/present-overlay.js').read_text()
+assert 'id="creator-mask"' not in controls_page
+assert '"ink_mask" => Some(' not in backend
+assert "stroke.tool === 'mask'" not in page
 assert "CombineRgn(Some(region),Some(video_region),Some(physical),RGN_AND)" in backend
 assert "Restored phone body HWND silhouette after fullscreen" in backend
 assert "fn bezel_outer_region_rejects_square_window_corners_after_fullscreen()" in rust

@@ -276,13 +276,11 @@
       background:rgba(113,129,147,.17);border-radius:7px;}
     #ink-tools>.palette-heading {display:none;}
     #creator-shapes {display:none;align-items:center;gap:4px;
-      grid-template-columns:repeat(4,minmax(0,1fr));width:100%;flex:none;}
+      grid-template-columns:repeat(3,minmax(0,1fr));width:100%;flex:none;}
     #creator-shapes button {width:100%;height:36px;min-height:36px;font-size:11px;
       background:rgba(113,129,147,.14);}
     body[data-ink-page="creator"] #basic-ink-actions {display:none;}
     body[data-ink-page="creator"] #creator-shapes {display:grid;}
-    #ink-privacy-note {display:none;font-size:10px;color:#ffcc75;line-height:13px;}
-    body[data-ink-page="creator"] #ink-privacy-note {display:block;}
     body[data-ink-page="creator"] #ink-tools .swatches,
     body[data-ink-page="creator"] #ink-tools .sizes {display:none;}
     .swatches { justify-items: center; }
@@ -362,7 +360,7 @@
     <div id="ink-tools" role="group" aria-label="画笔工具">
       <div class="ink-pages" role="group" aria-label="标注工具分类">
         <button id="ink-basic-tab" class="active" aria-pressed="true" title="画笔、橡皮和撤销">基础画笔</button>
-        <button id="ink-creator-tab" aria-pressed="false" title="箭头、矩形、步骤和遮挡">创作者</button>
+        <button id="ink-creator-tab" aria-pressed="false" title="箭头、矩形和步骤编号">创作者</button>
       </div>
       <div class="palette-actions" id="basic-ink-actions">
       <button id="pen" aria-label="画笔" aria-pressed="true" class="active" title="画笔">
@@ -386,13 +384,11 @@
         </svg>
       </button>
       </div>
-      <div id="creator-shapes" role="group" aria-label="MirroCreator 步骤标注与视觉遮挡">
+      <div id="creator-shapes" role="group" aria-label="MirroCreator 步骤标注">
         <button id="creator-arrow" aria-pressed="false" aria-label="箭头标注" title="拖动画箭头">➤</button>
         <button id="creator-rect" aria-pressed="false" aria-label="矩形标注" title="拖动框选重点">▢</button>
         <button id="creator-step" aria-pressed="false" aria-label="步骤编号" title="点击放置 1 到 9 的步骤编号">①</button>
-        <button id="creator-mask" aria-pressed="false" aria-label="隐私遮挡" title="仅覆盖演示图层，原始录屏和 OBS 单窗口采集可能没有遮挡">▦</button>
       </div>
-      <div id="ink-privacy-note" role="note">注意：遮挡只在演示图层可见，原始录屏/OBS 可能泄露信息！</div>
       <div class="palette-heading">颜色</div>
       <div class="swatches" aria-label="画笔颜色">
         <button id="yellow" class="selected" aria-label="黄色" title="黄色" style="background:#ffd54b"></button>
@@ -736,7 +732,7 @@
         for (const [name,tool] of [
           ['pen','pen'],['eraser','eraser'],
           ['creator-arrow','arrow'],['creator-rect','rect'],
-          ['creator-step','step'],['creator-mask','mask']
+          ['creator-step','step']
         ]) {
           const button=document.getElementById(name);
           const active=tool===which;
@@ -964,18 +960,11 @@
       document.getElementById('ink-creator-tab').addEventListener('click',()=>{
         void act('ink_arrow',()=>{setInkPage('creator');chooseTool('arrow');});
       });
-      let maskWarningShown=false;
       for (const [name,tool] of [
-        ['arrow','arrow'],['rect','rect'],['step','step'],['mask','mask']
+        ['arrow','arrow'],['rect','rect'],['step','step']
       ]) {
         document.getElementById('creator-'+name).addEventListener('click',()=>{
-          void act('ink_'+name,()=>{
-            setInkPage('creator');chooseTool(tool);
-            if (name==='mask' && !maskWarningShown) {
-              maskWarningShown=true;
-              window.alert('注意：遮挡只是在投屏表面覆盖一个矩形！scrcpy 原始录制、OBS 单窗口采集可能仍包含未遮挡的敏感内容。请务必检查最终录像。');
-            }
-          });
+          void act('ink_'+name,()=>{setInkPage('creator');chooseTool(tool);});
         });
       }
       document.getElementById('pen').addEventListener('click', () => {

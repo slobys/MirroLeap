@@ -48,7 +48,7 @@ function createFrame() {
 }
 
 describe('actual MirroCreator transparent phone overlay',()=>{
-  it('draws normalized arrow, rectangle, numbered steps, and opaque mask on the ink canvas',()=>{
+  it('draws arrows, outlined rectangles and steps but rejects removed privacy-masking tools',()=>{
     const {dom,draw,place}=createFrame();
     const ink=dom.window.scrcpyInk;
     expect(ink.ready).toBe(true);
@@ -65,15 +65,15 @@ describe('actual MirroCreator transparent phone overlay',()=>{
     expect(draw.some(call=>call.method==='fillText'&&call.args[0]==='1')).toBe(true);
     expect(draw.some(call=>call.method==='fillText'&&call.args[0]==='2')).toBe(true);
     ink.setTool('mask');
-    place('pointerdown',20,30);place('pointermove',110,180);place('pointerup',110,180);
+    expect(ink.currentTool()).toBe('step');
+    expect(ink.captureSnapshot().strokes).toBe(4);
     expect(draw.some(call=>call.method==='fillRect'&&call.args[2]>0&&call.args[3]>0))
-      .toBe(true);
-    expect(ink.captureSnapshot().strokes).toBe(5);
+      .toBe(false);
     ink.setEnabled(false);
     expect(dom.window.document.body.classList.contains('inking')).toBe(false);
-    expect(ink.captureSnapshot().strokes).toBe(5);
-    ink.undo();
     expect(ink.captureSnapshot().strokes).toBe(4);
+    ink.undo();
+    expect(ink.captureSnapshot().strokes).toBe(3);
     ink.clear();
     expect(()=>ink.captureSnapshot()).toThrow('There are no pen strokes');
     dom.window.close();
