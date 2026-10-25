@@ -87,6 +87,8 @@ jobs:
         run: node scripts/windows-phone-frame-visual.mjs
       - name: Build original standalone desktop executable (unpatched, without any installer)
         run: npm run tauri build -- --no-bundle
+      - name: Windows GDI video/bezel no-white-seam native pixel tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib device_frame::tests
       # Linux CI excludes Windows-only Magnification.dll code. Run its
       # geometry, wheel bounds and source-centering tests on Windows too.
       - name: Windows native MirroCreator magnifier wheel tests

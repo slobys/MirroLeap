@@ -56,6 +56,7 @@ jobs:
             'hq_reference_render::tests','hq_pipeline::tests',
             'hq_cpu_lens_windows::tests','native_live_lens::tests',
             'native_click_effect::tests','hq_runtime::tests',
+            'device_frame::tests',
             'app_update::tests::v523_can_discover_and_install_standard_signed_v528_without_rebranding'
           )
           foreach ($test in $tests) {
