@@ -781,10 +781,14 @@ fn native_outer_bezel_clip_intact(hwnd: HWND,screen:ScreenRect,mode:ShellClip) -
                 .is_ok_and(|video| {
                     let x=(video.left+video.right)/2;
                     let y=(video.top+video.bottom)/2;
-                    let inside=[(video.left,y),(video.right-1,y),
-                        (x,video.top),(x,video.bottom-1)];
-                    let border=[(video.left-1,y),(video.right,y),
-                        (x,video.top-1),(x,video.bottom)];
+                    // The final rasterized pixel of a GDI rounded region
+                    // is platform-dependent. Probe 3px INSIDE and the pixel
+                    // just OUTSIDE the nominal video: the old 2px overcut
+                    // wrongly removed that outside pixel on bright desktops.
+                    let inside=[(video.left+3,y),(video.right-4,y),
+                        (x,video.top+3),(x,video.bottom-4)];
+                    let border=[(video.left-1,y),(video.right+1,y),
+                        (x,video.top-1),(x,video.bottom+1)];
                     inside.into_iter().all(|(px,py)|
                         !unsafe{PtInRegion(region,px,py)}.as_bool()) &&
                     border.into_iter().all(|(px,py)|
@@ -2767,12 +2771,23 @@ mod tests {
                     assert!(!inside_video(x,y));
                 }
             }
+            // Do NOT assume GDI includes the final right/bottom pixel on
+            // every Windows build. Regardless of its inclusive/exclusive
+            // raster rule, every tested screen-edge pixel must be painted
+            // by exactly one of the two HWNDs (never by white wallpaper).
             for &(x,y) in &[
                 (bounds.left,cy),(bounds.right,cy),
                 (cx,bounds.top),(cx,bounds.bottom),
             ] {
-                assert!(inside_video(x,y),"SDL clip lost edge pixel ({x},{y})");
-                assert!(!inside_shell(x,y),"Opaque WebView can cover SDL edge ({x},{y})");
+                assert_ne!(inside_video(x,y),inside_shell(x,y),
+                    "Desktop seam or overlap ({x},{y}) on {width}x{height}");
+            }
+            for &(x,y) in &[
+                (bounds.left+3,cy),(bounds.right-3,cy),
+                (cx,bounds.top+3),(cx,bounds.bottom-3),
+            ] {
+                assert!(inside_video(x,y),"Inner SDL pixels lost ({x},{y})");
+                assert!(!inside_shell(x,y),"Opaque WebView overlaps video ({x},{y})");
             }
             // Rasterized round corners also require a perfect complement:
             // no missing video AND bezel pixels on the curved transition.

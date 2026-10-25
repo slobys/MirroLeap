@@ -167,7 +167,7 @@ assert "video_hole.left,video_hole.top,video_hole.right,video_hole.bottom" in ba
 assert "aperture.left-2,aperture.top-2" not in backend
 assert "aperture.right+3,aperture.bottom+3" not in backend
 assert "no_white_desktop_pixel_between_video_and_native_bezel_at_all_dpi_scales" in backend
-assert "let border=[(video.left-1,y),(video.right,y)" in backend
+assert "let border=[(video.left-1,y),(video.right+1,y)" in backend
 assert "last_outer_mask_geometry" in backend
 assert "GetWindowRgn(hwnd,region)" in backend
 assert "RGN_DIFF" in backend and "CreateEllipticRgn" in backend and "RGN_OR" in backend
