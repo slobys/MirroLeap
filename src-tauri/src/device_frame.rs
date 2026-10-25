@@ -506,13 +506,26 @@ fn clip_window_rect(hwnd: HWND, screen: ScreenRect) -> Result<RECT, String> {
     })
 }
 
+/// One shared Win32 region geometry for both the SDL video and the hole
+/// carved out of the overlay. In v5.3.8 the hole extended 2 physical pixels
+/// past the SDL client on ALL four edges, revealing the white desktop behind
+/// the phone. Never enlarge the hole independently of the video clip.
+fn video_aperture_geometry(bounds: RECT, screen: ScreenRect) -> Option<(RECT,i32,i32)> {
+    let (rx,ry)=native_clip_radius(screen.width,screen.height)?;
+    Some((RECT{
+        left:bounds.left, top:bounds.top,
+        right:bounds.right.checked_add(1)?,
+        bottom:bounds.bottom.checked_add(1)?,
+    },rx,ry))
+}
+
 fn apply_native_corner_clip(hwnd: HWND, screen: ScreenRect) -> Result<(), String> {
     let bounds = clip_window_rect(hwnd, screen)?;
-    let (rx, ry) = native_clip_radius(screen.width, screen.height)
-        .ok_or("Invalid screen dimensions for native corner rounding")?;
-    let video_region = unsafe {
-        // +1 accounts for Win32's exclusive right/bottom clipping coordinates.
-        CreateRoundRectRgn(bounds.left, bounds.top, bounds.right + 1, bounds.bottom + 1, 2 * rx, 2 * ry)
+    let (aperture,rx,ry)=video_aperture_geometry(bounds,screen)
+        .ok_or("Invalid dimensions for native video corner rounding")?;
+    let video_region=unsafe {
+        CreateRoundRectRgn(aperture.left,aperture.top,
+            aperture.right,aperture.bottom,2*rx,2*ry)
     };
     if video_region.0.is_null() {
         return Err("Could not create native rounded video mask".into());
@@ -678,15 +691,17 @@ fn apply_native_outer_bezel_clip(hwnd: HWND,screen:ScreenRect,mode:ShellClip)->R
                 return Err(error);
             }
         };
-        let Some((crx,cry))=native_clip_radius(screen.width,screen.height) else {
+        let Some((video_hole,crx,cry))=video_aperture_geometry(aperture,screen) else {
             let _=unsafe{DeleteObject(HGDIOBJ(outer.0))};
             return Err("Invalid native Android screen radius".into());
         };
-        // Subtract the full screen area at OS-level, not CSS alpha-level.
-        // Even an entirely white WebView2 page cannot cover the video.
+        // Subtract EXACTLY the same Win32 pixels as the rounded SDL video
+        // region. Extending this rectangle outward by 2px (the v5.3.8 code)
+        // exposed bright 2px stripes on top/bottom/left/right when the desktop
+        // behind the phone was white. CSS transparency cannot seal that gap.
         let hole=unsafe{CreateRoundRectRgn(
-            aperture.left-2,aperture.top-2,aperture.right+3,aperture.bottom+3,
-            2*(crx+2),2*(cry+2))};
+            video_hole.left,video_hole.top,video_hole.right,video_hole.bottom,
+            2*crx,2*cry)};
         if hole.0.is_null() {
             let _=unsafe{DeleteObject(HGDIOBJ(outer.0))};
             return Err("Could not allocate transparent video aperture".into());
@@ -756,6 +771,26 @@ fn native_outer_bezel_clip_intact(hwnd: HWND,screen:ScreenRect,mode:ShellClip) -
                     !unsafe{PtInRegion(region,outside_x,(a.top+a.bottom)/2)}.as_bool()
                 }),
             };
+        // v5.3.8 had a perfect-looking outer region yet cut 2px beyond
+        // the SDL client: white desktop leaked in on all four straight
+        // edges. Check both sides of that seam on the native HWND itself.
+        if mode==ShellClip::VideoAperture {
+            valid &= clip_window_rect(hwnd,screen)
+                .and_then(|a| video_aperture_geometry(a,screen)
+                    .map(|(r,_,_)|r).ok_or("Video aperture geometry invalid".into()))
+                .is_ok_and(|video| {
+                    let x=(video.left+video.right)/2;
+                    let y=(video.top+video.bottom)/2;
+                    let inside=[(video.left,y),(video.right-1,y),
+                        (x,video.top),(x,video.bottom-1)];
+                    let border=[(video.left-1,y),(video.right,y),
+                        (x,video.top-1),(x,video.bottom)];
+                    inside.into_iter().all(|(px,py)|
+                        !unsafe{PtInRegion(region,px,py)}.as_bool()) &&
+                    border.into_iter().all(|(px,py)|
+                        unsafe{PtInRegion(region,px,py)}.as_bool())
+                });
+        }
         // Four distant samples *along* the quarter-ellipse, not only the
         // absolute corners: catch partial rectangular black protrusions.
         // At radius/6 from both sides, a true rounded corner is still
@@ -2691,6 +2726,74 @@ pub fn close(app: &AppHandle, device: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_white_desktop_pixel_between_video_and_native_bezel_at_all_dpi_scales() {
+        // Regression for the EXACT 2-pixel white stripes in v5.3.8.
+        // A white desktop behind the HWND must never be exposed between
+        // the shell's subtracted hole and the live SDL clip, in portrait or
+        // landscape at 100/125/150% scaling.
+        for (width,height) in [
+            (430,900),(538,1125),(645,1350),
+            (900,430),(1125,538),(1350,645),
+        ] {
+            let bounds=RECT{left:16,top:19,right:16+width,bottom:19+height};
+            let screen=ScreenRect{x:0,y:0,width,height};
+            let (video_bounds,rx,ry)=video_aperture_geometry(bounds,screen).unwrap();
+            assert_eq!(video_bounds.left,bounds.left);
+            assert_eq!(video_bounds.top,bounds.top);
+            assert_eq!(video_bounds.right,bounds.right+1);
+            assert_eq!(video_bounds.bottom,bounds.bottom+1);
+            let video=unsafe{CreateRoundRectRgn(
+                video_bounds.left,video_bounds.top,video_bounds.right,video_bounds.bottom,
+                2*rx,2*ry)};
+            let outer=unsafe{CreateRectRgn(bounds.left-30,bounds.top-30,
+                bounds.right+31,bounds.bottom+31)};
+            let shell=unsafe{CreateRectRgn(0,0,0,0)};
+            assert!(!video.0.is_null() && !outer.0.is_null() && !shell.0.is_null());
+            assert!(unsafe{CombineRgn(Some(shell),Some(outer),Some(video),RGN_DIFF)}.0>=2);
+            let inside_video=|x:i32,y:i32| unsafe{PtInRegion(video,x,y)}.as_bool();
+            let inside_shell=|x:i32,y:i32| unsafe{PtInRegion(shell,x,y)}.as_bool();
+            let cx=(bounds.left+bounds.right)/2;
+            let cy=(bounds.top+bounds.bottom)/2;
+            // SDL owns its first pixel and the whole video; the bezel owns
+            // the adjacent pixels. A +/-2px hole fails these assertions.
+            for offset in 1..=3 {
+                for &(x,y) in &[
+                    (bounds.left-offset,cy),(video_bounds.right+offset-1,cy),
+                    (cx,bounds.top-offset),(cx,video_bounds.bottom+offset-1),
+                ] {
+                    assert!(inside_shell(x,y),"Missing bezel pixel ({x},{y}) {width}x{height}");
+                    assert!(!inside_video(x,y));
+                }
+            }
+            for &(x,y) in &[
+                (bounds.left,cy),(bounds.right,cy),
+                (cx,bounds.top),(cx,bounds.bottom),
+            ] {
+                assert!(inside_video(x,y),"SDL clip lost edge pixel ({x},{y})");
+                assert!(!inside_shell(x,y),"Opaque WebView can cover SDL edge ({x},{y})");
+            }
+            // Rasterized round corners also require a perfect complement:
+            // no missing video AND bezel pixels on the curved transition.
+            for dx in (0..=rx.min(30)).step_by(3) {
+                for dy in (0..=ry.min(30)).step_by(3) {
+                    let x=bounds.left+dx;
+                    let y=bounds.top+dy;
+                    for &(sx,sy) in &[(x,y),
+                        (bounds.right-dx,y),
+                        (x,bounds.bottom-dy),
+                        (bounds.right-dx,bounds.bottom-dy)] {
+                        assert_ne!(inside_video(sx,sy),inside_shell(sx,sy),
+                            "Corner seam at ({sx},{sy}) with {width}x{height}");
+                    }
+                }
+            }
+            for region in [video,outer,shell] {
+                let _=unsafe{DeleteObject(HGDIOBJ(region.0))};
+            }
+        }
+    }
 
     #[test]
     fn video_cutout_and_snapshot_circle_follow_physical_screen_geometry() {

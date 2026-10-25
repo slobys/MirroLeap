@@ -155,6 +155,19 @@ assert "frame.x-window_rect.left-overscan" in backend
 assert "native_corner_mask_respects_svg_antialias_at_common_windows_dpi" in rust
 assert "bezel_outer_clip_radii(" in rust and "native_outer_bezel_clip_intact(" in backend
 assert "apply_native_outer_bezel_clip(shell,screen,desired_shell_clip)" in backend
+# v5.3.8 exposed exactly 2 white pixels on every straight screen edge:
+# its frame-window hole extended left/top -2 and right/bottom +3 beyond the
+# native SDL mask. Both masks MUST share one geometry helper at Win32 pixel
+# precision; no independent hole overscan may ever be reintroduced.
+assert "fn video_aperture_geometry(bounds: RECT, screen: ScreenRect)" in backend
+assert backend.count("video_aperture_geometry(bounds,screen)") >= 1
+assert "video_aperture_geometry(aperture,screen)" in backend
+assert "CreateRoundRectRgn(aperture.left,aperture.top" in backend
+assert "video_hole.left,video_hole.top,video_hole.right,video_hole.bottom" in backend
+assert "aperture.left-2,aperture.top-2" not in backend
+assert "aperture.right+3,aperture.bottom+3" not in backend
+assert "no_white_desktop_pixel_between_video_and_native_bezel_at_all_dpi_scales" in backend
+assert "let border=[(video.left-1,y),(video.right,y)" in backend
 assert "last_outer_mask_geometry" in backend
 assert "GetWindowRgn(hwnd,region)" in backend
 assert "RGN_DIFF" in backend and "CreateEllipticRgn" in backend and "RGN_OR" in backend
