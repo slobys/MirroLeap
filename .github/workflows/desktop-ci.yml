@@ -46,6 +46,7 @@ jobs:
       - run: python3 scripts/check_preview_clipboard.py
       - run: python3 scripts/check_wireless_center.py
       - run: python3 scripts/check_app_update.py
+      - run: python3 scripts/check_ios_airplay.py
       - run: python3 scripts/check_video_decoder.py
       - run: python3 scripts/check_mirropresent.py
       - run: python3 scripts/check_v5_integration.py

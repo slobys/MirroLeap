@@ -1,11 +1,12 @@
 import {
-    ArrowRight, Check, CircleHelp, Download, MonitorPlay, RefreshCw,
+    Airplay, ArrowRight, Check, CircleHelp, Download, MonitorPlay, RefreshCw,
     Settings2, ShieldCheck, Smartphone, Volume2, VolumeX, Wifi, Youtube, Send,
 } from 'lucide-react';
 import type { PendingAdbDevice, ScrcpyConfig } from '../hooks/useScrcpy';
 import {invoke} from '@tauri-apps/api/core';
 import {useState, type MouseEvent} from 'react';
 import VersionUpdateBadge from './VersionUpdateBadge';
+import IosReceiverPanel from './IosReceiverPanel';
 import { mirrorVideoSummary, videoLoadWarning } from '../utils/mirrorPresets';
 
 type Props = {
@@ -63,6 +64,7 @@ export default function CompactDashboard({
     // briefly closes/reopens scrcpy; never display a misleading Start button.
     const visibleRunning = running || isSwitchingResolution;
     const [communityError,setCommunityError] = useState<string|null>(null);
+    const [iosPanelOpen,setIosPanelOpen] = useState(false);
     const openCommunity = async(event:MouseEvent<HTMLAnchorElement>, destination:'youtube'|'telegram')=>{
         // Ordinary web previews may use the external link directly. The
         // installed WebView2 has no default external-window permission,
@@ -81,6 +83,7 @@ export default function CompactDashboard({
 
     return (
         <main className="ml-home flex flex-col w-full h-full min-h-0">
+            {iosPanelOpen && <IosReceiverPanel locale={locale} onClose={()=>setIosPanelOpen(false)}/>}
             <header className="ml-home-header flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                     <div className="ml-brand-icon shrink-0" aria-hidden="true">
@@ -132,10 +135,18 @@ export default function CompactDashboard({
                             {copy('选择手机，一键开始。其他功能都在设置里。', 'Choose your phone and start in one click.')}
                         </p>
                     </div>
-                    <span className={'ml-status-chip ' + (coreReady ? 'ml-ready' : 'ml-missing')} role="status">
-                        <span className="ml-status-dot" />
-                        {coreReady ? copy('引擎就绪', 'Engine ready') : copy('需要安装引擎', 'Engine missing')}
-                    </span>
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                        <button type="button" onClick={()=>setIosPanelOpen(true)}
+                            className="ml-secondary-action !min-h-9 px-3 inline-flex items-center gap-1.5 whitespace-nowrap"
+                            aria-label={copy('iPhone 和 iPad AirPlay 投屏', 'iPhone and iPad AirPlay mirroring')}>
+                            <Airplay size={16} />
+                            <span className="text-xs font-semibold">iOS AirPlay</span>
+                        </button>
+                        <span className={'ml-status-chip ' + (coreReady ? 'ml-ready' : 'ml-missing')} role="status">
+                            <span className="ml-status-dot" />
+                            {coreReady ? copy('引擎就绪', 'Engine ready') : copy('需要安装引擎', 'Engine missing')}
+                        </span>
+                    </div>
                 </div>
 
                 <div className="ml-dashboard-grid grid gap-4 items-stretch">

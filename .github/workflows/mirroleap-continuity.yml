@@ -46,6 +46,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "HQ v5 hardware-frame safety checks failed" }
           python scripts/check_app_update.py
           if ($LASTEXITCODE -ne 0) { throw "Update guard check failed" }
+          python scripts/check_ios_airplay.py
+          if ($LASTEXITCODE -ne 0) { throw "AirPlay receiver safety checks failed" }
           python scripts/check_v5_integration.py
           if ($LASTEXITCODE -ne 0) { throw "Legacy lens regression check failed" }
       - name: Native Windows HQ and original live-lens unit tests
@@ -57,6 +59,7 @@ jobs:
             'hq_cpu_lens_windows::tests','native_live_lens::tests',
             'native_click_effect::tests','hq_runtime::tests',
             'device_frame::tests',
+            'ios_airplay::tests',
             'app_update::tests::v523_can_discover_and_install_standard_signed_v528_without_rebranding'
           )
           foreach ($test in $tests) {

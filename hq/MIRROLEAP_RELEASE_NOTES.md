@@ -1,3 +1,11 @@
+# MirroLeap v5.4.0 · iPhone/iPad AirPlay 接收中心（Windows 首阶段）
+
+- 新增首页 iOS AirPlay 入口，支持从 MirroLeap 管理独立 iOS 接收组件的安装、运行、停止和基本诊断，Android scrcpy 原功能与旧数据保持不变。
+- AirPlay 引擎选用独立第三方 [moieric11/AirPlay-Windows](https://github.com/moieric11/AirPlay-Windows) **v0.4.1**（GPL-3.0）。组件不包含在主 EXE：仅由用户点击后从固定 GitHub 版本链接下载、SHA-256 全包校验、安全限制 ZIP 成员，再保存 GPL LICENSE 和 THIRD_PARTY_NOTICES。Windows 10/11 x64，无需另外安装 Bonjour。
+- 手机与电脑处于允许 mDNS/同网段设备互访的网络，iPhone/iPad「控制中心 → 屏幕镜像 → AirPlay-Windows」，配对提示由接收器自身显示。iOS 视频/音频暂时使用独立 Windows 窗口，接收器运行状态不代表 Apple 手机已连接。
+- 这是可真实接收 iOS 的第一阶段，但**尚未将 AirPlay 视频接到 MirroLeap 的 Android 专用手机外框、画笔、D3D11 HQ 放大和 ADB 操控**。屏幕镜像不支持破解 Apple DRM。注意公共网络和防火墙风险。请实机验证局域网发现、横竖屏、声音、停止连接和接收器退出。
+- 保留 Windows 原有应用标识、签名更新频道和独立 HQ 组件；不将第三方引擎打包进主安装包。
+
 # MirroLeap v5.3.9 · 修复手机屏幕与金属边框之间的 2px 白边
 
 - 修复 v5.3.8 在手机投屏屏幕四周出现的纯白细线：WebView2 的原生 `RGN_DIFF` 透视孔超出了 scrcpy 的视频剪裁边界左右/上下各约 2 个物理像素，因此透出了白色浏览器/桌面背景，而不是手机内容本身。

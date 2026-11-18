@@ -4,7 +4,7 @@
 
 **轻盈投屏，专注当下**
 
-基于 [scrcpy-gui](https://github.com/kil0bit-kb/scrcpy-gui) 二次开发的 Android 桌面投屏工具，使用 [scrcpy](https://github.com/Genymobile/scrcpy) 作为底层投屏引擎。
+基于 [scrcpy-gui](https://github.com/kil0bit-kb/scrcpy-gui) 二次开发的 Windows 手机投屏工具：Android 使用 [scrcpy](https://github.com/Genymobile/scrcpy)，iPhone/iPad 可选择独立的开源 AirPlay 接收组件。
 
 [下载最新版](https://github.com/slobys/MirroLeap/releases/latest) · [更新日志](https://github.com/slobys/MirroLeap/releases) · [安装问题指南](INSTALL_RECOVERY_CN.md)
 
@@ -12,7 +12,7 @@
 
 ## ✨ 功能特点
 
-- **精简首页**：连接手机、选择分辨率、开关声音与真机边框、一键开始/停止投屏。
+- **精简首页**：Android 设备连接、分辨率、音频/边框与一键投屏；额外提供 iOS AirPlay 接收入口。
 - **无线与 USB**：支持 USB 投屏、无线调试配对、设备记忆与重连。
 - **手机外观与画笔**：竖屏/横屏真机边框、悬浮控制栏、标注画笔、橡皮擦、撤销、一键恢复。
 - **悬浮栏防越界（v4.6.1）**：始终约束在手机投屏的可见上下范围、当前显示器工作区内，避开 Windows 任务栏；短横屏时自动切换双排按钮，避免画笔和关闭键被遮挡。
@@ -30,6 +30,14 @@
 - **MirroPresent 专业演示工具（v5.0.0，悬浮控制栏）**：手机投屏右侧悬浮栏直接使用实时聚光灯和**定格截图**放大镜（需刷新快照、非实时视频），不会重复占用设置页；切换横竖屏丢弃旧快照，退出恢复手机触控。设置 → 工具与日志保留独立的 MirroCapture 截图工具。**原始／含画笔 PNG 不包含演示镜头。**
 - **专业模式放在设置里**：摄像头、虚拟显示器、编码器、帧率、图形渲染器、录屏、快捷键、日志等功能按类别整理，仍可使用。
 - **兼容旧配置**：延续之前 ScrcpyGUI 的配置存储与内部应用标识，不要求重新配对已授权设备。
+
+## ✨ MirroLeap v5.4.0 · 新增 iPhone/iPad AirPlay 接收（Windows 预览版）
+
+- 首页增加 **iOS AirPlay** 入口，可一键查看接收器状态、首次手动安装、启动及停止 AirPlay 接收器；**无需 Android ADB、无需 Bonjour 安装**。iOS 和 Android 可以在同一 MirroLeap 控制台启动，不更改旧有 Android 功能。
+- 首次点击安装时才从 [AirPlay-Windows v0.4.1](https://github.com/moieric11/AirPlay-Windows/releases/tag/v0.4.1) 下载单独的 GPL-3.0 组件（约 12 MB），校验锁定的 SHA-256 `5f1792a9…7747bf9`，安全解压到当前 Windows 用户数据目录，保留 GPL 许可证及第三方声明。MirroLeap **不内置或自动启动**第三方二进制。
+- 电脑和 iPhone/iPad 在同一 Wi-Fi/局域网时，在 iOS 控制中心选择「屏幕镜像 → AirPlay-Windows」。接收器默认打开**自己的 Windows 视频窗口**，并支持其自身音频/旋转/录屏能力；名称可在接收器 OPTIONS 中修改。不会将接收器运行误显示成「iPhone 已连接」。
+- **范围边界**：初版不把 iOS 的视频接到 scrcpy 画笔、手机外壳、HQ 圆形镜头或 Android 远控；iOS 不能通过 ADB 操控，不能绕过受保护视频的 DRM。仅在用户点击安装/启动后使用，同一网络不能发现时请检查路由器 AP 隔离、mDNS 和 Windows 专用网络防火墙。
+- 具体步骤与许可证见 [iOS 接收器使用指南](IOS_AIRPLAY_CN.md)。第三方软件遵循其自己的 GPL-3.0 许可证，MirroLeap 非 Apple 官方产品。是否在你的 iPhone、显卡和局域网上正常投屏仍需 Windows 实机验收。
 
 ## ✨ MirroLeap v5.3.9 · 消除手机边框内侧 2px 白边（Windows 测试版）
 
@@ -100,11 +108,11 @@
 此前已修复 HQ 圆形窗口可能被手机视频或透明真机边框遮挡的问题，本轮保留它的实时置顶与失败回退。
 
 
-**名称仍为 MirroLeap，不再建立“MirroLeap HQ Preview”独立应用。** 保留 v5.2.3 的 Windows 安装标识、原有配置和签名更新公钥；继续使用 v5.3.9 这种正常版本标签。已安装 v5.2.3 的 NSIS EXE 用户可以通过原来的启动检查与确认弹窗发现并安装此版本；便携 ZIP 和 MSI 仍使用手动更新。
+**名称仍为 MirroLeap，不再建立“MirroLeap HQ Preview”独立应用。** 保留 v5.2.3 的 Windows 安装标识、原有配置和签名更新公钥；继续使用 v5.4.0 这种正常版本标签。已安装 v5.2.3 的 NSIS EXE 用户可以通过原来的启动检查与确认弹窗发现并安装此版本；便携 ZIP 和 MSI 仍使用手动更新。
 
 安装包保持约 5 MB 的轻量级，USB/Wi-Fi 投屏、画笔、点击特效和实时放大都在主应用中。原始帧 2.35× 高清镜头依旧是 **主动勾选才下载** 的可选组件，独立 scrcpy 5.0.1 HQ 及其 FFmpeg/SDL 运行库不随主 EXE/MSI 安装。画质路径提示可区分「原始帧」与「桌面回退」，尚未完成真实 Android GPU D3D11 高清端到端验收。
 
-这是同一 MirroLeap 更新频道里的 GitHub 测试版（Pre-release），不强制自动安装，也不替换 v5.1.4 在 GitHub 上的 Latest 标记。详见 [v5.3.9 发布说明](hq/MIRROLEAP_RELEASE_NOTES.md)。
+这是同一 MirroLeap 更新频道里的 GitHub 测试版（Pre-release），不强制自动安装，也不替换 v5.1.4 在 GitHub 上的 Latest 标记。详见 [v5.4.0 发布说明](hq/MIRROLEAP_RELEASE_NOTES.md)。
 
 本版同时保留 HQ 圆圈的 Windows 置顶/遮挡修复，并对 YUV 取图、CPU 抗锯齿执行按需启停和负载限制，不再让已接收的帧与用户实际可见的放大圈混为一谈。
 
@@ -367,11 +375,11 @@ v5.0.14 **用户实测仍会出现四角黑色方块**，因此不能视为已�
 
 | 版本 | 文件名 | 适用场景 |
 | --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.3.9_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
-| EXE 安装版 | `MirroLeap_5.3.9_x64-setup.exe` | 标准 Windows 安装 |
-| MSI 安装版 | `MirroLeap_5.3.9_x64_en-US.msi` | 使用 Windows Installer 安装 |
+| **免安装版（推荐）** | `MirroLeap_5.4.0_x64_Portable.zip` | 解压直接运行，绕开旧版卸载程序异常 |
+| EXE 安装版 | `MirroLeap_5.4.0_x64-setup.exe` | 标准 Windows 安装 |
+| MSI 安装版 | `MirroLeap_5.4.0_x64_en-US.msi` | 使用 Windows Installer 安装 |
 
-**v5.3.9 沿用原有安装标识与签名更新频道，只有 Windows CI 验证发布文件后才提供本版下载。** [GitHub Releases](https://github.com/slobys/MirroLeap/releases) 中可选择具体版本附件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 暂保持 v5.1.4 正式版。不要把 Tags 页面自动生成的源码 ZIP 当作安装包。
+**v5.4.0 沿用原有安装标识与签名更新频道，只有 Windows CI 验证发布文件后才提供本版下载。** [GitHub Releases](https://github.com/slobys/MirroLeap/releases) 中可选择具体版本附件；[Latest](https://github.com/slobys/MirroLeap/releases/latest) 暂保持 v5.1.4 正式版。不要把 Tags 页面自动生成的源码 ZIP 当作安装包。
 
 推荐直接下载 **Portable ZIP**，完整解压后双击 `Run-MirroLeap.cmd`（或 `mirroleap.exe`）。首次启动如提示缺少 scrcpy 引擎，可在软件里下载；已有引擎的用户可按 [免安装指引](INSTALL_RECOVERY_CN.md) 放置完整的 `scrcpy-bin`。
 

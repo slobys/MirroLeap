@@ -18,6 +18,7 @@ mod hq_cpu_lens_windows;
 #[cfg(target_os = "windows")]
 mod hq_runtime;
 mod app_update;
+mod ios_airplay;
 mod android_rotation;
 mod capture_compositor;
 mod video_decoder;
@@ -132,6 +133,7 @@ pub fn run() {
                 active_device: Mutex::new(None),
                 final_capture_hint: Mutex::new(HashMap::new()),
             });
+            app.manage(ios_airplay::IosAirplayState::default());
 
             // Ctrl+Alt+Shift+C (recentre the active mirror window) on every
             // platform, plus Ctrl+Alt+Shift+W (drag the borderless window) on
@@ -154,6 +156,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::check_scrcpy,
+            ios_airplay::ios_airplay_status,
+            ios_airplay::ios_airplay_install,
+            ios_airplay::ios_airplay_start,
+            ios_airplay::ios_airplay_stop,
+            ios_airplay::ios_airplay_open_source,
             commands::get_devices,
             commands::adb_connect,
             commands::adb_usb_to_wireless,

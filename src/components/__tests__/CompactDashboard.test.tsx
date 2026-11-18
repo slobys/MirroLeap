@@ -29,6 +29,19 @@ function props(overrides: Partial<React.ComponentProps<typeof CompactDashboard>>
 describe('MirroLeap daily workspace', () => {
     beforeEach(()=>invokeMock.mockReset().mockResolvedValue(undefined));
     afterEach(()=>{delete (window as unknown as {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__;});
+    it('opens iOS AirPlay setup without interrupting Android controls',async()=>{
+        invokeMock.mockResolvedValue({supported:true,installed:false,running:false,installing:false,
+            receiverName:'AirPlay-Windows',engineVersion:'v0.4.1'});
+        render(<CompactDashboard {...props()}/>);
+        expect(screen.getByRole('button',{name:'开始投屏'})).toBeEnabled();
+        fireEvent.click(screen.getByRole('button',{name:'iPhone 和 iPad AirPlay 投屏'}));
+        expect(await screen.findByRole('dialog',{name:'iOS AirPlay 投屏中心'})).toBeInTheDocument();
+        expect(invokeMock).toHaveBeenCalledWith('ios_airplay_status');
+        expect(invokeMock).not.toHaveBeenCalledWith('ios_airplay_install');
+        fireEvent.click(screen.getByRole('button',{name:'关闭 iOS 面板'}));
+        expect(screen.queryByRole('dialog',{name:'iOS AirPlay 投屏中心'})).not.toBeInTheDocument();
+        expect(screen.getByRole('button',{name:'开始投屏'})).toBeEnabled();
+    });
     it('opens YouTube and Telegram using an allowlisted Rust OS browser handoff',async()=>{
         Object.defineProperty(window,'__TAURI_INTERNALS__',{value:{},configurable:true});
         render(<CompactDashboard {...props()}/>);
