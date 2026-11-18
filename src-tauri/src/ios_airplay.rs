@@ -16,8 +16,9 @@ pub const ENGINE_ARCHIVE_SHA256: &str =
 
 #[derive(Default)]
 pub struct IosAirplayState {
-    child: Mutex<Option<Child>>,
+    pub(crate) child: Mutex<Option<Child>>,
     install_gate: tokio::sync::Mutex<()>,
+    pub(crate) window_style: Mutex<String>,
 }
 impl Drop for IosAirplayState {
     fn drop(&mut self) {
@@ -41,6 +42,8 @@ pub struct IosAirplayStatus {
     pub engine_version: String,
     /// MirroLeap's next-launch layout preference, NOT an active iOS connection.
     pub compact_mode: bool,
+    pub window_style: String,
+    pub quality_tier: String,
 }
 
 fn main_only(window: &Window) -> Result<(), String> {
@@ -84,6 +87,59 @@ fn save_compact_preference(app:&AppHandle,compact:bool)->Result<(),String> {
 }
 /// Preserve the third-party receiver's independent name/codec/placement
 /// settings; only set its documented chromeless key, and never force fullscreen.
+fn valid_window_style(value:&str)->bool {
+    matches!(value,"device-auto"|"device-iphone"|"device-ipad"|"clean"|"classic")
+}
+fn valid_quality_tier(value:&str)->bool {
+    matches!(value,"balanced"|"high"|"ultra")
+}
+/// Upstream AirPlay-Windows uses the announced dimensions for iOS's /info
+/// sender handshake; its default 2560×1440 envelope downsizes portrait.
+/// Square capability ceilings let each device keep its own aspect ratio.
+fn quality_cap(tier:&str)->Option<(u32,u32)> {
+    match tier {
+        "balanced"=>Some((1920,1920)),
+        "high"=>Some((2868,2868)),
+        "ultra"=>Some((3840,3840)),
+        _=>None,
+    }
+}
+#[cfg(target_os="windows")]
+fn extra_pref(app:&AppHandle,name:&str)->Result<std::path::PathBuf,String> {
+    Ok(app.path().app_local_data_dir().map_err(|e|e.to_string())?
+        .join("ios-airplay").join(name))
+}
+#[cfg(target_os="windows")]
+fn read_pref(app:&AppHandle,name:&str,default:&str,valid:fn(&str)->bool)->Result<String,String>{
+    match std::fs::read_to_string(extra_pref(app,name)?) {
+        Ok(value)=> {
+            let value=value.trim();
+            Ok(if valid(value){value.to_string()}else{default.to_string()})
+        }
+        Err(error) if error.kind()==std::io::ErrorKind::NotFound=>Ok(default.to_string()),
+        Err(error)=>Err(format!("Cannot read iOS preference: {error}")),
+    }
+}
+#[cfg(target_os="windows")]
+fn save_pref(app:&AppHandle,name:&str,value:&str)->Result<(),String>{
+    let path=extra_pref(app,name)?;
+    if let Some(parent)=path.parent(){std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;}
+    if path.symlink_metadata().is_ok_and(|m|m.file_type().is_symlink()) {
+        return Err("iOS preference is a symbolic link".into());
+    }
+    std::fs::write(path,value).map_err(|e|e.to_string())
+}
+#[cfg(target_os="windows")]
+fn prefer_window_style(app:&AppHandle)->Result<String,String>{
+    // Keep an existing user's explicit original UI preference.
+    let legacy=if prefer_compact(app)? {"device-auto"} else {"classic"};
+    read_pref(app,"window-style.txt",legacy,valid_window_style)
+}
+#[cfg(target_os="windows")]
+fn prefer_quality_tier(app:&AppHandle)->Result<String,String>{
+    read_pref(app,"quality-tier.txt","high",valid_quality_tier)
+}
+
 fn update_receiver_ini(existing:&str,compact:bool)->String {
     let mut lines=Vec::new();
     let mut found=false;
@@ -98,8 +154,28 @@ fn update_receiver_ini(existing:&str,compact:bool)->String {
     if !found {lines.push(format!("chromeless={}",u8::from(compact)));}
     lines.join("\n")+"\n"
 }
+/// Change only upstream's advertised display ceiling and FPS. Never change
+/// receiver name, saved window geometry, selected codec or hardware decoder.
+fn update_receiver_quality_ini(existing:&str,tier:&str)->Result<String,String>{
+    let (width,height)=quality_cap(tier).ok_or("Unsupported iOS quality tier")?;
+    let mut lines=Vec::new();
+    let mut found=std::collections::HashSet::new();
+    let keys=[("mirror_width",width),("mirror_height",height),("max_fps",60)];
+    for line in existing.lines(){
+        if let Some((key,_))=line.split_once('=') {
+            let key=key.trim();
+            if let Some((_,value))=keys.iter().find(|(name,_)|*name==key){
+                if found.insert(key.to_string()) {lines.push(format!("{key}={value}"));}
+                continue;
+            }
+        }
+        lines.push(line.trim_end_matches('\r').to_string());
+    }
+    for (key,value) in keys {if found.insert(key.to_string()) {lines.push(format!("{key}={value}"));}}
+    Ok(lines.join("\n")+"\n")
+}
 #[cfg(target_os="windows")]
-fn configure_receiver_window(app:&AppHandle,compact:bool)->Result<(),String> {
+fn configure_receiver_window(app:&AppHandle,compact:bool,quality:&str)->Result<(),String> {
     // Upstream v0.4.1 uses FOLDERID_RoamingAppData / AirPlay-Windows /
     // settings.ini, loaded before SDL first creates its video window.
     let file=app.path().config_dir().map_err(|e|e.to_string())?
@@ -112,7 +188,7 @@ fn configure_receiver_window(app:&AppHandle,compact:bool)->Result<(),String> {
         Err(error) if error.kind()==std::io::ErrorKind::NotFound=>String::new(),
         Err(error)=>return Err(format!("Cannot read AirPlay settings: {error}"))
     };
-    let updated=update_receiver_ini(&old,compact);
+    let updated=update_receiver_quality_ini(&update_receiver_ini(&old,compact),quality)?;
     if updated==old {return Ok(());}
     if let Some(parent)=file.parent() {
         std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;
@@ -154,7 +230,9 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
             // Users may change this in the receiver's OPTIONS > Receiver Name.
             receiver_name: ENGINE_NAME.to_string(),
             engine_version: ENGINE_VERSION.to_string(),
-            compact_mode: prefer_compact(app)?,
+            compact_mode: prefer_window_style(app)?!="classic",
+            window_style: prefer_window_style(app)?,
+            quality_tier: prefer_quality_tier(app)?,
         })
     }
     #[cfg(not(target_os = "windows"))]
@@ -165,6 +243,8 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
             receiver_name: ENGINE_NAME.to_string(),
             engine_version: ENGINE_VERSION.to_string(),
             compact_mode: false,
+            window_style: "clean".to_string(),
+            quality_tier: "high".to_string(),
         })
     }
 }
@@ -296,7 +376,8 @@ pub async fn ios_airplay_start(
         let root=engine_root(&app)?;
         if !installed(&root) {return Err("Install the verified AirPlay receiver first".into());}
         if running(&state)? {drop(_gate);return status_for(&app,&state);}
-        configure_receiver_window(&app,prefer_compact(&app)?)?;
+        let style=prefer_window_style(&app)?;
+        configure_receiver_window(&app,style!="classic",&prefer_quality_tier(&app)?)?;
         let child=std::process::Command::new(root.join("airplay-windows.exe"))
             .current_dir(&root)
             .stdin(std::process::Stdio::null())
@@ -304,10 +385,17 @@ pub async fn ios_airplay_start(
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|e|format!("Cannot launch AirPlay receiver: {e}"))?;
+        let pid=child.id();
         *state.child.lock().map_err(|e|e.to_string())?=Some(child);
+        *state.window_style.lock().map_err(|e|e.to_string())?=style;
         tokio::time::sleep(std::time::Duration::from_millis(350)).await;
         if !running(&state)? {
             return Err("AirPlay receiver quit immediately; check Windows firewall or antivirus".into());
+        }
+        // One passive, click-through native silhouette; it does not create
+        // another user-facing settings page or capture the mirror's pixels.
+        if let Err(error)=crate::ios_device_frame::start(&app,pid) {
+            eprintln!("[iOS frame] Optional bezel unavailable: {error}");
         }
         drop(_gate);
         status_for(&app,&state)
@@ -330,11 +418,57 @@ pub async fn ios_airplay_set_compact_mode(
             return Err("Stop the receiver to change its default window layout".into());
         }
         save_compact_preference(&app,compact)?;
+        save_pref(&app,"window-style.txt",if compact {"clean"}else{"classic"})?;
         drop(_gate);
         status_for(&app,&state)
     }
     #[cfg(not(target_os="windows"))]
     {let _=(app,state,compact);Err("Windows AirPlay receiver required".into())}
+}
+
+/// Switch clean/device styling from the homepage without an intermediate
+/// modal. The classic upstream UI requires a receiver restart because H is
+/// toggle-only and cannot be reliably read back over Win32 messages.
+#[tauri::command]
+pub async fn ios_airplay_set_window_style(
+    window:Window,app:AppHandle,state:State<'_,IosAirplayState>,style:String,
+)->Result<IosAirplayStatus,String>{
+    main_only(&window)?;
+    if !valid_window_style(&style) {return Err("Unsupported iOS window style".into());}
+    #[cfg(target_os="windows")]
+    {
+        let _gate=state.install_gate.lock().await;
+        if running(&state)? && (style=="classic" || prefer_window_style(&app)?=="classic") {
+            return Err("Stop the receiver before switching to/from its original interface".into());
+        }
+        save_pref(&app,"window-style.txt",&style)?;
+        save_compact_preference(&app,style!="classic")?;
+        *state.window_style.lock().map_err(|e|e.to_string())?=style;
+        drop(_gate);
+        status_for(&app,&state)
+    }
+    #[cfg(not(target_os="windows"))]
+    {let _=(app,state);Err("Windows AirPlay receiver required".into())}
+}
+
+#[tauri::command]
+pub async fn ios_airplay_set_quality_tier(
+    window:Window,app:AppHandle,state:State<'_,IosAirplayState>,tier:String,
+)->Result<IosAirplayStatus,String>{
+    main_only(&window)?;
+    if !valid_quality_tier(&tier) {return Err("Unsupported iOS quality tier".into());}
+    #[cfg(target_os="windows")]
+    {
+        let _gate=state.install_gate.lock().await;
+        if running(&state)? {
+            return Err("Stop the receiver before changing its advertised AirPlay resolution".into());
+        }
+        save_pref(&app,"quality-tier.txt",&tier)?;
+        drop(_gate);
+        status_for(&app,&state)
+    }
+    #[cfg(not(target_os="windows"))]
+    {let _=(app,state);Err("Windows AirPlay receiver required".into())}
 }
 
 /// Send only two explicitly supported shortcuts to this process's OWN window,
@@ -383,6 +517,7 @@ pub fn ios_airplay_stop(
     main_only(&window)?;
     #[cfg(target_os = "windows")]
     {
+        crate::ios_device_frame::close(&app);
         if let Some(mut child)=state.child.lock().map_err(|e|e.to_string())?.take() {
             if child.try_wait().map_err(|e|e.to_string())?.is_none() {
                 child.kill().map_err(|e|format!("Cannot stop AirPlay receiver: {e}"))?;
@@ -432,6 +567,23 @@ mod tests {
         let value=update_receiver_ini("fullscreen=0\nmax_fps=60",true);
         assert!(value.contains("fullscreen=0\n"));
         assert!(value.contains("max_fps=60\n"));
+    }
+    #[test]
+    fn portrait_resolution_envelopes_preserve_sender_aspect_and_unrelated_options(){
+        let original="receiver_name=Office iPad\nmirror_width=1920\nmirror_height=1080\nmax_fps=30\nmirror_hwaccel=0\nchromeless=1\nrecording_codec=1\n";
+        for (tier,side) in [("balanced",1920),("high",2868),("ultra",3840)] {
+            let updated=update_receiver_quality_ini(original,tier).unwrap();
+            assert!(updated.contains(&format!("mirror_width={side}\n")));
+            assert!(updated.contains(&format!("mirror_height={side}\n")));
+            assert!(updated.contains("max_fps=60\n"));
+            assert!(updated.contains("receiver_name=Office iPad\n"));
+            assert!(updated.contains("mirror_hwaccel=0\n"));
+            assert!(updated.contains("recording_codec=1\n"));
+            assert_eq!(updated,update_receiver_quality_ini(&updated,tier).unwrap());
+        }
+        assert!(update_receiver_quality_ini(original,"untrusted").is_err());
+        assert!(!valid_window_style("../../malicious"));
+        assert!(!valid_quality_tier("40000"));
     }
     #[cfg(target_os = "windows")]
     #[test]

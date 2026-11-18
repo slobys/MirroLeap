@@ -922,6 +922,14 @@ fn place_overlay(overlay: &WebviewWindow, video: HWND, frame: FrameRect) -> Resu
     })
 }
 
+/// Reuse the tier-aware companion stacking for the optional iOS bezel.
+/// HWND_TOP alone would cover unrelated applications.
+pub(crate) fn place_ios_companion(
+    shell: HWND, video: HWND, x: i32, y: i32, width: i32, height: i32,
+) -> Result<(), String> {
+    position_above(shell, video, ScreenRect {x,y,width,height})
+}
+
 fn place_toolbar(toolbar: &WebviewWindow, overlay: &WebviewWindow, rect: ScreenRect) -> Result<(), String> {
     let hwnd = toolbar.hwnd().map_err(|e| e.to_string())?;
     let shell = overlay.hwnd().map_err(|e| e.to_string())?;

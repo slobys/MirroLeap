@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>MirroLeap iOS bezel</title>
+<style>
+  :root { color-scheme: dark; }
+  html,body { margin:0; width:100%; height:100%; overflow:hidden; background:transparent !important; }
+  body { user-select:none; pointer-events:none; }
+  #case {
+    position:absolute; inset:0; box-sizing:border-box;
+    border-radius:43px; border:2px solid #73808d;
+    background:linear-gradient(115deg,#65717e 0%,#222930 8%,#090e14 18%,#12161e 72%,#4c5560 96%,#8a949d 100%);
+    box-shadow:inset 0 0 0 2px #090c12,inset 0 0 0 5px #242a33;
+  }
+  .camera {
+    position:absolute; top:6px; left:50%; transform:translateX(-50%);
+    width:54px; height:8px; border-radius:100px;
+    background:linear-gradient(#010309,#111826); border:1px solid #333b44;
+    box-shadow:inset 0 1px 1px #03060a;
+  }
+  .camera::after { content:""; display:block; width:5px; height:5px; border-radius:50%;
+    background:#263d51; box-shadow:0 0 2px #507390; margin:1px auto; }
+  .key { position:absolute; background:linear-gradient(#5e6770,#1b2129,#606974); border-radius:4px; }
+  .volume { left:0; top:21%; width:3px; height:10%; }
+  .power { right:0; top:24%; width:3px; height:12%; }
+  body.ipad #case { border-radius:26px; background:linear-gradient(110deg,#646d77,#171d24 12%,#0a0f16 50%,#313943 93%,#858b94); }
+  body.ipad .camera { top:3px; width:6px; height:6px; border-radius:50%; }
+  body.ipad .volume,body.ipad .power { display:none; }
+  body.landscape .camera { top:50%; left:auto; right:5px; transform:translateY(-50%); width:8px; height:54px; }
+  body.landscape .camera::after { margin:23px auto; }
+  body.landscape.ipad .camera { width:6px; height:6px; right:3px; }
+  body.landscape.ipad .camera::after { margin:0; }
+</style>
+</head>
+<body class="ipad portrait">
+  <div id="case"><div class="camera"></div><div class="key volume"></div><div class="key power"></div></div>
+  <script>
+    window.mirroleapIosSkin=function(kind,orientation){
+      document.body.className=(kind==='iphone'?'iphone':'ipad')+' '+
+        (orientation==='landscape'?'landscape':'portrait');
+    };
+  </script>
+</body>
+</html>

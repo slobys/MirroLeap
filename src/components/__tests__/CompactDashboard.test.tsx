@@ -29,17 +29,16 @@ function props(overrides: Partial<React.ComponentProps<typeof CompactDashboard>>
 describe('MirroLeap daily workspace', () => {
     beforeEach(()=>invokeMock.mockReset().mockResolvedValue(undefined));
     afterEach(()=>{delete (window as unknown as {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__;});
-    it('opens iOS AirPlay setup without interrupting Android controls',async()=>{
+    it('keeps iOS AirPlay controls inline, without any settings modal or auto-start',async()=>{
         invokeMock.mockResolvedValue({supported:true,installed:false,running:false,installing:false,
-            receiverName:'AirPlay-Windows',engineVersion:'v0.4.1'});
+            receiverName:'AirPlay-Windows',engineVersion:'v0.4.1',
+            compactMode:true,windowStyle:'device-auto',qualityTier:'high'});
         render(<CompactDashboard {...props()}/>);
         expect(screen.getByRole('button',{name:'开始投屏'})).toBeEnabled();
-        fireEvent.click(screen.getByRole('button',{name:'iPhone 和 iPad AirPlay 投屏'}));
-        expect(await screen.findByRole('dialog',{name:'iOS AirPlay 投屏中心'})).toBeInTheDocument();
-        expect(invokeMock).toHaveBeenCalledWith('ios_airplay_status');
+        expect(screen.getByTestId('ios-home-panel')).toBeInTheDocument();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_status'));
         expect(invokeMock).not.toHaveBeenCalledWith('ios_airplay_install');
-        fireEvent.click(screen.getByRole('button',{name:'关闭 iOS 面板'}));
-        expect(screen.queryByRole('dialog',{name:'iOS AirPlay 投屏中心'})).not.toBeInTheDocument();
         expect(screen.getByRole('button',{name:'开始投屏'})).toBeEnabled();
     });
     it('opens YouTube and Telegram using an allowlisted Rust OS browser handoff',async()=>{
@@ -47,13 +46,18 @@ describe('MirroLeap daily workspace', () => {
         render(<CompactDashboard {...props()}/>);
         fireEvent.click(screen.getByRole('link',{name:'奶油 YouTube 频道'}));
         fireEvent.click(screen.getByRole('link',{name:'奶油 Telegram 群组'}));
-        await waitFor(()=>expect(invokeMock).toHaveBeenCalledTimes(2));
-        expect(invokeMock).toHaveBeenNthCalledWith(1,'open_official_community_link',{destination:'youtube'});
-        expect(invokeMock).toHaveBeenNthCalledWith(2,'open_official_community_link',{destination:'telegram'});
+        await waitFor(()=>expect(invokeMock.mock.calls.filter(
+            ([name])=>name==='open_official_community_link')).toHaveLength(2));
+        const links=invokeMock.mock.calls.filter(([name])=>name==='open_official_community_link');
+        expect(links[0]).toEqual(['open_official_community_link',{destination:'youtube'}]);
+        expect(links[1]).toEqual(['open_official_community_link',{destination:'telegram'}]);
     });
     it('shows an explicit error if Windows has no default browser',async()=>{
         Object.defineProperty(window,'__TAURI_INTERNALS__',{value:{},configurable:true});
-        invokeMock.mockRejectedValueOnce(new Error('No browser'));
+        invokeMock.mockImplementation(async (name:string)=>{
+            if(name==='open_official_community_link')throw new Error('No browser');
+            return undefined;
+        });
         render(<CompactDashboard {...props()}/>);
         fireEvent.click(screen.getByRole('link',{name:'奶油 YouTube 频道'}));
         await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('无法打开外部浏览器'));

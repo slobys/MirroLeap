@@ -19,6 +19,8 @@ mod hq_cpu_lens_windows;
 mod hq_runtime;
 mod app_update;
 mod ios_airplay;
+#[cfg(target_os = "windows")]
+mod ios_device_frame;
 mod android_rotation;
 mod capture_compositor;
 mod video_decoder;
@@ -160,6 +162,8 @@ pub fn run() {
             ios_airplay::ios_airplay_install,
             ios_airplay::ios_airplay_start,
             ios_airplay::ios_airplay_set_compact_mode,
+            ios_airplay::ios_airplay_set_window_style,
+            ios_airplay::ios_airplay_set_quality_tier,
             ios_airplay::ios_airplay_window_action,
             ios_airplay::ios_airplay_stop,
             ios_airplay::ios_airplay_open_source,

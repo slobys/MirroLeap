@@ -1,97 +1,107 @@
-import {render,screen,fireEvent,waitFor} from '@testing-library/react';
+import {fireEvent,render,screen,waitFor} from '@testing-library/react';
 import {beforeEach,describe,expect,it,vi} from 'vitest';
-import IosReceiverPanel, {type IosAirplayStatus} from '../IosReceiverPanel';
+import IosReceiverPanel,{type IosAirplayStatus} from '../IosReceiverPanel';
 
 const {invokeMock}=vi.hoisted(()=>({invokeMock:vi.fn()}));
 vi.mock('@tauri-apps/api/core',()=>({invoke:invokeMock}));
-const ready: IosAirplayStatus={
+const ready:IosAirplayStatus={
     supported:true,installed:false,running:false,installing:false,
-    engineVersion:'v0.4.1',receiverName:'AirPlay-Windows',compactMode:true,
+    receiverName:'AirPlay-Windows',engineVersion:'v0.4.1',
+    compactMode:true,windowStyle:'device-auto',qualityTier:'high',
 };
-describe('opt-in iOS AirPlay receiver in MirroLeap',()=>{
+
+describe('single-page iOS AirPlay experience',()=>{
     beforeEach(()=>invokeMock.mockReset());
-    it('does not download AirPlay until an explicit click and links to GPL source',async()=>{
+
+    it('does not open an intermediate dialog or launch/install without a click',async()=>{
         invokeMock.mockResolvedValue(ready);
-        render(<IosReceiverPanel locale="zh-CN" onClose={vi.fn()}/>);
-        expect(await screen.findByText('尚未安装 AirPlay 接收组件')).toBeInTheDocument();
-        expect(invokeMock).toHaveBeenCalledWith('ios_airplay_status');
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        expect(screen.getByTestId('ios-home-panel')).toBeInTheDocument();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_status'));
         expect(invokeMock).not.toHaveBeenCalledWith('ios_airplay_install');
-        expect(screen.getByRole('link',{name:/源码与许可证/})).toHaveAttribute(
-            'href','https://github.com/moieric11/AirPlay-Windows');
-        expect(screen.getByText(/开源 GPL-3.0/)).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button',{name:/下载安装 AirPlay 组件/}));
+        expect(invokeMock).not.toHaveBeenCalledWith('ios_airplay_start');
+        expect(screen.getByRole('link',{name:/GPL-3.0 开源接收器/}))
+            .toHaveAttribute('href','https://github.com/moieric11/AirPlay-Windows');
+        fireEvent.click(screen.getByRole('button',{name:'安装 iOS 接收器'}));
         await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_install'));
     });
-    it('defaults to clean screen-only layout and only changes next launch on user command',async()=>{
-        let state={...ready,installed:true};
-        invokeMock.mockImplementation(async(name:string,args?:{compact?:boolean})=>{
-            if(name==='ios_airplay_status')return state;
-            if(name==='ios_airplay_set_compact_mode'){
-                state={...state,compactMode:!!args?.compact};
-                return state;
-            }
-            return state;
-        });
-        render(<IosReceiverPanel locale="zh-CN" onClose={vi.fn()}/>);
-        const clean=await screen.findByRole('button',{name:'简洁投屏（推荐）'});
-        const classic=screen.getByRole('button',{name:'原版控制界面'});
-        expect(clean).toHaveAttribute('aria-pressed','true');
-        expect(invokeMock).not.toHaveBeenCalledWith('ios_airplay_set_compact_mode',expect.anything());
-        fireEvent.click(classic);
-        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_set_compact_mode',{compact:false}));
-        await waitFor(()=>expect(classic).toHaveAttribute('aria-pressed','true'));
-        fireEvent.click(clean);
-        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_set_compact_mode',{compact:true}));
-    });
-    it('can request safe window actions without disconnecting a running iPad',async()=>{
-        const started={...ready,installed:true,running:true};
+    it('starts and stops from the homepage without claiming a connected sender',async()=>{
+        let current={...ready,installed:true};
         invokeMock.mockImplementation(async(name:string)=>{
-            if(name==='ios_airplay_status'||name==='ios_airplay_window_action')return started;
-            return started;
+            if(name==='ios_airplay_start')current={...current,running:true};
+            if(name==='ios_airplay_stop')current={...current,running:false};
+            return current;
         });
-        render(<IosReceiverPanel locale="zh-CN" onClose={vi.fn()}/>);
-        const shortcut=await screen.findByRole('button',{name:/切换简洁\/原界面/});
-        expect(screen.getByRole('button',{name:'简洁投屏（推荐）'})).toBeDisabled();
-        fireEvent.click(shortcut);
-        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_window_action',{action:'toggle_clean'}));
-        expect(await screen.findByText(/已向接收窗口发送 H 切换请求/)).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button',{name:/全屏\/退出/}));
-        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_window_action',{action:'fullscreen'}));
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        fireEvent.click(await screen.findByRole('button',{name:'启动 iOS 投屏'}));
+        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_start'));
+        expect(await screen.findByText(/等待手机连接/)).toBeInTheDocument();
         expect(screen.queryByText('iPhone 已连接')).not.toBeInTheDocument();
-    });
-    it('starts and stops its own process but never reports a connected iPhone',async()=>{
-        const installed={...ready,installed:true};
-        const running={...installed,running:true};
-        invokeMock.mockImplementation(async (name:string)=>{
-            if(name==='ios_airplay_status')return installed;
-            if(name==='ios_airplay_start')return running;
-            if(name==='ios_airplay_stop')return installed;
-            return installed;
-        });
-        render(<IosReceiverPanel locale="zh-CN" onClose={vi.fn()}/>);
-        fireEvent.click(await screen.findByRole('button',{name:'启动 iOS 接收器'}));
-        expect(await screen.findByText(/等待 iPhone 连接/)).toBeInTheDocument();
-        expect(invokeMock).toHaveBeenCalledWith('ios_airplay_start');
-        expect(screen.queryByText('iPhone 已连接')).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button',{name:'停止 iOS 接收器'}));
+        fireEvent.click(screen.getByRole('button',{name:'停止接收'}));
         await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_stop'));
     });
-    it('explains unsupported hosts, sender instructions and protected-content limits',async()=>{
-        invokeMock.mockResolvedValue({...ready,supported:false});
-        render(<IosReceiverPanel locale="zh-CN" onClose={vi.fn()}/>);
-        expect(await screen.findByText('仅支持 Windows x64')).toBeInTheDocument();
-        expect(screen.queryByRole('button',{name:'下载安装 AirPlay 组件'})).not.toBeInTheDocument();
-        expect(screen.getByText(/屏幕镜像/)).toBeInTheDocument();
+    it('offers separate real-device frame, clean, classic and resolution choices',async()=>{
+        let current={...ready,installed:true};
+        invokeMock.mockImplementation(async(name:string,args?:{style?:string;tier?:string})=>{
+            if(name==='ios_airplay_set_window_style')current={...current,windowStyle:args?.style};
+            if(name==='ios_airplay_set_quality_tier')current={...current,qualityTier:args?.tier};
+            return current;
+        });
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        const style=await screen.findByRole('combobox',{name:'iOS 投屏窗口风格'});
+        expect(style).toHaveValue('device-auto');
+        expect(screen.getByRole('option',{name:'iPad 真机边框'})).toBeInTheDocument();
+        expect(screen.getByRole('option',{name:'iPhone 真机边框'})).toBeInTheDocument();
+        fireEvent.change(style,{target:{value:'device-ipad'}});
+        await waitFor(()=>expect(invokeMock)
+            .toHaveBeenCalledWith('ios_airplay_set_window_style',{style:'device-ipad'}));
+        const quality=screen.getByRole('combobox',{name:'iOS 画质'});
+        expect(quality).toHaveValue('high');
+        fireEvent.change(quality,{target:{value:'ultra'}});
+        await waitFor(()=>expect(invokeMock)
+            .toHaveBeenCalledWith('ios_airplay_set_quality_tier',{tier:'ultra'}));
+    });
+    it('allows switching device and clean styles live but blocks unsafe quality changes',async()=>{
+        let current={...ready,installed:true,running:true};
+        invokeMock.mockImplementation(async(name:string,args?:{style?:string})=>{
+            if(name==='ios_airplay_set_window_style')current={...current,windowStyle:args?.style};
+            return current;
+        });
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        const style=await screen.findByRole('combobox',{name:'iOS 投屏窗口风格'});
+        expect(screen.getByRole('combobox',{name:'iOS 画质'})).toBeDisabled();
+        expect(screen.getByRole('option',{name:'接收器原版界面'})).toBeDisabled();
+        fireEvent.change(style,{target:{value:'clean'}});
+        await waitFor(()=>expect(invokeMock)
+            .toHaveBeenCalledWith('ios_airplay_set_window_style',{style:'clean'}));
+        fireEvent.click(screen.getByRole('button',{name:'全屏'}));
+        await waitFor(()=>expect(invokeMock)
+            .toHaveBeenCalledWith('ios_airplay_window_action',{action:'fullscreen'}));
+    });
+    it('keeps connection help collapsed, then shows firewall and DRM limits',async()=>{
+        invokeMock.mockResolvedValue(ready);
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        const help=screen.getByRole('button',{name:'连接说明'});
+        expect(help).toHaveAttribute('aria-expanded','false');
+        expect(screen.queryByText(/Windows 防火墙/)).not.toBeInTheDocument();
+        fireEvent.click(help);
+        expect(help).toHaveAttribute('aria-expanded','true');
+        expect(screen.getByText(/Windows 防火墙/)).toBeInTheDocument();
         expect(screen.getByText(/DRM/)).toBeInTheDocument();
     });
-    it('shows installation errors and never claims the receiver is ready',async()=>{
-        invokeMock.mockImplementation(async (name:string)=>{
-            if(name==='ios_airplay_status')return ready;
+    it('shows unsupported hosts and component verification errors without false readiness',async()=>{
+        invokeMock.mockResolvedValueOnce({...ready,supported:false});
+        const {unmount}=render(<IosReceiverPanel locale="zh-CN"/>);
+        expect(await screen.findByText('仅支持 Windows x64')).toBeInTheDocument();
+        expect(screen.queryByRole('button',{name:'安装 iOS 接收器'})).not.toBeInTheDocument();
+        unmount();
+        invokeMock.mockImplementation(async(name:string)=>{
             if(name==='ios_airplay_install')throw Error('SHA-256 mismatch');
+            return ready;
         });
-        render(<IosReceiverPanel locale="en-US" onClose={vi.fn()}/>);
-        fireEvent.click(await screen.findByRole('button',{name:'Install AirPlay component'}));
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        fireEvent.click(await screen.findByRole('button',{name:'安装 iOS 接收器'}));
         expect(await screen.findByRole('alert')).toHaveTextContent('SHA-256 mismatch');
-        expect(screen.queryByText(/Receiver running/)).not.toBeInTheDocument();
     });
 });

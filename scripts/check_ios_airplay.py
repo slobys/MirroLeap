@@ -32,7 +32,8 @@ for command in ("ios_airplay_status","ios_airplay_install","ios_airplay_start",
         assert command in ui
 assert "'ios_airplay_'+action" in ui
 assert "'install'|'start'|'stop'" in ui
-assert "IosReceiverPanel" in home and "setIosPanelOpen(true)" in home
+assert "IosReceiverPanel" in home and "setIosPanelOpen(true)" not in home
+assert 'data-testid="ios-home-panel"' in ui and 'role="dialog"' not in ui
 assert "屏幕镜像" in ui and "专用网络" in ui
 assert "接收器进程启动并不代表 iPhone 已连接" in doc
 assert "GPL-3.0" in ui and "DRM" in ui
@@ -42,10 +43,20 @@ assert "'ios_airplay::tests'" in release
 assert '"version": "5.4.1"' in (root/"package.json").read_text()
 assert '"version": "5.4.1"' in (root/"src-tauri/tauri.conf.json").read_text()
 assert "ios_airplay::ios_airplay_set_compact_mode" in lib
+assert "ios_airplay::ios_airplay_set_window_style" in lib
+assert "ios_airplay::ios_airplay_set_quality_tier" in lib
 assert "ios_airplay::ios_airplay_window_action" in lib
 assert "configure_receiver_window" in native and "update_receiver_ini" in native
 assert "find_window_by_pid" in native and "PostMessageW(Some(hwnd)" in native
-assert "chromeless" in native and "简洁投屏" in ui and "compactMode" in ui
-assert "ios_airplay_set_compact_mode" in ui and "ios_airplay_window_action" in ui
+assert "chromeless" in native and "纯画面" in ui and "compactMode" in ui
+assert "ios_airplay_set_window_style" in ui and "ios_airplay_set_quality_tier" in ui
+assert "ios_airplay_window_action" in ui
+assert "quality_cap" in native and "2868" in native and "3840" in native
+assert "ios_device_frame::start" in native and "ios_device_frame::close" in native
+assert "mod ios_device_frame;" in lib
+frame=(root/"src-tauri/src/ios_device_frame.rs").read_text(encoding="utf-8")
+assert "SetWindowRgn" in frame and "set_ignore_cursor_events(true)" in frame
+assert "place_ios_companion" in frame and "device-auto" in ui
+assert (root/"public/ios-bezel.html").is_file()
 assert "ios_airplay::tests" in workflow
-print("iOS AirPlay v5.4.1: compact screen-only view, bounded keyboard actions and original GPL receiver checks passed")
+print("iOS AirPlay preview: inline home, aspect-safe quality caps, passive phone/tablet frame and verified GPL receiver checks passed")
