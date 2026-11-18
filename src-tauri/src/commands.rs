@@ -2884,6 +2884,9 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
             match outcome {
                 AttemptOutcome::WaitError(e) => {
                     let _ = window_mon.emit("scrcpy-log", format!("[SYSTEM] Error waiting for scrcpy: {}", e));
+                    let _ = window_mon.emit("scrcpy-unexpected-stop", json!({
+                        "device": device_mon.as_str(), "reason": "wait-error"
+                    }));
                     emit_window_pos_and_stop(&window_mon, &device_mon, requested_pos, first_window_pos, last_window_pos);
                     break;
                 }
@@ -3040,6 +3043,14 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
                         emit_window_pos_and_stop(&window_mon, &device_mon, requested_pos, first_window_pos, last_window_pos);
                         break;
                     } else {
+                        // Only an abnormal terminal exit may trigger UI recovery.
+                        // Closing the native SDL window normally (exit 0), or
+                        // pressing Stop (UserStopped), must never relaunch it.
+                        if !succeeded {
+                            let _ = window_mon.emit("scrcpy-unexpected-stop", json!({
+                                "device": device_mon.as_str(), "reason": "process-exit"
+                            }));
+                        }
                         emit_window_pos_and_stop(&window_mon, &device_mon, requested_pos, first_window_pos, last_window_pos);
                         break;
                     }

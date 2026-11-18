@@ -13,6 +13,7 @@ import { DEVICE_PROFILES_KEY, profileFromConfig, readDeviceProfiles,
     rememberCompletedVideoForInactiveDevice, transitionDeviceSelection } from '../utils/deviceProfiles';
 import { chooseAutoQualityStep } from '../utils/autoQuality';
 import { measuredSkippedFrames } from '../utils/performanceSamples';
+import { isRecoverableMirrorSession, nextMirrorRecovery } from '../utils/mirrorRecovery';
 
 /** Measured from the running scrcpy process, never an FPS cap. */
 export type MirrorPerformance = {
@@ -197,6 +198,23 @@ export function useScrcpy() {
     // The clipboard policy is fixed at launch, unlike its saved checkbox.
     const [sessionClipboardSync, setSessionClipboardSync] = useState<Record<string, boolean>>({});
     const launchedSessionConfigRef = useRef<Record<string, ScrcpyConfig>>({});
+    const recoveryTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+    const recoveryInFlightRef = useRef(new Map<string, Promise<void>>());
+    const recoveryEpochRef = useRef(new Map<string, number>());
+    const recoveryBudgetRef = useRef(new Map<string, { firstAt: number; attempts: number }>());
+    const cancelRecovery = (device: string) => {
+        recoveryEpochRef.current.set(device, (recoveryEpochRef.current.get(device) || 0) + 1);
+        const timer = recoveryTimersRef.current.get(device);
+        if (timer !== undefined) clearTimeout(timer);
+        recoveryTimersRef.current.delete(device);
+    };
+    useEffect(() => () => {
+        for (const timer of recoveryTimersRef.current.values()) clearTimeout(timer);
+        recoveryTimersRef.current.clear();
+        for (const device of recoveryEpochRef.current.keys()) {
+            recoveryEpochRef.current.set(device, (recoveryEpochRef.current.get(device) || 0) + 1);
+        }
+    }, []);
     const resolutionSwitchLock = useRef(false);
     const autoLastChangeRef = useRef<Record<string, number>>({});
     const [defaultRecordPath, setDefaultRecordPath] = useState<string>("");
@@ -525,6 +543,54 @@ export function useScrcpy() {
             }
         });
 
+        // This event is emitted only after an abnormal terminal scrcpy exit,
+        // not for deliberate Stop, SDL window close, or video-setting changes.
+        const unlistenUnexpectedStop = listen<{device:string;reason:string}>(
+            'scrcpy-unexpected-stop', ({payload}) => {
+                const device = payload?.device;
+                if (!device || recoveryTimersRef.current.has(device)) return;
+                const previous = launchedSessionConfigRef.current[device];
+                // Do not restart recorders, camera sessions or virtual displays.
+                if (!isRecoverableMirrorSession(previous)) return;
+                const now = Date.now();
+                const retry = nextMirrorRecovery(now, recoveryBudgetRef.current.get(device));
+                if (!retry) {
+                    setLogs(prev => [...prev.slice(-100), '[RECOVERY] ' + device + ': 已达到自动恢复上限，请检查连接。']);
+                    return;
+                }
+                const { budget, delayMs: delay } = retry;
+                recoveryBudgetRef.current.set(device, budget);
+                const epoch = recoveryEpochRef.current.get(device) || 0;
+                setLogs(prev => [...prev.slice(-100),
+                    '[RECOVERY] ' + device + ': 进程意外退出，准备自动恢复（' + budget.attempts + '/2）。']);
+                const timer = setTimeout(() => {
+                    recoveryTimersRef.current.delete(device);
+                    if ((recoveryEpochRef.current.get(device) || 0) !== epoch ||
+                        liveRunningDevicesRef.current.includes(device)) return;
+                    const flight = (async () => {
+                        try {
+                            await invoke('run_scrcpy', { config: previous });
+                            if ((recoveryEpochRef.current.get(device) || 0) !== epoch) return;
+                            launchedSessionConfigRef.current[device] = previous;
+                            setLogs(prev => [...prev.slice(-100), '[RECOVERY] ' + device + ': 投屏已恢复。']);
+                        } catch (error) {
+                            if ((recoveryEpochRef.current.get(device) || 0) === epoch) {
+                                setLogs(prev => [...prev.slice(-100), '[RECOVERY] ' + device +
+                                    ': 自动恢复失败：' + String(error)]);
+                            }
+                        }
+                    })();
+                    recoveryInFlightRef.current.set(device, flight);
+                    void flight.finally(() => {
+                        if (recoveryInFlightRef.current.get(device) === flight) {
+                            recoveryInFlightRef.current.delete(device);
+                        }
+                    });
+                }, delay);
+                recoveryTimersRef.current.set(device, timer);
+            }
+        );
+
         // The backend emits progress on a separate Tauri event, not a status
         // object. Earlier versions listened to the wrong event and stayed at 0%.
         const unlistenProgress = listen<{ percent: number }>('download-progress', (event) => {
@@ -561,6 +627,7 @@ export function useScrcpy() {
             unlistenPerformance.then(f => f());
             unlistenRecording.then(f => f());
             unlistenStatus.then(f => f());
+            unlistenUnexpectedStop.then(f => f());
             unlistenProgress.then(f => f());
             unlistenWindowPos.then(f => f());
         };
@@ -860,6 +927,10 @@ export function useScrcpy() {
     }, [historyDevices, config.scrcpyPath]);
 
     const runScrcpy = async (config: ScrcpyConfig): Promise<string | null> => {
+        cancelRecovery(config.device);
+        recoveryBudgetRef.current.delete(config.device);
+        // A manual Start must not race a recovery launch for the same device.
+        await recoveryInFlightRef.current.get(config.device);
         try {
             setLogs(prev => [...prev.slice(-100), t('logs.initializingScrcpy', { device: config.device })]);
             // Resolve the saved position for this specific device only, so
@@ -1153,6 +1224,9 @@ export function useScrcpy() {
     };
 
     const stopScrcpy = async (device: string) => {
+        cancelRecovery(device);
+        // A user-requested Stop wins even if recovery already entered IPC.
+        await recoveryInFlightRef.current.get(device);
         try {
             await invoke('stop_scrcpy', { device });
         } catch (e) {
