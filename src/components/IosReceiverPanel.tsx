@@ -168,13 +168,13 @@ export default function IosReceiverPanel({locale}:Props) {
         {feedback && <p role="status" className="mt-2 text-xs">{feedback}</p>}
         <div className="mt-2 flex items-center justify-between flex-wrap gap-2">
             <button type="button" aria-expanded={helpOpen} onClick={()=>setHelpOpen(o=>!o)}
-                className="ml-footer-link flex items-center gap-1 text-xs">
+                className="ml-muted hover:underline flex items-center gap-1 text-xs">
                 <Info size={14}/>{copy('连接说明','How to connect')}
                 {helpOpen?<ChevronUp size={13}/>:<ChevronDown size={13}/>}
             </button>
             <a href="https://github.com/moieric11/AirPlay-Windows" target="_blank"
                 rel="noopener noreferrer" onClick={event=>void openSource(event)}
-                className="ml-footer-link inline-flex gap-1 items-center text-[11px]">
+                className="ml-muted hover:underline inline-flex gap-1 items-center text-[11px]">
                 <ShieldCheck size={13}/>{copy('GPL-3.0 开源接收器','GPL-3.0 receiver')}
                 <ExternalLink size={12}/></a>
         </div>
