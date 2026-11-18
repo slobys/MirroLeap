@@ -13,6 +13,12 @@ export type IosAirplayStatus = {
     compactMode:boolean;
     windowStyle?:string;
     qualityTier?:string;
+    /** Actual received decoder texture, not the chosen advertisement cap. */
+    sourceWidth?:number|null;
+    sourceHeight?:number|null;
+    /** Win32 physical SDL client area (may be smaller/larger than source). */
+    displayWidth?:number|null;
+    displayHeight?:number|null;
 };
 type Props={locale:string};
 const windowStyles=[
@@ -115,6 +121,8 @@ export default function IosReceiverPanel({locale}:Props) {
                     {!status?copy('检测接收组件中…','Checking receiver…'):
                         !status.supported?copy('仅支持 Windows x64','Windows x64 only'):
                         !status.installed?copy('首次使用需要安装接收组件','Install receiver for first use'):
+                        isRunning && status.sourceWidth && status.sourceHeight
+                            ? copy('已接收镜像视频帧','Receiving mirroring frames'):
                         isRunning?copy('接收器已启动 · 等待手机连接','Receiver running · awaiting device'):
                         copy('已就绪 · 点击启动','Ready · click Start')}
                 </div>
@@ -164,6 +172,24 @@ export default function IosReceiverPanel({locale}:Props) {
             {copy('真机外观不遮挡画面；可在运行中切换真机/纯画面。画质上限与原版界面需停止接收器后更改，实际清晰度取决于 iOS 发送画面。',
                 'The frame leaves pixels untouched. Switch device/clean style live; change quality cap or original UI after stopping. Sender controls actual detail.')}
         </p>}
+        {isRunning && <p className="ml-muted text-[11px] leading-5" role="note" data-testid="ios-actual-resolution">
+            {status?.sourceWidth && status?.sourceHeight
+                ? copy('实际解码画面：','Decoded stream: ')
+                    + status.sourceWidth + ' × ' + status.sourceHeight
+                    + (status.displayWidth && status.displayHeight
+                        ? ' · '+copy('显示窗口：','Window: ')
+                            +status.displayWidth+' × '+status.displayHeight : '')
+                : copy('等待第一帧；画质档位只是接收上限，并非实际画面分辨率。',
+                    'Waiting for the first frame. Quality settings are ceilings, not actual frame size.')}
+        </p>}
+        {isRunning && status?.sourceWidth && status.sourceHeight &&
+            status.displayWidth && status.displayHeight &&
+            (status.displayWidth>status.sourceWidth*1.05 ||
+                status.displayHeight>status.sourceHeight*1.05) &&
+            <p role="note" className="text-amber-500 text-[11px] leading-5">
+                {copy('当前窗口在放大源画面，可能出现模糊。可以缩小接收窗口，或停止后尝试更高画质档位。',
+                    'The window is upscaling received pixels. Shrink it or try a higher quality tier after stopping.')}
+            </p>}
         {error && <p role="alert" className="mt-2 text-xs text-red-500 break-words">{error}</p>}
         {feedback && <p role="status" className="mt-2 text-xs">{feedback}</p>}
         <div className="mt-2 flex items-center justify-between flex-wrap gap-2">

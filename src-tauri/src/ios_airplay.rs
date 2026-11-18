@@ -19,6 +19,9 @@ pub struct IosAirplayState {
     pub(crate) child: Mutex<Option<Child>>,
     install_gate: tokio::sync::Mutex<()>,
     pub(crate) window_style: Mutex<String>,
+    /// Verified decoded texture dimensions from THIS receiver process only.
+    /// The advertised AirPlay resolution is a ceiling, not actual pixels.
+    source_pixels: Mutex<Option<(u32,u32)>>,
 }
 impl Drop for IosAirplayState {
     fn drop(&mut self) {
@@ -44,6 +47,10 @@ pub struct IosAirplayStatus {
     pub compact_mode: bool,
     pub window_style: String,
     pub quality_tier: String,
+    pub source_width: Option<u32>,
+    pub source_height: Option<u32>,
+    pub display_width: Option<u32>,
+    pub display_height: Option<u32>,
 }
 
 fn main_only(window: &Window) -> Result<(), String> {
@@ -218,14 +225,35 @@ fn running(state: &IosAirplayState) -> Result<bool, String> {
     }
     Ok(false)
 }
+/// AirPlay-Windows v0.4.1 logs the actual decoded texture when --log is set:
+/// "VideoRenderer texture (NV12) created 1640x2360". This is distinct from
+/// the square resolution limit we advertise in /info. Collect ONLY numbers;
+/// never store/forward receiver logs containing sender names or LAN IPs.
+fn decoded_texture_from_line(line:&str)->Option<(u32,u32)> {
+    let raw=line.split("VideoRenderer texture (").nth(1)?
+        .split(") created ").nth(1)?
+        .split_whitespace().next()?;
+    let (w,h)=raw.split_once('x')?;
+    let w=w.parse::<u32>().ok()?;
+    let h=h.parse::<u32>().ok()?;
+    (w>=320 && h>=240 && w<=7680 && h<=7680).then_some((w,h))
+}
 fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStatus, String> {
     #[cfg(target_os = "windows")]
     {
         let root=engine_root(app)?;
+        let is_running=running(state)?;
+        let source=if is_running {
+            *state.source_pixels.lock().map_err(|e|e.to_string())?
+        } else {None};
+        let display=if is_running {
+            state.child.lock().map_err(|e|e.to_string())?
+                .as_ref().and_then(|child|crate::ios_device_frame::receiver_client_size(child.id()))
+        }else{None};
         Ok(IosAirplayStatus {
             supported: true,
             installed: installed(&root),
-            running: running(state)?,
+            running: is_running,
             installing: state.install_gate.try_lock().is_err(),
             // Users may change this in the receiver's OPTIONS > Receiver Name.
             receiver_name: ENGINE_NAME.to_string(),
@@ -233,6 +261,10 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
             compact_mode: prefer_window_style(app)?!="classic",
             window_style: prefer_window_style(app)?,
             quality_tier: prefer_quality_tier(app)?,
+            source_width: source.map(|(width,_)|width),
+            source_height: source.map(|(_,height)|height),
+            display_width: display.map(|(width,_)|width),
+            display_height: display.map(|(_,height)|height),
         })
     }
     #[cfg(not(target_os = "windows"))]
@@ -245,6 +277,8 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
             compact_mode: false,
             window_style: "clean".to_string(),
             quality_tier: "high".to_string(),
+            source_width: None, source_height:None,
+            display_width:None, display_height:None,
         })
     }
 }
@@ -378,16 +412,44 @@ pub async fn ios_airplay_start(
         if running(&state)? {drop(_gate);return status_for(&app,&state);}
         let style=prefer_window_style(&app)?;
         configure_receiver_window(&app,style!="classic",&prefer_quality_tier(&app)?)?;
-        let child=std::process::Command::new(root.join("airplay-windows.exe"))
+        // Capture only the receiver's documented video texture dimensions.
+        // The upstream --log switch does NOT create a console if stderr is
+        // piped; unfiltered logs may contain private LAN details, so never
+        // persist them or surface raw lines in the UI.
+        let mut child=std::process::Command::new(root.join("airplay-windows.exe"))
+            .arg("--log")
             .current_dir(&root)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|e|format!("Cannot launch AirPlay receiver: {e}"))?;
         let pid=child.id();
+        let stderr=child.stderr.take();
+        *state.source_pixels.lock().map_err(|e|e.to_string())?=None;
         *state.child.lock().map_err(|e|e.to_string())?=Some(child);
         *state.window_style.lock().map_err(|e|e.to_string())?=style;
+        if let Some(stderr)=stderr {
+            let app_logs=app.clone();
+            std::thread::spawn(move || {
+                use std::io::{BufRead,BufReader};
+                for line in BufReader::new(stderr).lines() {
+                    let Ok(line)=line else {break};
+                    let dimension=decoded_texture_from_line(&line);
+                    let cleared=line.contains("VideoRenderer clear_session:");
+                    if dimension.is_none() && !cleared {continue;}
+                    let state=app_logs.state::<IosAirplayState>();
+                    let is_current=state.child.lock().ok().and_then(
+                        |child|child.as_ref().map(|active|active.id()==pid)
+                    ).unwrap_or(false);
+                    if is_current {
+                        if let Ok(mut pixels)=state.source_pixels.lock(){
+                            *pixels=if cleared {None} else {dimension};
+                        }
+                    }
+                }
+            });
+        }
         tokio::time::sleep(std::time::Duration::from_millis(350)).await;
         if !running(&state)? {
             return Err("AirPlay receiver quit immediately; check Windows firewall or antivirus".into());
@@ -518,6 +580,7 @@ pub fn ios_airplay_stop(
     #[cfg(target_os = "windows")]
     {
         crate::ios_device_frame::close(&app);
+        *state.source_pixels.lock().map_err(|e|e.to_string())?=None;
         if let Some(mut child)=state.child.lock().map_err(|e|e.to_string())?.take() {
             if child.try_wait().map_err(|e|e.to_string())?.is_none() {
                 child.kill().map_err(|e|format!("Cannot stop AirPlay receiver: {e}"))?;
@@ -584,6 +647,23 @@ mod tests {
         assert!(update_receiver_quality_ini(original,"untrusted").is_err());
         assert!(!valid_window_style("../../malicious"));
         assert!(!valid_quality_tier("40000"));
+    }
+    #[test]
+    fn actual_decoder_dimensions_are_strictly_extracted_without_exposing_logs(){
+        assert_eq!(decoded_texture_from_line(
+            "[12:30:01.235] INFO  VideoRenderer texture (NV12) created 1640x2360"),
+            Some((1640,2360)));
+        assert_eq!(decoded_texture_from_line(
+            "[12:30:02.100] INFO  VideoRenderer texture (GPU BGRA) created 2048x2732"),
+            Some((2048,2732)));
+        assert_eq!(decoded_texture_from_line(
+            "[12:31:00.123] INFO  VideoRenderer clear_session: reset cover"),None);
+        assert_eq!(decoded_texture_from_line(
+            "[12:30] INFO receiver 192.168.1.22 name=Office"),None);
+        assert_eq!(decoded_texture_from_line(
+            "VideoRenderer texture (NV12) created 999999999x1"),None);
+        assert_eq!(decoded_texture_from_line(
+            "VideoRenderer texture (NV12) created garbage"),None);
     }
     #[cfg(target_os = "windows")]
     #[test]

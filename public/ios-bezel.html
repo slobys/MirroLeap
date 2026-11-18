@@ -5,41 +5,67 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>MirroLeap iOS bezel</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme:dark; --air-rim:16px; }
   html,body { margin:0; width:100%; height:100%; overflow:hidden; background:transparent !important; }
-  body { user-select:none; pointer-events:none; }
+  body { user-select:none; pointer-events:none; -webkit-user-select:none; }
+  /* iPad Air front: slender matte-black display lip, starlight/silver
+     anodized hairline on the outside; no chunky titanium-gradient strip. */
   #case {
-    position:absolute; inset:0; box-sizing:border-box;
-    border-radius:43px; border:2px solid #73808d;
-    background:linear-gradient(115deg,#65717e 0%,#222930 8%,#090e14 18%,#12161e 72%,#4c5560 96%,#8a949d 100%);
-    box-shadow:inset 0 0 0 2px #090c12,inset 0 0 0 5px #242a33;
+    position:absolute; inset:0; box-sizing:border-box; overflow:hidden;
+    border-radius:27px;
+    border:2px solid #9caeb4;
+    background:linear-gradient(110deg,#181d21 0%,#090c11 17%,#05070a 52%,#11161c 87%,#222a31 100%);
+    box-shadow:inset 0 0 0 1px #3d454c,inset 0 0 0 3px #080b10,
+               inset 0 0 0 5px #14191f;
+  }
+  #case::before {
+    content:""; position:absolute; inset:1px; pointer-events:none;
+    border:1px solid rgba(236,243,242,.22); border-radius:24px;
+  }
+  #case::after {
+    content:""; position:absolute;
+    inset:calc(var(--air-rim) - 2px); pointer-events:none;
+    border:1px solid rgba(7,10,13,.8); border-radius:16px;
   }
   .camera {
-    position:absolute; top:6px; left:50%; transform:translateX(-50%);
-    width:54px; height:8px; border-radius:100px;
-    background:linear-gradient(#010309,#111826); border:1px solid #333b44;
-    box-shadow:inset 0 1px 1px #03060a;
+    position:absolute; top:5px; left:50%; transform:translateX(-50%);
+    width:6px; height:6px; border-radius:50%;
+    background:radial-gradient(circle at 42% 34%,#364d60 0 17%,#152632 31%,#040810 67%);
+    box-shadow:0 0 0 1px #161d25,0 0 1px #617484;
   }
-  .camera::after { content:""; display:block; width:5px; height:5px; border-radius:50%;
-    background:#263d51; box-shadow:0 0 2px #507390; margin:1px auto; }
-  .key { position:absolute; background:linear-gradient(#5e6770,#1b2129,#606974); border-radius:4px; }
-  .volume { left:0; top:21%; width:3px; height:10%; }
-  .power { right:0; top:24%; width:3px; height:12%; }
-  body.ipad #case { border-radius:26px; background:linear-gradient(110deg,#646d77,#171d24 12%,#0a0f16 50%,#313943 93%,#858b94); }
-  body.ipad .camera { top:3px; width:6px; height:6px; border-radius:50%; }
-  body.ipad .volume,body.ipad .power { display:none; }
-  body.landscape .camera { top:50%; left:auto; right:5px; transform:translateY(-50%); width:8px; height:54px; }
-  body.landscape .camera::after { margin:23px auto; }
-  body.landscape.ipad .camera { width:6px; height:6px; right:3px; }
-  body.landscape.ipad .camera::after { margin:0; }
+  .key { position:absolute; background:#59646c; box-shadow:0 0 0 1px #232b31; border-radius:3px; }
+  .volume { left:1px; top:21%; width:2px; height:8%; }
+  .power { right:1px; top:24%; width:2px; height:10%; }
+  body.ipad .key { display:none; }
+  body.iphone #case { border-radius:40px; border-color:#8797a3; }
+  body.iphone #case::before { border-radius:37px; }
+  body.iphone #case::after { border-radius:27px; }
+  body.iphone.portrait .camera {
+    top:5px; width:54px; height:8px; border-radius:100px;
+    background:linear-gradient(165deg,#04070a,#101923,#020407);
+    box-shadow:inset 0 1px 1px #273745;
+  }
+  body.iphone.portrait .camera::after {
+    content:""; position:absolute; top:2px; right:9px; width:4px; height:4px;
+    border-radius:50%; background:#223b50;
+  }
+  body.landscape .camera { top:50%; left:auto; right:5px; transform:translateY(-50%); }
+  body.iphone.landscape .camera { width:8px; height:54px; border-radius:100px; }
+  body.iphone.landscape .camera::after {
+    content:""; position:absolute; left:2px; bottom:9px; width:4px; height:4px;
+    border-radius:50%; background:#223b50;
+  }
 </style>
 </head>
 <body class="ipad portrait">
   <div id="case"><div class="camera"></div><div class="key volume"></div><div class="key power"></div></div>
   <script>
-    window.mirroleapIosSkin=function(kind,orientation){
+    window.mirroleapIosSkin=function(kind,orientation,rim){
       document.body.className=(kind==='iphone'?'iphone':'ipad')+' '+
         (orientation==='landscape'?'landscape':'portrait');
+      if(Number.isFinite(rim) && rim>=8 && rim<=64) {
+        document.documentElement.style.setProperty('--air-rim',rim+'px');
+      }
     };
   </script>
 </body>

@@ -79,6 +79,20 @@ describe('single-page iOS AirPlay experience',()=>{
         await waitFor(()=>expect(invokeMock)
             .toHaveBeenCalledWith('ios_airplay_window_action',{action:'fullscreen'}));
     });
+    it('shows actual decoded pixels and warns only when enlarging the sender image',async()=>{
+        invokeMock.mockResolvedValue({
+            ...ready,installed:true,running:true,qualityTier:'ultra',
+            sourceWidth:1640,sourceHeight:2360,displayWidth:1860,displayHeight:2670,
+        });
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        expect(await screen.findByTestId('ios-actual-resolution'))
+            .toHaveTextContent('实际解码画面：1640 × 2360');
+        expect(screen.getByTestId('ios-actual-resolution'))
+            .toHaveTextContent('显示窗口：1860 × 2670');
+        expect(screen.getByText(/窗口在放大源画面/)).toBeInTheDocument();
+        expect(screen.getByText('已接收镜像视频帧')).toBeInTheDocument();
+        expect(screen.queryByText('iPhone 已连接')).not.toBeInTheDocument();
+    });
     it('keeps connection help collapsed, then shows firewall and DRM limits',async()=>{
         invokeMock.mockResolvedValue(ready);
         render(<IosReceiverPanel locale="zh-CN"/>);

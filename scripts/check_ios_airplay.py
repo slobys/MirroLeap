@@ -22,7 +22,7 @@ assert 'root.join("LICENSE").is_file()' in native
 assert 'root.join("THIRD_PARTY_NOTICES.md").is_file()' in native
 assert "only after a user click" in native and "start" in native
 assert "Only the main MirroLeap window" in native
-assert "running: running(state)?" in native
+assert "let is_running=running(state)?" in native and "running: is_running" in native
 assert "status_for(&app,&state)" in native
 assert "app.manage(ios_airplay::IosAirplayState::default())" in lib
 for command in ("ios_airplay_status","ios_airplay_install","ios_airplay_start",
@@ -57,6 +57,12 @@ assert "mod ios_device_frame;" in lib
 frame=(root/"src-tauri/src/ios_device_frame.rs").read_text(encoding="utf-8")
 assert "SetWindowRgn" in frame and "set_ignore_cursor_events(true)" in frame
 assert "place_ios_companion" in frame and "device-auto" in ui
+assert "GetClientRect" in frame and "ClientToScreen" in frame
+assert "outer_for_client" in frame and "pixel_aligned" in frame
+assert "hollow_bezel(own,metrics,screen" in frame
+assert "ios_device_frame::tests" in workflow
+assert 'arg("--log")' in native and "decoded_texture_from_line" in native
+assert "source_pixels" in native and "sourceWidth" in ui and "displayWidth" in ui
 assert (root/"public/ios-bezel.html").is_file()
 assert "ios_airplay::tests" in workflow
 print("iOS AirPlay preview: inline home, aspect-safe quality caps, passive phone/tablet frame and verified GPL receiver checks passed")
