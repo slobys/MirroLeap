@@ -1,6 +1,6 @@
 import { useEffect, useState, type MouseEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Airplay, CheckCircle2, Download, ExternalLink, LoaderCircle, ShieldAlert, Square, X } from 'lucide-react';
+import { Airplay, CheckCircle2, Download, ExternalLink, Expand, LayoutPanelLeft, LoaderCircle, ShieldAlert, Square, X } from 'lucide-react';
 
 export type IosAirplayStatus = {
     supported: boolean;
@@ -9,6 +9,7 @@ export type IosAirplayStatus = {
     installing: boolean;
     receiverName: string;
     engineVersion: string;
+    compactMode: boolean;
 };
 
 type Props = { locale: string; onClose: () => void };
@@ -17,8 +18,9 @@ export default function IosReceiverPanel({locale, onClose}: Props) {
     const zh = locale.startsWith('zh');
     const copy = (cn: string, en: string) => zh ? cn : en;
     const [status,setStatus] = useState<IosAirplayStatus | null>(null);
-    const [busy,setBusy] = useState<'install'|'start'|'stop'|null>(null);
+    const [busy,setBusy] = useState<'install'|'start'|'stop'|'layout'|'view'|null>(null);
     const [error,setError] = useState<string | null>(null);
+    const [viewFeedback,setViewFeedback] = useState<string | null>(null);
 
     useEffect(() => {
         let active=true;
@@ -48,6 +50,28 @@ export default function IosReceiverPanel({locale, onClose}: Props) {
             try {setStatus(await invoke<IosAirplayStatus>('ios_airplay_status'));}
             catch { /* Keep the action error visible. */ }
         } finally {setBusy(null);}
+    };
+
+    const setCompact=async(compact:boolean)=>{
+        if(busy || status?.running || !status?.supported) return;
+        setBusy('layout');setError(null);setViewFeedback(null);
+        try {
+            setStatus(await invoke<IosAirplayStatus>('ios_airplay_set_compact_mode',{compact}));
+        } catch(error) {setError(String(error));}
+        finally {setBusy(null);}
+    };
+    const viewAction=async(action:'toggle_clean'|'fullscreen')=>{
+        if(busy || !status?.running) return;
+        setBusy('view');setError(null);setViewFeedback(null);
+        try {
+            setStatus(await invoke<IosAirplayStatus>('ios_airplay_window_action',{action}));
+            setViewFeedback(action==='toggle_clean'?
+                copy('已向接收窗口发送 H 切换请求；若未生效，请点击接收窗口后按 H。',
+                     'Sent H request to the receiver. If needed, click its window and press H.') :
+                copy('已发送 F11 全屏切换请求；若未生效，请点击接收窗口后按 F11。',
+                     'Sent F11 fullscreen request. If needed, click its window and press F11.'));
+        } catch(error) {setError(String(error));}
+        finally {setBusy(null);}
     };
 
     const openSource=async(event:MouseEvent<HTMLAnchorElement>)=>{
@@ -115,6 +139,41 @@ export default function IosReceiverPanel({locale, onClose}: Props) {
                                 {copy('停止 iOS 接收器','Stop receiver')}</button>
                         )}
                     </div>
+                    {status?.supported && status.installed && (
+                        <div className="mt-4 rounded-xl border border-zinc-500/20 p-3">
+                            <p className="font-semibold text-xs mb-2">{copy('投屏窗口风格','Receiver window layout')}</p>
+                            <div role="group" aria-label={copy('iOS 投屏窗口布局','iOS mirroring window layout')}
+                                className="grid grid-cols-2 gap-2">
+                                <button type="button" disabled={working||status.running}
+                                    aria-pressed={status.compactMode}
+                                    onClick={()=>void setCompact(true)}
+                                    className={`rounded-lg border px-3 py-2 text-xs flex items-center justify-center gap-1.5 disabled:opacity-60 ${status.compactMode?'border-emerald-500 bg-emerald-500/15':'border-zinc-500/30'}`}>
+                                    <Airplay size={15}/>{copy('简洁投屏（推荐）','Clean view (recommended)')}
+                                </button>
+                                <button type="button" disabled={working||status.running}
+                                    aria-pressed={!status.compactMode}
+                                    onClick={()=>void setCompact(false)}
+                                    className={`rounded-lg border px-3 py-2 text-xs flex items-center justify-center gap-1.5 disabled:opacity-60 ${!status.compactMode?'border-emerald-500 bg-emerald-500/15':'border-zinc-500/30'}`}>
+                                    <LayoutPanelLeft size={15}/>{copy('原版控制界面','Original UI')}
+                                </button>
+                            </div>
+                            <p className="ml-muted text-xs mt-2 leading-5">
+                                {copy('简洁模式启动后只显示投屏画面，隐藏英文侧栏与大块留白，窗口可拖动、缩放并跟随 iPad 旋转。此选项在下次启动接收器时生效。',
+                                      'Clean view removes the sidebar and whitespace, supports dragging/resizing and follows iPad rotation. The setting applies on the next receiver start.')}
+                            </p>
+                            {status.running && <div className="flex flex-wrap gap-2 mt-3">
+                                <button type="button" disabled={working} onClick={()=>void viewAction('toggle_clean')}
+                                    className="ml-secondary-action !min-h-9 px-3 inline-flex items-center gap-2 text-xs">
+                                    <LayoutPanelLeft size={15}/>{copy('切换简洁/原界面（H）','Toggle clean/original (H)')}
+                                </button>
+                                <button type="button" disabled={working} onClick={()=>void viewAction('fullscreen')}
+                                    className="ml-secondary-action !min-h-9 px-3 inline-flex items-center gap-2 text-xs">
+                                    <Expand size={15}/>{copy('全屏/退出（F11）','Toggle fullscreen (F11)')}
+                                </button>
+                            </div>}
+                            {viewFeedback && <p role="status" className="text-xs mt-2 leading-5">{viewFeedback}</p>}
+                        </div>
+                    )}
                     {error && <p className="mt-3 text-xs text-red-400 whitespace-pre-wrap break-words" role="alert">{error}</p>}
                 </div>
 
@@ -135,7 +194,7 @@ export default function IosReceiverPanel({locale, onClose}: Props) {
                 <div className="mt-5 flex items-start gap-2 text-xs ml-muted">
                     <ShieldAlert size={16} className="shrink-0 mt-0.5"/>
                     <p className="leading-5">{copy(
-                        '当前是 iOS 接收第一阶段：支持无线镜像与接收器自身的声音/画面窗口；不支持 ADB 触控控制，无法绕过 Netflix、Apple TV+ 等受保护视频的 DRM。接收器运行状态不代表 iPhone 已连接。',
+                        'iOS 接收阶段使用可缩放的独立窗口，简洁模式不显示第三方接收器侧栏；不支持 ADB 触控控制、Netflix/Apple TV+ 等视频 DRM 绕过。接收器运行不代表 iPhone 已连接。',
                         'iOS receiver phase 1: wireless mirror in a separate window with its own audio. No ADB remote control or bypass of protected video DRM. A running receiver does not mean an iPhone is connected.'
                     )}</p>
                 </div>

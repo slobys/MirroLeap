@@ -1,6 +1,6 @@
 [package]
 name = "mirroleap"
-version = "5.4.0"
+version = "5.4.1"
 authors = ["slobys", "KB-kil0bit contributors"]
 description = "MirroLeap: Android scrcpy and optional iOS AirPlay screen mirroring for Windows"
 edition = "2021"

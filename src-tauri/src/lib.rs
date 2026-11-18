@@ -159,6 +159,8 @@ pub fn run() {
             ios_airplay::ios_airplay_status,
             ios_airplay::ios_airplay_install,
             ios_airplay::ios_airplay_start,
+            ios_airplay::ios_airplay_set_compact_mode,
+            ios_airplay::ios_airplay_window_action,
             ios_airplay::ios_airplay_stop,
             ios_airplay::ios_airplay_open_source,
             commands::get_devices,

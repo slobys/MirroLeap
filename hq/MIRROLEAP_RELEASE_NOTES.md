@@ -1,3 +1,11 @@
+# MirroLeap v5.4.1 · iPhone/iPad 简洁投屏窗口（Windows 测试版）
+
+- 复用 AirPlay-Windows v0.4.1 内建的「Hide interface」原生画面模式，不新增视频截图复制、WebView2 遮罩或改变解码器。默认进入视频优先的无边框、可拖动/缩放窗口，官方实现会随 iPad 横竖屏切换适配窗口比例。
+- MirroLeap iOS 面板新增「简洁投屏（默认）」与「原版控制界面」偏好。下次启动时通过修改 `%APPDATA%/AirPlay-Windows/settings.ini` 的**仅 chromeless 字段**实现，保留接收名称、编码、录制、其他设置；选择行为由 MirroLeap 用户目录单独记忆。
+- 运行中可一键发送 H 隐藏/恢复第三方侧栏、F11 进入/退出全屏。发送目标限制为 MirroLeap 自己启动的 AirPlay Windows 进程对应窗口，不对用户其他程序模拟快捷键；如目标窗口未就绪会报错并提示手动使用 H/F11。
+- Android 5.3.9 的手机边框、放大镜、无线配对保持不变。iOS 视频仍是独立 Windows 原生接收窗口，未融合 Android scrcpy 的画笔、遮罩和 GPU HQ 画面管线，也不支持远程触控和 DRM 绕过。
+- **本版只制作 Windows 测试构建，通过 GitHub Actions Artifacts 下载；没有发布 GitHub Release 或给旧版用户推送更新。**
+
 # MirroLeap v5.4.0 · iPhone/iPad AirPlay 接收中心（Windows 首阶段）
 
 - 新增首页 iOS AirPlay 入口，支持从 MirroLeap 管理独立 iOS 接收组件的安装、运行、停止和基本诊断，Android scrcpy 原功能与旧数据保持不变。

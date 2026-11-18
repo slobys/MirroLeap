@@ -39,6 +39,13 @@ assert "GPL-3.0" in ui and "DRM" in ui
 assert "scripts/check_ios_airplay.py" in workflow
 assert "scripts/check_ios_airplay.py" in release
 assert "'ios_airplay::tests'" in release
-assert '"version": "5.4.0"' in (root/"package.json").read_text()
-assert '"version": "5.4.0"' in (root/"src-tauri/tauri.conf.json").read_text()
-print("iOS AirPlay v5.4.0: pinned GPL receiver, scoped IPC and opt-in UI checks passed")
+assert '"version": "5.4.1"' in (root/"package.json").read_text()
+assert '"version": "5.4.1"' in (root/"src-tauri/tauri.conf.json").read_text()
+assert "ios_airplay::ios_airplay_set_compact_mode" in lib
+assert "ios_airplay::ios_airplay_window_action" in lib
+assert "configure_receiver_window" in native and "update_receiver_ini" in native
+assert "find_window_by_pid" in native and "PostMessageW(Some(hwnd)" in native
+assert "chromeless" in native and "简洁投屏" in ui and "compactMode" in ui
+assert "ios_airplay_set_compact_mode" in ui and "ios_airplay_window_action" in ui
+assert "ios_airplay::tests" in workflow
+print("iOS AirPlay v5.4.1: compact screen-only view, bounded keyboard actions and original GPL receiver checks passed")

@@ -6,7 +6,7 @@ const {invokeMock}=vi.hoisted(()=>({invokeMock:vi.fn()}));
 vi.mock('@tauri-apps/api/core',()=>({invoke:invokeMock}));
 const ready: IosAirplayStatus={
     supported:true,installed:false,running:false,installing:false,
-    engineVersion:'v0.4.1',receiverName:'AirPlay-Windows',
+    engineVersion:'v0.4.1',receiverName:'AirPlay-Windows',compactMode:true,
 };
 describe('opt-in iOS AirPlay receiver in MirroLeap',()=>{
     beforeEach(()=>invokeMock.mockReset());
@@ -21,6 +21,43 @@ describe('opt-in iOS AirPlay receiver in MirroLeap',()=>{
         expect(screen.getByText(/开源 GPL-3.0/)).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button',{name:/下载安装 AirPlay 组件/}));
         await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_install'));
+    });
+    it('defaults to clean screen-only layout and only changes next launch on user command',async()=>{
+        let state={...ready,installed:true};
+        invokeMock.mockImplementation(async(name:string,args?:{compact?:boolean})=>{
+            if(name==='ios_airplay_status')return state;
+            if(name==='ios_airplay_set_compact_mode'){
+                state={...state,compactMode:!!args?.compact};
+                return state;
+            }
+            return state;
+        });
+        render(<IosReceiverPanel locale="zh-CN" onClose={vi.fn()}/>);
+        const clean=await screen.findByRole('button',{name:'简洁投屏（推荐）'});
+        const classic=screen.getByRole('button',{name:'原版控制界面'});
+        expect(clean).toHaveAttribute('aria-pressed','true');
+        expect(invokeMock).not.toHaveBeenCalledWith('ios_airplay_set_compact_mode',expect.anything());
+        fireEvent.click(classic);
+        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_set_compact_mode',{compact:false}));
+        await waitFor(()=>expect(classic).toHaveAttribute('aria-pressed','true'));
+        fireEvent.click(clean);
+        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_set_compact_mode',{compact:true}));
+    });
+    it('can request safe window actions without disconnecting a running iPad',async()=>{
+        const started={...ready,installed:true,running:true};
+        invokeMock.mockImplementation(async(name:string)=>{
+            if(name==='ios_airplay_status'||name==='ios_airplay_window_action')return started;
+            return started;
+        });
+        render(<IosReceiverPanel locale="zh-CN" onClose={vi.fn()}/>);
+        const shortcut=await screen.findByRole('button',{name:/切换简洁\/原界面/});
+        expect(screen.getByRole('button',{name:'简洁投屏（推荐）'})).toBeDisabled();
+        fireEvent.click(shortcut);
+        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_window_action',{action:'toggle_clean'}));
+        expect(await screen.findByText(/已向接收窗口发送 H 切换请求/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button',{name:/全屏\/退出/}));
+        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_window_action',{action:'fullscreen'}));
+        expect(screen.queryByText('iPhone 已连接')).not.toBeInTheDocument();
     });
     it('starts and stops its own process but never reports a connected iPhone',async()=>{
         const installed={...ready,installed:true};
