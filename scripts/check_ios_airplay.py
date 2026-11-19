@@ -82,7 +82,9 @@ assert "ControlAction::Close" in controls and "minimize_receiver" in controls
 assert "ios_window_controls::tests" in workflow
 assert "NativeControls::create()" in frame and "ControlAction::Close" in frame
 assert "apply_video_corner_clip" in frame and "clear_video_corner_clip" in frame
-assert "native_clip_intact" in frame and "RGN_DIFF" in frame
+assert "native_clip_intact" in frame and "BezelGeometry" in frame
+assert "full HWND - rectangular client" in frame
+assert "outer_inner_and_native_video_arcs_are_concentric_at_all_dpis" in frame
 assert "update_hover" in frame and "HIDE_AFTER_MS" in controls
 assert "GetCursorPos" in controls and "SIZE:i32=46" in controls
 assert "safe_corner_x" in frame and "each_inner_round_corner_is_covered" in frame

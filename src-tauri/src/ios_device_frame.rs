@@ -24,7 +24,7 @@ use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
     MONITOR_DEFAULTTONEAREST, CreateRectRgn,CreateRoundRectRgn,
-    CombineRgn,SetWindowRgn,DeleteObject as GdiDeleteObject,HGDIOBJ,RGN_DIFF,RGN_OR,
+    SetWindowRgn,CombineRgn,RGN_OR,DeleteObject as GdiDeleteObject,HGDIOBJ,
     GetWindowRgn,PtInRegion,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
@@ -183,9 +183,42 @@ fn seam_cover_px(dpi:u32)->i32 {
     ((VIDEO_SEAM_COVER_LOGICAL as i64*i64::from(dpi.clamp(96,384))+48)/96)
         .clamp(4,16) as i32
 }
+/// A single source of truth for all three intersecting shapes:
+/// antialiased outer bezel, antialiased inner aperture and HWND video clip.
+///
+/// The video region extends under the opaque bezel by two physical pixels,
+/// eliminating gaps without leaving the receiver's native non-client border
+/// visible around the rounded corners. Both arcs share exactly one centre.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+struct BezelGeometry{
+    inset:i32,
+    cover:i32,
+    outer_radius:i32,
+    inner_radius:i32,
+    clip_overlap:i32,
+}
+impl BezelGeometry {
+    fn new(ipad:bool,dpi:u32)->Self{
+        let inset=bezel_inset(ipad,dpi);
+        let cover=seam_cover_px(dpi);
+        let scale=dpi.clamp(96,384) as f64/96.0;
+        let inner_radius=((if ipad {32.0}else{44.0})*scale).round() as i32;
+        Self{
+            inset,cover,
+            // Concentric: inner opening begins inset+cover pixels inside
+            // the outer case and its arc centre equals the outer arc centre.
+            outer_radius:inner_radius+inset+cover,
+            inner_radius,
+            clip_overlap:2.max((scale*1.3).round() as i32).min(cover-1),
+        }
+    }
+    fn aperture_inset(self)->i32{self.inset+self.cover}
+    fn video_clip_inset(self)->i32{self.cover-self.clip_overlap}
+    fn video_clip_radius(self)->i32{self.inner_radius+self.clip_overlap}
+}
 fn target_layout(video:VideoClient,style:&str,dpi:u32)->Option<CaseLayout>{
     let ipad=choose_ipad(style,video.width,video.height);
-    let inset=bezel_inset(ipad,dpi);
+    let inset=BezelGeometry::new(ipad,dpi).inset;
     let width=video.width.checked_add(inset*2)?;
     let height=video.height.checked_add(inset*2)?;
     if width>MAX_SIDE || height>MAX_SIDE ||
@@ -224,55 +257,80 @@ fn clip_signature(hwnd:HWND,client:VideoClient,ipad:bool,dpi:u32)
 fn clip_shape(client:VideoClient,outer:RECT,ipad:bool,dpi:u32)
     ->Option<(i32,i32,i32,i32,i32)>
 {
-    let cover=seam_cover_px(dpi);
-    let left=client.point.x.checked_sub(outer.left)?.checked_add(cover)?;
-    let top=client.point.y.checked_sub(outer.top)?.checked_add(cover)?;
-    let right=left.checked_add(client.width-2*cover)?;
-    let bottom=top.checked_add(client.height-2*cover)?;
-    let radius=((if ipad{28.0}else{40.0})*dpi as f64/96.0)
-        .round().clamp(10.0,180.0) as i32;
+    let geometry=BezelGeometry::new(ipad,dpi);
+    let clip=geometry.video_clip_inset();
+    let left=client.point.x.checked_sub(outer.left)?.checked_add(clip)?;
+    let top=client.point.y.checked_sub(outer.top)?.checked_add(clip)?;
+    let right=left.checked_add(client.width-2*clip)?;
+    let bottom=top.checked_add(client.height-2*clip)?;
+    let radius=geometry.video_clip_radius();
     (right>left+2*radius && bottom>top+2*radius)
         .then_some((left,top,right,bottom,radius))
 }
-/// Reuse Android's native GDI clipping instead of exposing the SDL window's
-/// rectangular black corners THROUGH the transparent rounded outer case.
-/// Preserve the invisible non-client WS_THICKFRAME resize border: remove
-/// only the rectangular video CLIENT and add back the rounded video region.
+/// Restore SDL borderless window resizing ONLY along straight bezel sides.
+/// Preserve no rectangular native corner (that was the white arc).
+/// These narrow HWND strips remain beneath the fully opaque BGRA shell.
+fn add_straight_resize_hits(
+    aperture:windows::Win32::Graphics::Gdi::HRGN,
+    client:VideoClient,outer:RECT,ipad:bool,dpi:u32,
+    shape:(i32,i32,i32,i32,i32),
+){
+    let (left,top,right,bottom,r)=shape;
+    let geometry=BezelGeometry::new(ipad,dpi);
+    let w=outer.right-outer.left;
+    let h=outer.bottom-outer.top;
+    let cx=client.point.x-outer.left;
+    let cy=client.point.y-outer.top;
+    let left_edge=(cx-geometry.inset+2).max(0);
+    let right_edge=(cx+client.width+geometry.inset-2).min(w);
+    let top_edge=(cy-geometry.inset+2).max(0);
+    let bottom_edge=(cy+client.height+geometry.inset-2).min(h);
+    let x1=left+r+2;
+    let x2=right-r-2;
+    let y1=top+r+2;
+    let y2=bottom-r-2;
+    let strips=[
+        (left_edge,y1,left+1,y2),
+        (right-1,y1,right_edge,y2),
+        (x1,top_edge,x2,top+1),
+        (x1,bottom-1,x2,bottom_edge),
+    ];
+    for (a,b,c,d) in strips {
+        if c<=a || d<=b {continue;}
+        let strip=unsafe{CreateRectRgn(a,b,c,d)};
+        if strip.0.is_null(){continue;}
+        let _=unsafe{CombineRgn(Some(aperture),Some(aperture),Some(strip),RGN_OR)};
+        let _=unsafe{GdiDeleteObject(HGDIOBJ(strip.0))};
+    }
+}
+/// Clip the ACTUAL SDL video client to the exact aperture geometry.
+///
+/// Prior builds used (full HWND - rectangular client + rounded client),
+/// preserving the entire non-client frame. On Win11 the native theme could
+/// paint this preserved corner as a BRIGHT WHITE ARC behind the bezel.
+/// We must NOT retain the rectangular non-client corner: the region is solely
+/// the rounded video aperture, extended 1-2px under the opaque antialiased
+/// inner lip. Only narrow straight-side resize strips remain; no white
+/// native corner can survive beneath the antialiased outer rim.
 fn apply_video_corner_clip(hwnd:HWND,client:VideoClient,ipad:bool,dpi:u32)
     ->Result<(),&'static str>
 {
     let mut bounds=RECT::default();
     unsafe{GetWindowRect(hwnd,&mut bounds)}
         .map_err(|_|"Cannot inspect AirPlay HWND bounds")?;
-    let width=bounds.right-bounds.left;
-    let height=bounds.bottom-bounds.top;
-    if width<=0 || height<=0 || width>MAX_SIDE || height>MAX_SIDE {
+    if bounds.right<=bounds.left || bounds.bottom<=bounds.top ||
+        bounds.right-bounds.left>MAX_SIDE || bounds.bottom-bounds.top>MAX_SIDE {
         return Err("Invalid AirPlay video HWND bounds");
     }
     let (left,top,right,bottom,r)=clip_shape(client,bounds,ipad,dpi)
         .ok_or("Invalid rounded video aperture")?;
-    let full=unsafe{CreateRectRgn(0,0,width+1,height+1)};
-    let client_region=unsafe{CreateRectRgn(
-        client.point.x-bounds.left,client.point.y-bounds.top,
-        client.point.x-bounds.left+client.width+1,
-        client.point.y-bounds.top+client.height+1)};
-    let rounded=unsafe{CreateRoundRectRgn(
+    let aperture=unsafe{CreateRoundRectRgn(
         left,top,right+1,bottom+1,2*r,2*r)};
-    let rest=unsafe{CreateRectRgn(0,0,0,0)};
-    let result=unsafe{CreateRectRgn(0,0,0,0)};
-    let valid=!full.0.is_null() && !client_region.0.is_null() &&
-        !rounded.0.is_null() && !rest.0.is_null() && !result.0.is_null()
-        && unsafe{CombineRgn(Some(rest),Some(full),Some(client_region),RGN_DIFF)}.0>=1
-        && unsafe{CombineRgn(Some(result),Some(rest),Some(rounded),RGN_OR)}.0>=2;
-    for region in [full,client_region,rounded,rest]{
-        if !region.0.is_null(){let _=unsafe{GdiDeleteObject(HGDIOBJ(region.0))};}
-    }
-    if !valid {
-        if !result.0.is_null(){let _=unsafe{GdiDeleteObject(HGDIOBJ(result.0))};}
-        return Err("Cannot construct AirPlay native rounded clip");
-    }
-    if unsafe{SetWindowRgn(hwnd,Some(result),true)}==0 {
-        let _=unsafe{GdiDeleteObject(HGDIOBJ(result.0))};
+    if aperture.0.is_null(){return Err("Cannot create AirPlay rounded aperture");}
+    add_straight_resize_hits(aperture,client,bounds,ipad,dpi,
+        (left,top,right,bottom,r));
+    if unsafe{SetWindowRgn(hwnd,Some(aperture),true)}==0 {
+        let _=unsafe{GdiDeleteObject(HGDIOBJ(aperture.0))};
         return Err("Windows rejected the video rounded clip");
     }
     Ok(())
@@ -288,6 +346,9 @@ fn native_clip_intact(hwnd:HWND,client:VideoClient,ipad:bool,dpi:u32)->bool{
     let valid=kind>=2
         && !unsafe{PtInRegion(rgn,left+1,top+1)}.as_bool()
         && !unsafe{PtInRegion(rgn,right-2,bottom-2)}.as_bool()
+        // Non-client white frame at (0,0) MUST be excluded, otherwise a
+        // bright arc leaks through the antialiased transparent outer corner.
+        && !unsafe{PtInRegion(rgn,0,0)}.as_bool()
         && unsafe{PtInRegion(rgn,(left+right)/2,(top+bottom)/2)}.as_bool();
     let _=unsafe{GdiDeleteObject(HGDIOBJ(rgn.0))};
     valid
@@ -325,11 +386,11 @@ fn render_bezel(layout:CaseLayout)->Result<Vec<u8>,&'static str>{
     }
     let dpi=layout.dpi.clamp(96,384);
     let scale=dpi as f32/96.0;
-    let inset=bezel_inset(layout.ipad,dpi);
-    let inner_inset=inset+seam_cover_px(dpi);
-    // Restore #44351521843's iPad Air silhouette and graphite screen lip.
-    let radius=(if layout.ipad {40.0}else{54.0})*scale;
-    let hole_radius=(if layout.ipad {29.0}else{41.0})*scale;
+    let geometry=BezelGeometry::new(layout.ipad,dpi);
+    let inner_inset=geometry.aperture_inset();
+    // Both arcs have the SAME centre, not independently tuned radii.
+    let radius=geometry.outer_radius as f32;
+    let hole_radius=geometry.inner_radius as f32;
     let mut pixels=vec![0u8;(w as usize)*(h as usize)*4];
     let safe_corner_x=inner_inset+hole_radius.ceil() as i32+2;
     let safe_corner_y=safe_corner_x;
@@ -647,6 +708,8 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
     let mut previous_skin:Option<(i32,i32,bool,u32)>=None;
     let mut applied_video_clip:Option<NativeVideoClip>=None;
     let mut clip_checked_at=Instant::now()-Duration::from_secs(1);
+    let mut last_stacked=Instant::now()-Duration::from_secs(1);
+    let mut last_anchor:Option<usize>=None;
     let mut shown=false;
     let mut applied=false;
     while !stop.load(Ordering::Acquire){
@@ -727,7 +790,8 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
             clip_checked_at=Instant::now();
         }
         let skin=(layout.width,layout.height,layout.ipad,layout.dpi);
-        if previous_skin!=Some(skin){
+        let skin_changed=previous_skin!=Some(skin);
+        if skin_changed{
             if let Err(reason)=surface.present(hwnd.as_ptr(),layout){
                 hide(hwnd.as_ptr(),&mut shown);
                 state.frame_attached.store(false,Ordering::Release);
@@ -737,11 +801,33 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
             }
             previous_skin=Some(skin);
         }
-        // Use native Win32 stacking; position above the SDL HWND in the
-        // SAME z-order band rather than creating an always-topmost overlay.
-        let location=crate::device_frame::place_ios_companion(
-            HWND(hwnd.as_ptr()),video,layout.point.x,layout.point.y,
-            layout.width,layout.height);
+        // Previously we forcibly re-stacked this top-level layer EVERY 16ms,
+        // competing with the immediate EVENT_OBJECT_LOCATIONCHANGE handler.
+        // Let that callback do movement in the same Win32 event turn, and
+        // perform only light no-z-order repairs during the health loop.
+        // Re-stack at 350ms intervals / geometry or anchor changes.
+        let restack=skin_changed || !shown ||
+            last_anchor!=Some(video.0 as usize) ||
+            last_stacked.elapsed()>Duration::from_millis(350);
+        let location=if restack{
+            last_stacked=Instant::now();
+            last_anchor=Some(video.0 as usize);
+            crate::device_frame::place_ios_companion(
+                HWND(hwnd.as_ptr()),video,layout.point.x,layout.point.y,
+                layout.width,layout.height)
+        }else{
+            let mut old=RECT::default();
+            if unsafe{GetWindowRect(HWND(hwnd.as_ptr()),&mut old)}.is_err(){
+                Err("Could not inspect native bezel position".into())
+            }else if (old.left-layout.point.x).abs()>1 ||
+                (old.top-layout.point.y).abs()>1 {
+                if unsafe{SetWindowPos(hwnd.as_ptr(),ptr::null_mut(),
+                    layout.point.x,layout.point.y,0,0,
+                    SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE)}==0 {
+                    Err("Could not repair native bezel position".into())
+                }else{Ok(())}
+            }else{Ok(())}
+        };
         if location.is_err(){
             hide(hwnd.as_ptr(),&mut shown);
             state.frame_attached.store(false,Ordering::Release);
@@ -881,10 +967,37 @@ mod tests{
         };
         let outer=RECT{left:92,top:72,right:808,bottom:1068};
         let (left,top,right,bottom,radius)=clip_shape(video,outer,true,96).unwrap();
-        assert_eq!((left,top,right,bottom),(12,12,704,984));
-        assert!(radius>=28);
+        assert_eq!((left,top,right,bottom),(10,10,706,986));
+        assert_eq!(radius,BezelGeometry::new(true,96).video_clip_radius());
         let (_,_,_,_,hi_dpi)=clip_shape(video,outer,true,144).unwrap();
         assert!(hi_dpi>radius);
+    }
+    #[test]
+    fn outer_inner_and_native_video_arcs_are_concentric_at_all_dpis(){
+        for ipad in [true,false] {
+            for dpi in [96,120,144,192,288] {
+                let geometry=BezelGeometry::new(ipad,dpi);
+                assert_eq!(geometry.outer_radius,
+                    geometry.aperture_inset()+geometry.inner_radius);
+                // The native clip is 1–2px INSIDE the opaque graphite lip,
+                // so the compositor cannot expose a white/blue seam.
+                assert_eq!(geometry.video_clip_inset()+
+                    geometry.video_clip_radius(),
+                    geometry.cover+geometry.inner_radius);
+                assert!(geometry.outer_radius>geometry.inner_radius);
+                let skin=layout(620,940,ipad,dpi);
+                let bgra=render_bezel(skin).unwrap();
+                let x=geometry.aperture_inset()+geometry.inner_radius;
+                // At the upper-left arc's common centre, the inner aperture
+                // is fully transparent. Just outside its radius, the rim
+                // remains dark (no cyan/white native decoration).
+                let alpha=|x:i32,y:i32|
+                    bgra[((y*skin.width+x)*4+3) as usize];
+                assert_eq!(alpha(x,x),0);
+                assert_eq!(alpha(geometry.aperture_inset()+2,
+                    geometry.aperture_inset()+2),255);
+            }
+        }
     }
     #[test]
     fn native_win32_gdi_region_clips_all_four_square_video_corners(){
@@ -897,7 +1010,21 @@ mod tests{
         let hwnd=HWND(raw.as_ptr());
         let video=VideoClient{point:Point{x:100,y:80},width:320,height:480};
         let result=apply_video_corner_clip(hwnd,video,true,96);
-        if result.is_ok(){assert!(native_clip_intact(hwnd,video,true,96));}
+        if result.is_ok(){
+            assert!(native_clip_intact(hwnd,video,true,96));
+            let rgn=unsafe{CreateRectRgn(0,0,0,0)};
+            assert!(!rgn.0.is_null());
+            let actual=unsafe{GetWindowRgn(hwnd,rgn)};
+            assert!(actual.0>=2);
+            for (x,y) in [(0,0),(319,0),(0,479),(319,479)]{
+                assert!(!unsafe{PtInRegion(rgn,x,y)}.as_bool(),
+                    "native corner ({x},{y}) must remain transparent");
+            }
+            // Straight-side resize hit regions remain valid, but the old
+            // complete HWND nonclient border that leaked a white arc is gone.
+            assert!(unsafe{PtInRegion(rgn,0,240)}.as_bool());
+            let _=unsafe{GdiDeleteObject(HGDIOBJ(rgn.0))};
+        }
         clear_video_corner_clip(hwnd);
         unsafe{DestroyWindow(raw.as_ptr());}
         result.unwrap();
