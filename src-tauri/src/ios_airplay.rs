@@ -142,7 +142,7 @@ fn quality_cap(tier:&str)->Option<(u32,u32)> {
 fn adaptive_quality_cap(display:Option<(u32,u32)>)->u32{
     let longest=display.and_then(|(w,h)|
         (w>=320 && h>=240 && w<=7680 && h<=7680).then_some(w.max(h))
-    ).unwrap_or(1714);
+    ).unwrap_or(1830);
     let desired=((longest as u64*103+99)/100).clamp(1280,3840) as u32;
     ((desired+63)/64*64).min(3840)
 }

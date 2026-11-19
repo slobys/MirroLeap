@@ -24,7 +24,7 @@ use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
     MONITOR_DEFAULTTONEAREST, CreateRectRgn,CreateRoundRectRgn,
-    CombineRgn,SetWindowRgn,DeleteObject,HGDIOBJ,RGN_DIFF,RGN_OR,
+    CombineRgn,SetWindowRgn,DeleteObject as GdiDeleteObject,HGDIOBJ,RGN_DIFF,RGN_OR,
     GetWindowRgn,PtInRegion,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
@@ -265,14 +265,14 @@ fn apply_video_corner_clip(hwnd:HWND,client:VideoClient,ipad:bool,dpi:u32)
         && unsafe{CombineRgn(Some(rest),Some(full),Some(client_region),RGN_DIFF)}.0>=1
         && unsafe{CombineRgn(Some(result),Some(rest),Some(rounded),RGN_OR)}.0>=2;
     for region in [full,client_region,rounded,rest]{
-        if !region.0.is_null(){let _=unsafe{DeleteObject(HGDIOBJ(region.0))};}
+        if !region.0.is_null(){let _=unsafe{GdiDeleteObject(HGDIOBJ(region.0))};}
     }
     if !valid {
-        if !result.0.is_null(){let _=unsafe{DeleteObject(HGDIOBJ(result.0))};}
+        if !result.0.is_null(){let _=unsafe{GdiDeleteObject(HGDIOBJ(result.0))};}
         return Err("Cannot construct AirPlay native rounded clip");
     }
     if unsafe{SetWindowRgn(hwnd,Some(result),true)}==0 {
-        let _=unsafe{DeleteObject(HGDIOBJ(result.0))};
+        let _=unsafe{GdiDeleteObject(HGDIOBJ(result.0))};
         return Err("Windows rejected the video rounded clip");
     }
     Ok(())
@@ -289,7 +289,7 @@ fn native_clip_intact(hwnd:HWND,client:VideoClient,ipad:bool,dpi:u32)->bool{
         && !unsafe{PtInRegion(rgn,left+1,top+1)}.as_bool()
         && !unsafe{PtInRegion(rgn,right-2,bottom-2)}.as_bool()
         && unsafe{PtInRegion(rgn,(left+right)/2,(top+bottom)/2)}.as_bool();
-    let _=unsafe{DeleteObject(HGDIOBJ(rgn.0))};
+    let _=unsafe{GdiDeleteObject(HGDIOBJ(rgn.0))};
     valid
 }
 fn clear_video_corner_clip(hwnd:HWND){
