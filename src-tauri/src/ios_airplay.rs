@@ -3,7 +3,7 @@
 //! No unverified executables, arbitrary URLs or paths are accepted from JS.
 use serde::Serialize;
 use std::process::Child;
-use std::sync::Mutex;
+use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
 use tauri::{AppHandle, Manager, State, Window};
 
 pub const ENGINE_NAME: &str = "AirPlay-Windows";
@@ -19,6 +19,7 @@ pub struct IosAirplayState {
     pub(crate) child: Mutex<Option<Child>>,
     install_gate: tokio::sync::Mutex<()>,
     pub(crate) window_style: Mutex<String>,
+    pub(crate) frame_attached: AtomicBool,
     /// Verified decoded texture dimensions from THIS receiver process only.
     /// The advertised AirPlay resolution is a ceiling, not actual pixels.
     source_pixels: Mutex<Option<(u32,u32)>>,
@@ -51,6 +52,7 @@ pub struct IosAirplayStatus {
     pub source_height: Option<u32>,
     pub display_width: Option<u32>,
     pub display_height: Option<u32>,
+    pub frame_attached: bool,
 }
 
 fn main_only(window: &Window) -> Result<(), String> {
@@ -265,6 +267,7 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
             source_height: source.map(|(_,height)|height),
             display_width: display.map(|(width,_)|width),
             display_height: display.map(|(_,height)|height),
+            frame_attached: is_running && state.frame_attached.load(Ordering::Acquire),
         })
     }
     #[cfg(not(target_os = "windows"))]
@@ -279,6 +282,7 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
             quality_tier: "high".to_string(),
             source_width: None, source_height:None,
             display_width:None, display_height:None,
+            frame_attached: false,
         })
     }
 }

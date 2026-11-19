@@ -19,6 +19,8 @@ export type IosAirplayStatus = {
     /** Win32 physical SDL client area (may be smaller/larger than source). */
     displayWidth?:number|null;
     displayHeight?:number|null;
+    /** Confirmed native parent-child relationship with the AirPlay HWND. */
+    frameAttached?:boolean;
 };
 type Props={locale:string};
 const windowStyles=[
@@ -169,8 +171,15 @@ export default function IosReceiverPanel({locale}:Props) {
                 <Expand size={15}/>{copy('全屏','Fullscreen')}</button>}
         </div>}
         {status?.installed && <p className="ml-muted mt-2 text-[11px] leading-5" role="note">
-            {copy('真机外观不遮挡画面；可在运行中切换真机/纯画面。画质上限与原版界面需停止接收器后更改，实际清晰度取决于 iOS 发送画面。',
-                'The frame leaves pixels untouched. Switch device/clean style live; change quality cap or original UI after stopping. Sender controls actual detail.')}
+            {copy('真机边框现在固定在视频窗口内部，与画面一起移动；最外侧占用约 12–14 像素，避免旧版独立窗口错位。可运行中切换真机/纯画面。',
+                'The device bezel is attached inside the video window and moves with it, using a thin 12–14px inner rim. Switch device/clean style live.')}
+        </p>}
+        {isRunning && style.startsWith('device-') && <p role="status"
+            data-testid="ios-frame-attachment" className="ml-muted text-[11px] mt-1">
+            {status?.frameAttached
+                ? copy('真机边框：已绑定 AirPlay 视频窗口','Device frame: attached to the AirPlay video window')
+                : copy('真机边框：尚未绑定；为防止错位，暂不显示边框',
+                    'Device frame: not attached; hidden to prevent misalignment')}
         </p>}
         {isRunning && <p className="ml-muted text-[11px] leading-5" role="note" data-testid="ios-actual-resolution">
             {status?.sourceWidth && status?.sourceHeight

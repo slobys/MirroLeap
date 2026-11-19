@@ -83,6 +83,7 @@ describe('single-page iOS AirPlay experience',()=>{
         invokeMock.mockResolvedValue({
             ...ready,installed:true,running:true,qualityTier:'ultra',
             sourceWidth:1640,sourceHeight:2360,displayWidth:1860,displayHeight:2670,
+            frameAttached:true,
         });
         render(<IosReceiverPanel locale="zh-CN"/>);
         expect(await screen.findByTestId('ios-actual-resolution'))
@@ -91,7 +92,15 @@ describe('single-page iOS AirPlay experience',()=>{
             .toHaveTextContent('显示窗口：1860 × 2670');
         expect(screen.getByText(/窗口在放大源画面/)).toBeInTheDocument();
         expect(screen.getByText('已接收镜像视频帧')).toBeInTheDocument();
+        expect(screen.getByTestId('ios-frame-attachment'))
+            .toHaveTextContent('已绑定 AirPlay 视频窗口');
         expect(screen.queryByText('iPhone 已连接')).not.toBeInTheDocument();
+    });
+    it('does not misreport an unattached or incompatible receiver bezel as working',async()=>{
+        invokeMock.mockResolvedValue({...ready,installed:true,running:true,frameAttached:false});
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        expect(await screen.findByTestId('ios-frame-attachment'))
+            .toHaveTextContent('为防止错位，暂不显示边框');
     });
     it('keeps connection help collapsed, then shows firewall and DRM limits',async()=>{
         invokeMock.mockResolvedValue(ready);

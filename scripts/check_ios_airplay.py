@@ -56,10 +56,13 @@ assert "ios_device_frame::start" in native and "ios_device_frame::close" in nati
 assert "mod ios_device_frame;" in lib
 frame=(root/"src-tauri/src/ios_device_frame.rs").read_text(encoding="utf-8")
 assert "SetWindowRgn" in frame and "set_ignore_cursor_events(true)" in frame
-assert "place_ios_companion" in frame and "device-auto" in ui
-assert "GetClientRect" in frame and "ClientToScreen" in frame
-assert "outer_for_client" in frame and "pixel_aligned" in frame
-assert "hollow_bezel(own,metrics,screen" in frame
+assert "device-auto" in ui
+assert "GetClientRect" in frame and "SetParent(child, Some(video))" in frame
+assert "GetParent(child)" in frame and "WS_CHILD" in frame
+assert "SetWindowPos(child, Some(HWND_TOP), 0, 0" in frame
+assert "hollow_child(child, size, inset, ipad, dpi)" in frame
+assert "place_ios_companion(" not in frame and "ClientToScreen(" not in frame
+assert "frame_attached" in native and "frame_attached" in frame
 assert "ios_device_frame::tests" in workflow
 assert 'arg("--log")' in native and "decoded_texture_from_line" in native
 assert "source_pixels" in native and "sourceWidth" in ui and "displayWidth" in ui

@@ -1,99 +1,172 @@
-//! Passive click-through iPhone/iPad silhouette around the VERIFIED AirPlay
-//! receiver HWND. No frame interception, video capture or AirPlay injection.
-//! The entire video aperture is physically punched out of our WebView HWND:
-//! a failed transparent WebView cannot paint white over the sender's pixels.
-use std::time::{Duration,Instant};
+//! AirPlay video-attached iPad/iPhone shell (Windows only).
+//!
+//! The previous shell was another TOP-LEVEL window which chased the SDL video
+//! HWND by desktop coordinates. Even perfect ClientToScreen arithmetic cannot
+//! make two independently composited top-level windows move atomically.
+//! Instead, re-parent our transparent/mouse-through WebView as a WS_CHILD of
+//! the receiver's native SDL HWND. Windows itself moves them together. The
+//! shell is a thin INWARD rim, preserving the real video HWND, focus, keyboard,
+//! original renderer and audio. On any unsafe parent/geometry state hide it.
+
+use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
-use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CombineRgn, CreateRoundRectRgn, CreateRectRgn, DeleteObject,
-    GetMonitorInfoW,
-    MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, HGDIOBJ,
-    RGN_DIFF, SetWindowRgn,
+    CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
+    HGDIOBJ, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, RGN_DIFF,
+    SetWindowRgn,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, GetWindowRect, IsIconic, IsWindowVisible,
+    GetClientRect, GetParent, GetWindowLongPtrW, GetWindowRect, GWL_EXSTYLE,
+    GWL_STYLE, HWND_TOP, IsIconic, IsWindowVisible, SetParent, SetWindowLongPtrW,
+    SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    WS_CAPTION, WS_CHILD, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT, WS_POPUP,
+    WS_THICKFRAME,
 };
 
 const LABEL: &str = "ios-device-bezel";
 
-#[derive(Clone,Copy,Debug,PartialEq,Eq)]
-struct PixelRect {
-    x:i32,y:i32,width:i32,height:i32,
-}
-#[derive(Clone,Copy,Debug,PartialEq,Eq)]
-struct ShellMetrics {
-    outer:PixelRect,
-    client:PixelRect,
-}
-fn pixel_aligned(actual:PixelRect,target:PixelRect)->bool {
-    (actual.x-target.x).abs()<=1
-        && (actual.y-target.y).abs()<=1
-        && (actual.width-target.width).abs()<=1
-        && (actual.height-target.height).abs()<=1
-}
-/// The previous implementation used GetWindowRect of the foreign SDL HWND,
-/// which includes an invisible Windows resize frame. It also sized this
-/// Tauri WebView using the *outer* dimensions, ignoring its own non-client
-/// offsets. Both errors compounded after Windows DPI scaling / resizing.
-/// Use Android's already-proven GetClientRect + ClientToScreen contract.
-fn screen_client(hwnd:HWND)->Result<PixelRect,String>{
-    let mut bounds=RECT::default();
-    unsafe{GetClientRect(hwnd,&mut bounds)}
-        .map_err(|e|format!("Cannot read video client area: {e}"))?;
-    let mut origin=POINT::default();
-    if !unsafe{ClientToScreen(hwnd,&mut origin)}.as_bool(){
-        return Err("Cannot locate video client origin".into());
-    }
-    let width=bounds.right-bounds.left;
-    let height=bounds.bottom-bounds.top;
-    if width<=0 || height<=0 {return Err("Empty video client area".into());}
-    Ok(PixelRect{x:origin.x,y:origin.y,width,height})
-}
-pub(crate) fn receiver_client_size(pid:u32)->Option<(u32,u32)> {
-    let hwnd=crate::commands::find_window_by_pid(pid)?;
-    let rc=screen_client(hwnd).ok()?;
-    if rc.width<100 || rc.height<100 {return None;}
-    Some((rc.width as u32,rc.height as u32))
-}
-fn shell_metrics(hwnd:HWND)->Result<ShellMetrics,String>{
-    let client=screen_client(hwnd)?;
-    let mut bounds=RECT::default();
-    unsafe{GetWindowRect(hwnd,&mut bounds)}
-        .map_err(|e|format!("Cannot read iOS bezel HWND bounds: {e}"))?;
-    Ok(ShellMetrics{
-        outer:PixelRect{x:bounds.left,y:bounds.top,
-            width:bounds.right-bounds.left,height:bounds.bottom-bounds.top},
-        client,
-    })
-}
-/// Solve for the native OUTER HWND placement that puts the WebView CLIENT
-/// exactly around the video CLIENT, including invisible Win32 frame margins.
-fn outer_for_client(target:PixelRect, shell:ShellMetrics)->Option<PixelRect>{
-    let left_inset=shell.client.x.checked_sub(shell.outer.x)?;
-    let top_inset=shell.client.y.checked_sub(shell.outer.y)?;
-    let extra_w=shell.outer.width.checked_sub(shell.client.width)?;
-    let extra_h=shell.outer.height.checked_sub(shell.client.height)?;
-    if left_inset.abs()>64 || top_inset.abs()>64 || extra_w.abs()>128 || extra_h.abs()>128 {
-        return None;
-    }
-    Some(PixelRect{
-        x:target.x.checked_sub(left_inset)?,
-        y:target.y.checked_sub(top_inset)?,
-        width:target.width.checked_add(extra_w)?,
-        height:target.height.checked_add(extra_h)?,
-    })
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Extent { width: i32, height: i32 }
+
+fn safe_extent(width: i32, height: i32) -> Option<Extent> {
+    (width >= 160 && height >= 120 && width <= 9000 && height <= 9000)
+        .then_some(Extent { width, height })
 }
 
-pub fn close(app:&AppHandle) {
-    if let Some(old)=app.get_webview_window(LABEL) {let _=old.close();}
+fn classify_ipad(style: &str, size: Extent) -> bool {
+    match style {
+        "device-ipad" => true,
+        "device-iphone" => false,
+        _ => (size.width.min(size.height) as f64 /
+            size.width.max(size.height) as f64) >= 0.62,
+    }
 }
 
-pub fn start(app:&AppHandle,pid:u32)->Result<(),String>{
+fn inset_px(ipad: bool, dpi: u32) -> i32 {
+    let logical: i32 = if ipad { 12 } else { 14 };
+    ((logical as i64 * dpi.clamp(96, 384) as i64 + 48) / 96)
+        .clamp(8, 56) as i32
+}
+
+fn client_extent(hwnd: HWND) -> Option<Extent> {
+    let mut rect = RECT::default();
+    unsafe { GetClientRect(hwnd, &mut rect) }.ok()?;
+    safe_extent(rect.right - rect.left, rect.bottom - rect.top)
+}
+
+pub(crate) fn receiver_client_size(pid: u32) -> Option<(u32, u32)> {
+    let hwnd = crate::commands::find_window_by_pid(pid)?;
+    let size = client_extent(hwnd)?;
+    Some((size.width as u32, size.height as u32))
+}
+
+fn is_video_fullscreen(hwnd: HWND) -> bool {
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() { return false; }
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    if monitor.0.is_null() { return false; }
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
+        return false;
+    }
+    let screen = info.rcMonitor;
+    rect.left <= screen.left + 4 && rect.top <= screen.top + 4
+        && rect.right >= screen.right - 4 && rect.bottom >= screen.bottom - 4
+}
+
+fn parent_matches(child: HWND, video: HWND) -> bool {
+    unsafe { GetParent(child) }.ok() == Some(video)
+}
+
+/// Win32 relationship is the source of truth: never show a second top-level
+/// overlay as fallback. If cross-process/DPI safety rejects SetParent, keep
+/// mirroring unobstructed with the shell hidden.
+fn attach_shell(child: HWND, video: HWND) -> Result<(), String> {
+    if parent_matches(child, video) { return Ok(()); }
+    let original = unsafe { GetWindowLongPtrW(child, GWL_STYLE) };
+    let child_style = (original &
+        !((WS_POPUP.0 | WS_CAPTION.0 | WS_THICKFRAME.0) as isize))
+        | WS_CHILD.0 as isize;
+    unsafe { SetWindowLongPtrW(child, GWL_STYLE, child_style); }
+    let current = unsafe { GetWindowLongPtrW(child, GWL_STYLE) };
+    if current & WS_CHILD.0 as isize == 0 {
+        unsafe { SetWindowLongPtrW(child, GWL_STYLE, original); }
+        return Err("Could not enable native child-window style".into());
+    }
+    let ex = unsafe { GetWindowLongPtrW(child, GWL_EXSTYLE) };
+    unsafe {
+        SetWindowLongPtrW(child, GWL_EXSTYLE,
+            ex | WS_EX_NOACTIVATE.0 as isize | WS_EX_TRANSPARENT.0 as isize);
+    }
+    if let Err(error) = unsafe { SetParent(child, Some(video)) } {
+        unsafe { SetWindowLongPtrW(child, GWL_STYLE, original); }
+        return Err(format!("Windows refused iOS bezel parent attachment: {error}"));
+    }
+    if !parent_matches(child, video) {
+        return Err("iOS bezel was not attached to the active AirPlay video".into());
+    }
+    Ok(())
+}
+
+/// A tiny OS-level rim INSIDE the parent video client. The middle is removed
+/// using a GDI region so Chromium cannot ever paint over moving video pixels.
+/// We do not touch the receiver HWND region or alter any AirPlay frames.
+fn hollow_child(hwnd: HWND, size: Extent, inset: i32, ipad: bool, dpi: u32)
+    -> Result<(), String>
+{
+    let radius = ((if ipad { 27.0 } else { 39.0 }) *
+        f64::from(dpi) / 96.0).round() as i32;
+    let inner_radius = ((if ipad { 15.0 } else { 25.0 }) *
+        f64::from(dpi) / 96.0).round() as i32;
+    let outer = unsafe {
+        CreateRoundRectRgn(0, 0, size.width + 1, size.height + 1,
+            radius * 2, radius * 2)
+    };
+    if outer.0.is_null() { return Err("Could not create iOS outer rim".into()); }
+    let inner = unsafe {
+        CreateRoundRectRgn(inset, inset,
+            size.width - inset + 1, size.height - inset + 1,
+            inner_radius * 2, inner_radius * 2)
+    };
+    let rim = unsafe { CreateRectRgn(0, 0, 0, 0) };
+    let valid = !inner.0.is_null() && !rim.0.is_null()
+        && unsafe { CombineRgn(Some(rim), Some(outer), Some(inner), RGN_DIFF) }.0 >= 2;
+    let _ = unsafe { DeleteObject(HGDIOBJ(outer.0)) };
+    if !inner.0.is_null() {
+        let _ = unsafe { DeleteObject(HGDIOBJ(inner.0)) };
+    }
+    if !valid {
+        if !rim.0.is_null() {
+            let _ = unsafe { DeleteObject(HGDIOBJ(rim.0)) };
+        }
+        return Err("Could not create hollow iOS bezel".into());
+    }
+    if unsafe { SetWindowRgn(hwnd, Some(rim), true) } == 0 {
+        let _ = unsafe { DeleteObject(HGDIOBJ(rim.0)) };
+        return Err("Windows rejected hollow iOS bezel".into());
+    }
+    Ok(())
+}
+
+pub fn close(app: &AppHandle) {
+    app.state::<crate::ios_airplay::IosAirplayState>().frame_attached
+        .store(false, Ordering::Release);
+    if let Some(old) = app.get_webview_window(LABEL) {
+        let _ = old.close();
+    }
+}
+
+pub fn start(app: &AppHandle, pid: u32) -> Result<(), String> {
     close(app);
-    let view=WebviewWindowBuilder::new(app,LABEL,WebviewUrl::App("ios-bezel.html".into()))
-        .title("MirroLeap iOS bezel")
+    let view = WebviewWindowBuilder::new(
+        app, LABEL, WebviewUrl::App("ios-bezel.html".into()))
+        .title("MirroLeap iOS device bezel")
         .background_color(tauri::window::Color(0,0,0,0))
         .transparent(true)
         .decorations(false)
@@ -102,247 +175,149 @@ pub fn start(app:&AppHandle,pid:u32)->Result<(),String>{
         .skip_taskbar(true)
         .focused(false)
         .visible(false)
-        .inner_size(440.0,780.0)
+        .inner_size(400.0,700.0)
         .build()
-        .map_err(|e|format!("Cannot create iOS device bezel: {e}"))?;
-    if let Err(error)=view.set_ignore_cursor_events(true) {
-        let _=view.close();
-        return Err(format!("iOS frame must be mouse-through: {error}"));
+        .map_err(|e|format!("Cannot create iOS bezel: {e}"))?;
+    if let Err(error) = view.set_ignore_cursor_events(true) {
+        let _ = view.close();
+        return Err(format!("iOS bezel must be mouse-through: {error}"));
     }
-    tokio::spawn(follow(app.clone(),view,pid));
+    tokio::spawn(follow(app.clone(), view, pid));
     Ok(())
 }
 
-fn is_fullscreen(video:HWND,rect:RECT)->bool{
-    let monitor=unsafe{MonitorFromWindow(video,MONITOR_DEFAULTTONEAREST)};
-    if monitor.0.is_null(){return false;}
-    let mut info=MONITORINFO{cbSize:std::mem::size_of::<MONITORINFO>() as u32,..Default::default()};
-    if !unsafe{GetMonitorInfoW(monitor,&mut info)}.as_bool(){return false;}
-    let screen=info.rcMonitor;
-    rect.left<=screen.left+4 && rect.top<=screen.top+4
-        && rect.right>=screen.right-4 && rect.bottom>=screen.bottom-4
-}
-
-/// Cut out the EXACT SDL CLIENT area rather than estimating the screen hole
-/// from the foreign window's decorated bounding box. All coordinates are
-/// relative to the bezel OUTER HWND, not the WebView's CSS origin.
-fn hollow_bezel(
-    hwnd:HWND, shell:ShellMetrics, video:PixelRect, ipad:bool,scale:f64,
-)->Result<(),String>{
-    let outer_radius=(((if ipad {27.0}else{40.0})*scale).round() as i32).max(6);
-    let inner_radius=(((if ipad {16.0}else{27.0})*scale).round() as i32).max(4);
-    let left=shell.client.x-shell.outer.x;
-    let top=shell.client.y-shell.outer.y;
-    let width=shell.client.width;
-    let height=shell.client.height;
-    let outer=unsafe{CreateRoundRectRgn(left,top,
-        left+width+1,top+height+1,outer_radius*2,outer_radius*2)};
-    if outer.0.is_null(){return Err("Could not allocate iOS frame region".into());}
-    let hole_left=video.x-shell.outer.x;
-    let hole_top=video.y-shell.outer.y;
-    let inner=unsafe{CreateRoundRectRgn(
-        hole_left,hole_top,hole_left+video.width+1,hole_top+video.height+1,
-        inner_radius*2,inner_radius*2
-    )};
-    let rim=unsafe{CreateRectRgn(0,0,0,0)};
-    let ok=!inner.0.is_null() && !rim.0.is_null()
-        && unsafe{CombineRgn(Some(rim),Some(outer),Some(inner),RGN_DIFF)}.0>=2;
-    let _=unsafe{DeleteObject(HGDIOBJ(outer.0))};
-    if !inner.0.is_null(){let _=unsafe{DeleteObject(HGDIOBJ(inner.0))};}
-    if !ok {
-        if !rim.0.is_null(){let _=unsafe{DeleteObject(HGDIOBJ(rim.0))};}
-        return Err("Could not create the iOS bezel aperture".into());
-    }
-    if unsafe{SetWindowRgn(hwnd,Some(rim),true)}==0 {
-        let _=unsafe{DeleteObject(HGDIOBJ(rim.0))};
-        return Err("Windows rejected iOS bezel region".into());
-    }
-    Ok(())
-}
-
-async fn follow(app:AppHandle,view:WebviewWindow,pid:u32) {
-    // Leave the window hidden until WebView2 has loaded its transparent page.
-    tokio::time::sleep(Duration::from_millis(450)).await;
-    // Keep only a Send-safe integer across tokio awaits, not an HWND pointer.
-    let own_raw=match view.hwnd(){Ok(hwnd)=>hwnd.0 as usize,Err(_)=>return};
-    let mut last_layout:Option<(i32,i32,i32,bool,bool,u32,i32,i32)>=None;
-    let mut visible=false;
-    let mut stacked_at=Instant::now()-Duration::from_secs(1);
-    let mut style_sent_at=Instant::now()-Duration::from_secs(1);
-    let mut failed_geometry_logged=false;
-    let mut ticker=tokio::time::interval(Duration::from_millis(50));
+async fn follow(app: AppHandle, view: WebviewWindow, pid: u32) {
+    tokio::time::sleep(Duration::from_millis(350)).await;
+    let own = match view.hwnd() {
+        Ok(hwnd) => hwnd.0 as usize, Err(_) => return
+    };
+    let mut last: Option<(Extent, bool, u32)> = None;
+    let mut visible = false;
+    let mut last_style_update = Instant::now() - Duration::from_secs(1);
+    let mut ticker = tokio::time::interval(Duration::from_millis(80));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         ticker.tick().await;
         if app.get_webview_window(LABEL).and_then(|v|v.hwnd().ok())
-            .map(|hwnd|hwnd.0 as usize)!=Some(own_raw){break;}
-        let own=HWND(own_raw as *mut _);
-        let active_pid=app.state::<crate::ios_airplay::IosAirplayState>()
-            .child.lock().ok().and_then(|c|c.as_ref().map(|p|p.id()));
-        if active_pid!=Some(pid){break;}
-        let style=app.state::<crate::ios_airplay::IosAirplayState>()
-            .window_style.lock().ok().map(|s|s.clone()).unwrap_or_default();
-        let video=crate::commands::find_window_by_pid(pid);
-        let Some(video)=video else {
-            if visible {let _=view.hide();visible=false;}
-            // The sender may connect much later than the receiver starts.
-            // Keep the transparent companion hidden, never time it out.
+            .map(|hwnd|hwnd.0 as usize) != Some(own) { break; }
+        let state = app.state::<crate::ios_airplay::IosAirplayState>();
+        let active_pid = state.child.lock().ok()
+            .and_then(|v|v.as_ref().map(|c|c.id()));
+        if active_pid != Some(pid) { break; }
+        let style = state.window_style.lock().ok()
+            .map(|v|v.clone()).unwrap_or_default();
+        let video = crate::commands::find_window_by_pid(pid);
+        let Some(video) = video else {
+            if visible { let _=view.hide(); visible=false; }
+            state.frame_attached.store(false, Ordering::Release);
             continue;
         };
         if !style.starts_with("device-")
-            || !unsafe{IsWindowVisible(video)}.as_bool()
-            || unsafe{IsIconic(video)}.as_bool() {
-            if visible {let _=view.hide();visible=false;}
+            || !unsafe { IsWindowVisible(video) }.as_bool()
+            || unsafe { IsIconic(video) }.as_bool()
+            || is_video_fullscreen(video) {
+            if visible { let _=view.hide(); visible=false; }
+            state.frame_attached.store(false, Ordering::Release);
             continue;
         }
-        // The actual SDL CLIENT is our source of truth, as in Android's
-        // native device-frame follower. GetWindowRect includes a hidden
-        // WS_THICKFRAME resize margin on the upstream borderless receiver.
-        let Ok(screen)=screen_client(video) else {
-            if visible {let _=view.hide();visible=false;}
-            continue;
-        };
-        if is_fullscreen(video,RECT{left:screen.x,top:screen.y,
-            right:screen.x+screen.width,bottom:screen.y+screen.height}){
-            if visible {let _=view.hide();visible=false;}
-            continue;
-        }
-        let video_w=screen.width;
-        let video_h=screen.height;
-        if video_w<100 || video_h<100 || video_w>9000 || video_h>9000 {continue;}
-        let short=video_w.min(video_h) as f64;
-        let long=video_w.max(video_h) as f64;
-        let ipad=match style.as_str(){
-            "device-ipad"=>true,
-            "device-iphone"=>false,
-            _=>short/long>=0.62,
-        };
-        let landscape=video_w>video_h;
-        let dpi=unsafe{GetDpiForWindow(own)}.clamp(96,384);
-        let scale=f64::from(dpi)/96.0;
-        let inset=(((if ipad {16.0}else{18.0})*scale).round() as i32).max(8);
-        let Some(w)=video_w.checked_add(2*inset) else {continue};
-        let Some(h)=video_h.checked_add(2*inset) else {continue};
-        let target=PixelRect{x:screen.x-inset,y:screen.y-inset,width:w,height:h};
-        let Ok(mut metrics)=shell_metrics(own) else {continue};
-        let mut aligned=pixel_aligned(metrics.client,target);
-        // Re-stack periodically when Alt+Tab changes tiers; avoid endlessly
-        // resizing the same HWND on every video frame.
-        if !aligned || stacked_at.elapsed()>Duration::from_millis(450) {
-            let Some(outer)=outer_for_client(target,metrics) else {continue};
-            if crate::device_frame::place_ios_companion(
-                own,video,outer.x,outer.y,outer.width,outer.height
-            ).is_err(){break;}
-            stacked_at=Instant::now();
-            if let Ok(next)=shell_metrics(own){
-                metrics=next;
-                aligned=pixel_aligned(metrics.client,target);
-                if !aligned {
-                    // One correction for a late Win32 non-client offset/DPI
-                    // adjustment. Never flash an incorrectly placed bezel.
-                    if let Some(retry)=outer_for_client(target,metrics) {
-                        let _=crate::device_frame::place_ios_companion(
-                            own,video,retry.x,retry.y,retry.width,retry.height);
-                        if let Ok(next)=shell_metrics(own){
-                            metrics=next;
-                            aligned=pixel_aligned(metrics.client,target);
-                        }
-                    }
-                }
+        let Some(size) = client_extent(video) else { continue; };
+        // Keep HWND values scoped to the current tick: raw HWND pointers are
+        // intentionally never held across .await on the multithread runtime.
+        let child = HWND(own as *mut _);
+        if !parent_matches(child, video) {
+            if visible { let _=view.hide(); visible=false; }
+            if let Err(error) = attach_shell(child, video) {
+                eprintln!("[iOS bezel] {error}");
+                state.frame_attached.store(false, Ordering::Release);
+                break; // No detached-window fallback.
             }
+            last = None;
         }
-        if !aligned {
-            if visible {let _=view.hide();visible=false;}
-            if !failed_geometry_logged {
-                eprintln!("[iOS frame] Client geometry differs from AirPlay video; bezel hidden");
-                failed_geometry_logged=true;
+        let dpi = unsafe { GetDpiForWindow(video) }.clamp(96, 384);
+        let ipad = classify_ipad(&style, size);
+        let inset = inset_px(ipad, dpi);
+        let layout = (size, ipad, dpi);
+        // Child-local (0,0), not screen coordinates. Moving the SDL parent
+        // moves the child atomically, even between these 80-ms health ticks.
+        if last != Some(layout) {
+            if unsafe {
+                SetWindowPos(child, Some(HWND_TOP), 0, 0,
+                    size.width, size.height, SWP_NOACTIVATE | SWP_FRAMECHANGED)
+            }.is_err() {
+                if visible { let _=view.hide(); visible=false; }
+                state.frame_attached.store(false, Ordering::Release);
+                continue;
             }
-            last_layout=None;
-            continue;
+            if client_extent(child) != Some(size) || !parent_matches(child,video) {
+                if visible { let _=view.hide(); visible=false; }
+                state.frame_attached.store(false, Ordering::Release);
+                continue;
+            }
+            if hollow_child(child, size, inset, ipad, dpi).is_err() {
+                if visible { let _=view.hide(); visible=false; }
+                state.frame_attached.store(false, Ordering::Release);
+                continue;
+            }
+            last = Some(layout);
+            last_style_update = Instant::now() - Duration::from_secs(1);
         }
-        failed_geometry_logged=false;
-        // DWM can change the invisible non-client offset without resizing
-        // the actual WebView; the native region must move with that inset.
-        let layout=(w,h,inset,ipad,landscape,dpi,
-            metrics.client.x-metrics.outer.x,metrics.client.y-metrics.outer.y);
-        if last_layout!=Some(layout) {
-            // Only apply the GDI aperture AFTER a successful HWND resize.
-            if hollow_bezel(own,metrics,screen,ipad,scale).is_err(){break;}
-            last_layout=Some(layout);
-            style_sent_at=Instant::now()-Duration::from_secs(1);
-        }
-        if style_sent_at.elapsed()>Duration::from_millis(900){
-            let _=view.eval(format!(
+        if last_style_update.elapsed() > Duration::from_millis(700) {
+            let _ = view.eval(format!(
                 "window.mirroleapIosSkin?.('{}','{}',{})",
                 if ipad {"ipad"}else{"iphone"},
-                if landscape {"landscape"}else{"portrait"},
-                inset as f64/scale
+                if size.width>size.height {"landscape"}else{"portrait"},
+                inset as f64 * 96.0 / f64::from(dpi)
             ));
-            style_sent_at=Instant::now();
+            last_style_update = Instant::now();
         }
         if !visible {
-            if view.show().is_ok(){visible=true;}
+            if view.show().is_ok() { visible=true; }
+        }
+        if visible && parent_matches(child,video) && client_extent(child)==Some(size) {
+            state.frame_attached.store(true, Ordering::Release);
+        } else {
+            if visible { let _=view.hide(); visible=false; }
+            state.frame_attached.store(false, Ordering::Release);
+            last = None;
         }
     }
+    app.state::<crate::ios_airplay::IosAirplayState>().frame_attached
+        .store(false, Ordering::Release);
     if app.get_webview_window(LABEL).and_then(|v|v.hwnd().ok())
-        .map(|hwnd|hwnd.0 as usize)==Some(own_raw){
-        let _=view.close();
-    }
+        .map(|hwnd|hwnd.0 as usize)==Some(own) { let _=view.close(); }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn rect(x:i32,y:i32,width:i32,height:i32)->PixelRect{
-        PixelRect{x,y,width,height}
-    }
-
     #[test]
-    fn moves_bezel_by_video_client_not_resizable_outer_sdl_window(){
-        // SDL outer starts 8px before its actual screen content. The shell's
-        // own invisible frame is 7px and must be compensated separately.
-        let video_client=rect(145,59,865,1246);
-        let rim=16;
-        let expected=rect(video_client.x-rim,video_client.y-rim,
-            video_client.width+2*rim,video_client.height+2*rim);
-        let shell=ShellMetrics {
-            outer:rect(85,40,440,780),
-            client:rect(93,48,424,764),
-        };
-        let result=outer_for_client(expected,shell).unwrap();
-        assert_eq!(result,rect(121,35,913,1294));
-        let observed=ShellMetrics {
-            outer:result,
-            client:expected,
-        };
-        assert!(pixel_aligned(observed.client,expected));
-    }
-
-    #[test]
-    fn handles_dpi_and_negative_monitor_coordinates_without_drift(){
-        for (x,y,margin) in [(-1480,-270,0),(100,80,8),(1900,300,12)] {
-            let client=rect(x,y,1100,840);
-            let shell=ShellMetrics{
-                outer:rect(x-margin,y-margin,1100+margin*2,840+margin*2),
-                client,
-            };
-            let target=rect(x-20,y-20,1140,880);
-            let outer=outer_for_client(target,shell).unwrap();
-            assert_eq!(outer.x+margin,target.x);
-            assert_eq!(outer.y+margin,target.y);
-            assert_eq!(outer.width-2*margin,target.width);
-            assert_eq!(outer.height-2*margin,target.height);
+    fn only_valid_native_video_client_sizes_are_allowed() {
+        assert_eq!(safe_extent(1024,1366), Some(Extent{width:1024,height:1366}));
+        for (w,h) in [(0,120),(100,100),(9200,800),(-1,900)] {
+            assert_eq!(safe_extent(w,h),None);
         }
-        assert!(pixel_aligned(rect(0,0,100,200),rect(1,-1,101,199)));
-        assert!(!pixel_aligned(rect(0,0,100,200),rect(10,0,100,200)));
     }
-
     #[test]
-    fn refuses_impossible_nonclient_margins(){
-        assert!(outer_for_client(rect(10,10,300,400),ShellMetrics{
-            outer:rect(0,0,20,20),
-            client:rect(200,200,5,5),
-        }).is_none());
+    fn device_classification_and_rim_are_bounded_for_all_dpi() {
+        let ipad=Extent{width:1000,height:1380};
+        let iphone=Extent{width:400,height:865};
+        assert!(classify_ipad("device-auto",ipad));
+        assert!(!classify_ipad("device-auto",iphone));
+        assert!(classify_ipad("device-ipad",iphone));
+        assert!(!classify_ipad("device-iphone",ipad));
+        assert_eq!(inset_px(true,96),12);
+        assert_eq!(inset_px(true,144),18);
+        assert_eq!(inset_px(false,192),28);
+        assert!(inset_px(true,384)<=56);
+    }
+    #[test]
+    fn attached_rim_uses_child_local_geometry_not_desktop_coordinates() {
+        // Moving a parent from (-1200,200) to (750,320) changes neither
+        // child position nor the hollow bezel aperture; desktop offsets
+        // are no longer part of the placement equation.
+        let parent=Extent{width:1024,height:1366};
+        let inset=inset_px(true,96);
+        assert_eq!(parent.width - 2*inset,1000);
+        assert_eq!(parent.height - 2*inset,1342);
     }
 }
