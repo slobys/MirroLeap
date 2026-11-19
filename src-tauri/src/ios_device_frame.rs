@@ -45,6 +45,9 @@ const DIB_RGB_COLORS:u32=0;
 const MAX_SIDE:i32=5200;
 const MAX_PIXELS:i64=16_000_000;
 const FOLLOW_MS:u64=16;
+const MOVE_THRESHOLD_PX:i32=6;
+const MOTION_BURST_MS:u64=45;
+const STABLE_RESHOW_MS:u64=110;
 // Reuse Android's verified native bezel overscan concept: extend the opaque
 // iPad lip a few physical pixels OVER the SDL video, not merely up to it.
 // This removes transparent wallpaper leaks during native window movement.
@@ -66,6 +69,10 @@ static HOOK_INSET:AtomicI32=AtomicI32::new(0);
 static HOOK_VIDEO_W:AtomicI32=AtomicI32::new(0);
 static HOOK_VIDEO_H:AtomicI32=AtomicI32::new(0);
 static HOOK_READY:AtomicBool=AtomicBool::new(false);
+static MOTION:OnceLock<Mutex<MotionGate>>=OnceLock::new();
+fn motion()->&'static Mutex<MotionGate>{
+    MOTION.get_or_init(||Mutex::new(MotionGate::default()))
+}
 
 #[repr(C)]
 #[derive(Clone,Copy,Default,Debug,PartialEq,Eq)]
@@ -129,6 +136,50 @@ impl Default for WinMsg{
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 struct VideoClient{point:Point,width:i32,height:i32}
+/// A separate AirPlay SDL HWND cannot be composited atomically with our
+/// transparent bezel HWND. Hide the bezel during drag bursts instead of
+/// displaying a detached frame. Restore 110ms after the last movement.
+#[derive(Default)]
+struct MotionGate{
+    last_point:Option<Point>,
+    last_event:Option<Instant>,
+    last_motion:Option<Instant>,
+    burst_distance:i32,
+    suppressed:bool,
+}
+impl MotionGate{
+    fn observe(&mut self,position:Point,now:Instant)->bool{
+        if let Some(previous)=self.last_point{
+            let dx=(position.x as i64-previous.x as i64).abs();
+            let dy=(position.y as i64-previous.y as i64).abs();
+            let distance=(dx+dy).min(i32::MAX as i64) as i32;
+            if distance>0{
+                if self.last_event.is_some_and(|last|
+                    now.saturating_duration_since(last)<=Duration::from_millis(MOTION_BURST_MS)){
+                    self.burst_distance=self.burst_distance.saturating_add(distance);
+                }else{self.burst_distance=distance;}
+                if self.burst_distance>=MOVE_THRESHOLD_PX{self.suppressed=true;}
+                if self.suppressed{self.last_motion=Some(now);}
+                self.last_event=Some(now);
+            }
+        }else{self.last_event=Some(now);}
+        self.last_point=Some(position);
+        self.hidden(now)
+    }
+    fn hidden(&mut self,now:Instant)->bool{
+        if !self.suppressed{return false;}
+        if self.last_motion.is_some_and(|last|
+            now.saturating_duration_since(last)>=Duration::from_millis(STABLE_RESHOW_MS)){
+            self.suppressed=false;
+            self.burst_distance=0;
+            return false;
+        }
+        true
+    }
+}
+fn motion_hidden()->bool{
+    motion().lock().is_ok_and(|mut state|state.hidden(Instant::now()))
+}
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 struct CaseLayout{point:Point,width:i32,height:i32,ipad:bool,dpi:u32}
 
@@ -366,14 +417,31 @@ fn clear_clip_if_still_owned(pid:u32,applied:&mut Option<NativeVideoClip>){
     }
 }
 
-// Antialiased signed distance to an exact rounded rectangle in pixel space.
-fn round_coverage(px:f32,py:f32,left:f32,top:f32,w:f32,h:f32,r:f32)->f32 {
+// Exact signed distance to a rounded rectangle in physical pixels:
+// negative inside, zero at the metal contour, positive outside.
+fn round_signed_distance(px:f32,py:f32,left:f32,top:f32,w:f32,h:f32,r:f32)->f32 {
     let r=r.max(1.0).min(w.min(h)*0.5);
     let dx=(px-(left+w*0.5)).abs()-(w*0.5-r);
     let dy=(py-(top+h*0.5)).abs()-(h*0.5-r);
     let outside=(dx.max(0.0)*dx.max(0.0)+dy.max(0.0)*dy.max(0.0)).sqrt();
-    let distance=outside+dx.max(dy).min(0.0)-r;
-    (0.5-distance).clamp(0.0,1.0)
+    outside+dx.max(dy).min(0.0)-r
+}
+fn round_coverage(px:f32,py:f32,left:f32,top:f32,w:f32,h:f32,r:f32)->f32 {
+    (0.5-round_signed_distance(px,py,left,top,w,h,r)).clamp(0.0,1.0)
+}
+fn metal_band(distance:f32,scale:f32,shine:f32)->(f32,f32,f32) {
+    // Distance is measured INWARD from the curved metal contour, not from
+    // the rectangular canvas edge. The 2.5px silver strip therefore follows
+    // every quarter-circle instead of disappearing into graphite at corners.
+    if distance<3.3*scale {
+        (156.0+10.0*shine,174.0+9.0*shine,180.0+8.0*shine)
+    } else if distance<5.7*scale {
+        (61.0+6.0*shine,69.0+6.0*shine,76.0+6.0*shine)
+    } else if distance<8.0*scale {
+        (21.0,26.0,31.0)
+    } else {
+        (9.0+3.0*shine,12.0+3.0*shine,17.0+3.0*shine)
+    }
 }
 
 /// Build alpha-premultiplied silver/graphite ring in pure code. The middle is
@@ -391,6 +459,10 @@ fn render_bezel(layout:CaseLayout)->Result<Vec<u8>,&'static str>{
     // Both arcs have the SAME centre, not independently tuned radii.
     let radius=geometry.outer_radius as f32;
     let hole_radius=geometry.inner_radius as f32;
+    // Extend the outer rounded metal contour 1px outside the DIB on every
+    // side; this keeps the last visible antialiased arc sample from dropping
+    // out at the edge, without painting a square background in the corners.
+    let overdraw=(scale*1.1).clamp(1.0,3.5);
     let mut pixels=vec![0u8;(w as usize)*(h as usize)*4];
     let safe_corner_x=inner_inset+hole_radius.ceil() as i32+2;
     let safe_corner_y=safe_corner_x;
@@ -408,29 +480,25 @@ fn render_bezel(layout:CaseLayout)->Result<Vec<u8>,&'static str>{
                 continue;
             }
             let xf=x as f32+0.5;
-            let outer=round_coverage(xf,yf,0.0,0.0,w as f32,h as f32,radius);
+            let outer_distance=round_signed_distance(
+                xf,yf,-overdraw,-overdraw,
+                w as f32+2.0*overdraw,h as f32+2.0*overdraw,radius+overdraw);
+            let outer=(0.5-outer_distance).clamp(0.0,1.0);
             if outer==0.0{continue;}
             let inner=round_coverage(xf,yf,inner_inset as f32,inner_inset as f32,
                 (w-2*inner_inset) as f32,(h-2*inner_inset) as f32,hole_radius);
             let opacity=(outer*(1.0-inner)).clamp(0.0,1.0);
             if opacity==0.0{continue;}
-            let min_edge=x.min(y).min(w-1-x).min(h-1-y) as f32;
             // Original iPad Air: #9caeb4 2px anodized silver hairline,
             // #3d454c graphite transition, #090c11 flat matte front.
-            // Intentionally avoid the cyan/blue glowing edge of the preview.
+            // The metal band follows the curved distance field, not the
+            // rectangle's min(x,y,w-x,h-y) which made every corner go black.
             let shine=((w as f32-xf)/w as f32*0.10)+
                 ((h as f32-yf)/h as f32*0.035);
-            let (r,g,b)=if min_edge<1.8*scale{
-                (156.0+10.0*shine,174.0+9.0*shine,180.0+8.0*shine)
-            }else if min_edge<3.2*scale{
-                (61.0+6.0*shine,69.0+6.0*shine,76.0+6.0*shine)
-            }else if min_edge<5.2*scale{
-                (21.0,26.0,31.0)
-            }else if min_edge>inner_inset as f32-1.7*scale{
+            let distance_inside=(-outer_distance).max(0.0);
+            let (r,g,b)=if distance_inside>=inner_inset as f32-1.7*scale{
                 (17.0,22.0,28.0)
-            }else{
-                (9.0+3.0*shine,12.0+3.0*shine,17.0+3.0*shine)
-            };
+            }else{metal_band(distance_inside,scale,shine)};
             let a=(opacity*255.0).round() as u8;
             let pos=((y as usize)*(w as usize)+x as usize)*4;
             pixels[pos]=(b*a as f32/255.0).round() as u8;
@@ -655,6 +723,14 @@ unsafe extern "system" fn on_video_location_change(
         HOOK_VIDEO_W.load(Ordering::Relaxed),
         HOOK_VIDEO_H.load(Ordering::Relaxed),
     )else{return;};
+    if motion().lock().is_ok_and(|mut state|
+        state.observe(screen.point,Instant::now())){
+        // Independent HWNDs are never atomically composited during a drag.
+        // Hide immediately on WinEvent before an incorrect metal frame can
+        // be painted, then let the worker restore after a stable interval.
+        unsafe{ShowWindow(bezel,SW_HIDE);}
+        return;
+    }
     unsafe{SetWindowPos(bezel,ptr::null_mut(),target.x,target.y,0,0,
         SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);}
 }
@@ -703,6 +779,7 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
     }
     let _window=WindowOwner(hwnd);
     let _location_hook=NativeLocationHook::install(pid);
+    if let Ok(mut state)=motion().lock(){*state=MotionGate::default();}
     let mut surface=Surface::create()?;
     let mut controls=crate::ios_window_controls::NativeControls::create().ok();
     let mut previous_skin:Option<(i32,i32,bool,u32)>=None;
@@ -760,6 +837,18 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
             hide(hwnd.as_ptr(),&mut shown);
             state.frame_attached.store(false,Ordering::Release);
             thread::sleep(Duration::from_millis(40));
+            continue;
+        }
+        // The WinEvent callback may have already hidden the HWND. Keep it
+        // hidden until the source has been stationary for ~110ms; don't let
+        // a 16ms health tick prematurely show the detached shell.
+        let still_moving=motion().lock().is_ok_and(|mut gate|
+            gate.observe(screen.point,Instant::now()));
+        if still_moving || motion_hidden() {
+            if shown{unsafe{ShowWindow(hwnd.as_ptr(),SW_HIDE);}}
+            shown=false;
+            state.frame_attached.store(false,Ordering::Release);
+            thread::sleep(Duration::from_millis(FOLLOW_MS));
             continue;
         }
         let dpi=unsafe{GetDpiForWindow(video)}.clamp(96,384);
@@ -930,6 +1019,78 @@ mod tests{
         assert!((170..=190).contains(&green));
         assert!((176..=194).contains(&blue));
         assert!(blue.saturating_sub(red)<32);
+    }
+    #[test]
+    fn silver_metal_contour_is_continuous_across_all_four_curved_corners(){
+        for ipad in [true,false]{
+            for dpi in [96,144,192]{
+                let skin=layout(620,940,ipad,dpi);
+                let pixels=render_bezel(skin).unwrap();
+                let radius=BezelGeometry::new(ipad,dpi).outer_radius as f32;
+                let inset=1.2*dpi as f32/96.0;
+                for degrees in [20.0f32,35.0,50.0,65.0,80.0]{
+                    let rad=degrees.to_radians();
+                    let x=(radius-(radius-inset)*rad.cos()).round() as i32;
+                    let y=(radius-(radius-inset)*rad.sin()).round() as i32;
+                    for (cx,cy) in [
+                        (x,y),
+                        (skin.width-1-x,y),
+                        (x,skin.height-1-y),
+                        (skin.width-1-x,skin.height-1-y),
+                    ]{
+                        let index=((cy*skin.width+cx)*4) as usize;
+                        let (b,g,r,a)=(
+                            pixels[index],pixels[index+1],
+                            pixels[index+2],pixels[index+3]
+                        );
+                        assert!(a>=190,
+                            "missing metal at {cx},{cy} {dpi}dpi ipad={ipad}");
+                        assert!(r>=120 && g>=140 && b>=145 && b>r,
+                            "black/disconnected metal at {cx},{cy} {dpi}dpi: BGRA={b},{g},{r},{a}");
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn metal_round_caps_leave_only_the_correct_transparent_outside(){
+        let skin=layout(620,940,true,96);
+        let pixels=render_bezel(skin).unwrap();
+        let alpha=|x:i32,y:i32|pixels[((y*skin.width+x)*4+3) as usize];
+        // True iPad rounding must not fill the square corners.
+        for (x,y) in [(0,0),(skin.width-1,0),
+            (0,skin.height-1),(skin.width-1,skin.height-1)] {
+            assert_eq!(alpha(x,y),0);
+        }
+        // Yet every quadrant must contain an uninterrupted metal cap.
+        let cap=BezelGeometry::new(true,96).outer_radius;
+        for (x,y) in [(cap/2,cap/2),(skin.width-1-cap/2,cap/2),
+            (cap/2,skin.height-1-cap/2),
+            (skin.width-1-cap/2,skin.height-1-cap/2)] {
+            assert!(alpha(x,y)>0);
+        }
+    }
+    #[test]
+    fn dragging_temporarily_hides_shell_until_source_has_settled(){
+        let start=Instant::now();
+        let mut gate=MotionGate::default();
+        assert!(!gate.observe(Point{x:100,y:300},start));
+        assert!(gate.observe(Point{x:107,y:300},
+            start+Duration::from_millis(10)));
+        assert!(gate.hidden(start+Duration::from_millis(100)));
+        assert!(!gate.hidden(start+Duration::from_millis(121)));
+        let mut micro=MotionGate::default();
+        assert!(!micro.observe(Point{x:0,y:0},start));
+        assert!(!micro.observe(Point{x:2,y:0},
+            start+Duration::from_millis(5)));
+        assert!(!micro.observe(Point{x:4,y:0},
+            start+Duration::from_millis(10)));
+        assert!(micro.observe(Point{x:6,y:0},
+            start+Duration::from_millis(15)));
+        assert!(micro.observe(Point{x:8,y:0},
+            start+Duration::from_millis(20)));
+        assert!(micro.hidden(start+Duration::from_millis(80)));
+        assert!(!micro.hidden(start+Duration::from_millis(131)));
     }
     #[test]
     fn rounded_outer_corner_is_antialiased_and_zero_outside(){

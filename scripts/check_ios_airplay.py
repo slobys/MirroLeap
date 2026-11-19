@@ -85,6 +85,12 @@ assert "apply_video_corner_clip" in frame and "clear_video_corner_clip" in frame
 assert "native_clip_intact" in frame and "BezelGeometry" in frame
 assert "full HWND - rectangular client" in frame
 assert "outer_inner_and_native_video_arcs_are_concentric_at_all_dpis" in frame
+assert "round_signed_distance" in frame and "metal_band" in frame
+assert "silver_metal_contour_is_continuous_across_all_four_curved_corners" in frame
+assert "metal_round_caps_leave_only_the_correct_transparent_outside" in frame
+assert "MotionGate" in frame and "STABLE_RESHOW_MS:u64=110" in frame
+assert "dragging_temporarily_hides_shell_until_source_has_settled" in frame
+assert "ShowWindow(bezel,SW_HIDE)" in frame and "motion_hidden()" in frame
 assert "update_hover" in frame and "HIDE_AFTER_MS" in controls
 assert "GetCursorPos" in controls and "SIZE:i32=46" in controls
 assert "safe_corner_x" in frame and "each_inner_round_corner_is_covered" in frame
