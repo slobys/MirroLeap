@@ -17,15 +17,33 @@ pub const ENGINE_ARCHIVE_SHA256: &str =
 #[derive(Default)]
 pub struct IosAirplayState {
     pub(crate) child: Mutex<Option<Child>>,
+    /// A previous MirroLeap instance may have left the exact verified
+    /// receiver running. Keep its PID separately; std::process::Child only
+    /// represents newly spawned processes in THIS process.
+    adopted_pid: Mutex<Option<u32>>,
+    /// Prevent status polling from repeatedly recreating a failed bezel
+    /// around a recovered orphaned AirPlay process.
+    frame_attempted_pid: Mutex<Option<u32>>,
+    /// Windows kernel job object closes on any process exit, even crashes,
+    /// automatically killing the assigned AirPlay receiver.
+    #[cfg(target_os="windows")]
+    receiver_job: Mutex<Option<std::os::windows::io::OwnedHandle>>,
     install_gate: tokio::sync::Mutex<()>,
     pub(crate) window_style: Mutex<String>,
     pub(crate) frame_attached: AtomicBool,
+    /// Sanitized reason for a missing bezel; never includes LAN/IP/path data.
+    pub(crate) frame_error: Mutex<Option<String>>,
     /// Verified decoded texture dimensions from THIS receiver process only.
     /// The advertised AirPlay resolution is a ceiling, not actual pixels.
     source_pixels: Mutex<Option<(u32,u32)>>,
 }
 impl Drop for IosAirplayState {
     fn drop(&mut self) {
+        #[cfg(target_os="windows")]
+        if let Ok(mut job) = self.receiver_job.lock() {
+            // Kill-on-close job makes receiver cleanup OS-enforced.
+            job.take();
+        }
         if let Ok(mut child) = self.child.lock() {
             if let Some(mut process) = child.take() {
                 let _ = process.kill();
@@ -53,6 +71,7 @@ pub struct IosAirplayStatus {
     pub display_width: Option<u32>,
     pub display_height: Option<u32>,
     pub frame_attached: bool,
+    pub frame_error: Option<String>,
 }
 
 fn main_only(window: &Window) -> Result<(), String> {
@@ -216,16 +235,47 @@ fn installed(root: &std::path::Path) -> bool {
             .ok().as_deref() == Some(ENGINE_ARCHIVE_SHA256)
 }
 #[cfg(target_os = "windows")]
-fn running(state: &IosAirplayState) -> Result<bool, String> {
+fn running(app:&AppHandle,state: &IosAirplayState) -> Result<bool, String> {
+    let path=engine_root(app)?.join("airplay-windows.exe");
+    if !installed(&engine_root(app)?) {
+        *state.adopted_pid.lock().map_err(|e|e.to_string())?=None;
+        return Ok(false);
+    }
     let mut process = state.child.lock().map_err(|e| e.to_string())?;
     if let Some(child) = process.as_mut() {
         match child.try_wait() {
             Ok(None) => return Ok(true),
-            Ok(Some(_)) => { *process = None; }
+            Ok(Some(_)) => {
+                *process = None;
+                // Job has no living original process, release it.
+                if let Ok(mut job)=state.receiver_job.lock(){job.take();}
+            }
             Err(e) => return Err(format!("Cannot inspect AirPlay receiver process: {e}")),
         }
     }
-    Ok(false)
+    drop(process);
+    // Handle AirPlay-Windows's single-instance semantics: a second invocation
+    // exits 0 while the original instance stays alive. Only adopt an exact
+    // path match to MirroLeap's pinned, hash-verified component directory.
+    let tracked=*state.adopted_pid.lock().map_err(|e|e.to_string())?;
+    if let Some(pid)=tracked {
+        if crate::ios_receiver_process::verified_pid_alive(pid,&path){return Ok(true);}
+    }
+    let recovered=crate::ios_receiver_process::verified_receiver_pid(&path);
+    *state.adopted_pid.lock().map_err(|e|e.to_string())?=recovered;
+    if let Some(pid)=recovered {
+        let mut job=state.receiver_job.lock().map_err(|e|e.to_string())?;
+        if job.is_none(){
+            if let Ok(handle)=crate::ios_receiver_process::kill_on_exit_pid(pid,&path) {
+                *job=Some(handle);
+            }
+        }
+    }
+    Ok(recovered.is_some())
+}
+pub(crate) fn active_receiver_pid(state:&IosAirplayState)->Option<u32>{
+    state.child.lock().ok().and_then(|child|child.as_ref().map(|c|c.id()))
+        .or_else(||state.adopted_pid.lock().ok().and_then(|p|*p))
 }
 /// AirPlay-Windows v0.4.1 logs the actual decoded texture when --log is set:
 /// "VideoRenderer texture (NV12) created 1640x2360". This is distinct from
@@ -244,13 +294,12 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
     #[cfg(target_os = "windows")]
     {
         let root=engine_root(app)?;
-        let is_running=running(state)?;
+        let is_running=running(app,state)?;
         let source=if is_running {
             *state.source_pixels.lock().map_err(|e|e.to_string())?
         } else {None};
         let display=if is_running {
-            state.child.lock().map_err(|e|e.to_string())?
-                .as_ref().and_then(|child|crate::ios_device_frame::receiver_client_size(child.id()))
+            active_receiver_pid(state).and_then(crate::ios_device_frame::receiver_client_size)
         }else{None};
         Ok(IosAirplayStatus {
             supported: true,
@@ -268,6 +317,9 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
             display_width: display.map(|(width,_)|width),
             display_height: display.map(|(_,height)|height),
             frame_attached: is_running && state.frame_attached.load(Ordering::Acquire),
+            frame_error: if is_running {
+                state.frame_error.lock().map_err(|e|e.to_string())?.clone()
+            } else {None},
         })
     }
     #[cfg(not(target_os = "windows"))]
@@ -283,6 +335,7 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
             source_width: None, source_height:None,
             display_width:None, display_height:None,
             frame_attached: false,
+            frame_error: None,
         })
     }
 }
@@ -292,6 +345,27 @@ pub fn ios_airplay_status(
     window: Window, app: AppHandle, state: State<'_, IosAirplayState>,
 ) -> Result<IosAirplayStatus, String> {
     main_only(&window)?;
+    #[cfg(target_os="windows")]
+    {
+        let current=status_for(&app,&state)?;
+        if current.running && current.installed
+            && app.get_webview_window("ios-device-bezel").is_none(){
+            if let Some(pid)=active_receiver_pid(&state){
+                let mut attempted=state.frame_attempted_pid.lock().map_err(|e|e.to_string())?;
+                if *attempted!=Some(pid){
+                    *attempted=Some(pid);
+                    drop(attempted);
+                    *state.window_style.lock().map_err(|e|e.to_string())?=
+                        prefer_window_style(&app)?;
+                    if let Err(error)=crate::ios_device_frame::start(&app,pid){
+                        if let Ok(mut reason)=state.frame_error.lock(){
+                            *reason=Some(format!("无法重新连接真机边框：{error}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
     status_for(&app,&state)
 }
 
@@ -378,7 +452,7 @@ pub async fn ios_airplay_install(
     #[cfg(target_os = "windows")]
     {
         let _gate=state.install_gate.lock().await;
-        if running(&state)? {
+        if running(&app,&state)? {
             return Err("Stop iOS mirroring before updating its receiver component".into());
         }
         let root=engine_root(&app)?;
@@ -413,7 +487,21 @@ pub async fn ios_airplay_start(
         let _gate=state.install_gate.lock().await;
         let root=engine_root(&app)?;
         if !installed(&root) {return Err("Install the verified AirPlay receiver first".into());}
-        if running(&state)? {drop(_gate);return status_for(&app,&state);}
+        if running(&app,&state)? {
+            // MirroLeap can resume control of its verified receiver even
+            // when an older GUI version exited without killing the stream.
+            if app.get_webview_window("ios-device-bezel").is_none(){
+                if let Some(pid)=active_receiver_pid(&state){
+                    *state.window_style.lock().map_err(|e|e.to_string())?=
+                        prefer_window_style(&app)?;
+                    if let Err(e)=crate::ios_device_frame::start(&app,pid){
+                        eprintln!("[iOS frame] Could not attach recovered receiver: {e}");
+                    }
+                }
+            }
+            drop(_gate);
+            return status_for(&app,&state);
+        }
         let style=prefer_window_style(&app)?;
         configure_receiver_window(&app,style!="classic",&prefer_quality_tier(&app)?)?;
         // Capture only the receiver's documented video texture dimensions.
@@ -430,6 +518,18 @@ pub async fn ios_airplay_start(
             .map_err(|e|format!("Cannot launch AirPlay receiver: {e}"))?;
         let pid=child.id();
         let stderr=child.stderr.take();
+        // A kernel job with KILL_ON_JOB_CLOSE means a Windows crash or
+        // forced termination of MirroLeap cannot leave its receiver orphaned.
+        let job=match crate::ios_receiver_process::kill_on_exit_job(&child) {
+            Ok(job)=>Some(job),
+            Err(error)=>{
+                eprintln!("[iOS receiver] Job assignment unavailable; using explicit shutdown cleanup: {error}");
+                None
+            },
+        };
+        *state.receiver_job.lock().map_err(|e|e.to_string())?=job;
+        *state.adopted_pid.lock().map_err(|e|e.to_string())?=None;
+        *state.frame_attempted_pid.lock().map_err(|e|e.to_string())?=Some(pid);
         *state.source_pixels.lock().map_err(|e|e.to_string())?=None;
         *state.child.lock().map_err(|e|e.to_string())?=Some(child);
         *state.window_style.lock().map_err(|e|e.to_string())?=style;
@@ -455,8 +555,8 @@ pub async fn ios_airplay_start(
             });
         }
         tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-        if !running(&state)? {
-            return Err("AirPlay receiver quit immediately; check Windows firewall or antivirus".into());
+        if !running(&app,&state)? {
+            return Err("AirPlay-Windows exited. Another receiver may already be running outside MirroLeap; close that AirPlay window with Alt+F4 and try again.".into());
         }
         // One passive, click-through native silhouette; it does not create
         // another user-facing settings page or capture the mirror's pixels.
@@ -480,7 +580,7 @@ pub async fn ios_airplay_set_compact_mode(
     #[cfg(target_os="windows")]
     {
         let _gate=state.install_gate.lock().await;
-        if running(&state)? {
+        if running(&app,&state)? {
             return Err("Stop the receiver to change its default window layout".into());
         }
         save_compact_preference(&app,compact)?;
@@ -504,7 +604,7 @@ pub async fn ios_airplay_set_window_style(
     #[cfg(target_os="windows")]
     {
         let _gate=state.install_gate.lock().await;
-        if running(&state)? && (style=="classic" || prefer_window_style(&app)?=="classic") {
+        if running(&app,&state)? && (style=="classic" || prefer_window_style(&app)?=="classic") {
             return Err("Stop the receiver before switching to/from its original interface".into());
         }
         save_pref(&app,"window-style.txt",&style)?;
@@ -526,7 +626,7 @@ pub async fn ios_airplay_set_quality_tier(
     #[cfg(target_os="windows")]
     {
         let _gate=state.install_gate.lock().await;
-        if running(&state)? {
+        if running(&app,&state)? {
             return Err("Stop the receiver before changing its advertised AirPlay resolution".into());
         }
         save_pref(&app,"quality-tier.txt",&tier)?;
@@ -553,11 +653,11 @@ pub fn ios_airplay_window_action(
             "fullscreen"=>(0x7A,0x57),   // upstream: F11 = fullscreen
             _=>return Err("Unsupported iOS receiver window action".into()),
         };
-        if !running(&state)? {
+        if !running(&app,&state)? {
             return Err("iOS receiver is not running".into());
         }
-        let pid=state.child.lock().map_err(|e|e.to_string())?
-            .as_ref().ok_or("iOS receiver process unavailable")?.id();
+        let pid=active_receiver_pid(&state)
+            .ok_or("iOS receiver process unavailable")?;
         let hwnd=crate::commands::find_window_by_pid(pid)
             .ok_or("Receiver video window is not ready; click it and press H or F11")?;
         let down=LPARAM(1|(scan_code<<16));
@@ -576,6 +676,58 @@ pub fn ios_airplay_window_action(
     {let _=(app,state,action);Err("Windows AirPlay receiver required".into())}
 }
 
+#[cfg(target_os = "windows")]
+fn stop_owned_receiver(app:&AppHandle,state:&IosAirplayState)->Result<(),String>{
+    // Close the child bezel BEFORE terminating the third-party SDL parent.
+    // There must never be a stale WebView2 HWND pointing to dead video.
+    crate::ios_device_frame::close(app);
+    *state.source_pixels.lock().map_err(|e|e.to_string())?=None;
+    state.frame_attached.store(false,Ordering::Release);
+    let child=state.child.lock().map_err(|e|e.to_string())?.take();
+    let adopted=state.adopted_pid.lock().map_err(|e|e.to_string())?.take();
+    *state.frame_attempted_pid.lock().map_err(|e|e.to_string())?=None;
+    let mut error=None;
+    if let Some(mut child)=child {
+        match child.try_wait() {
+            Ok(None)=>{
+                if let Err(e)=child.kill(){
+                    error=Some(format!("Cannot stop AirPlay receiver: {e}"));
+                }
+                let _=child.wait();
+            }
+            Ok(Some(_))=>{},
+            Err(e)=>{
+                error=Some(format!("Cannot inspect AirPlay process: {e}"));
+                let _=child.kill();
+                let _=child.wait();
+            }
+        }
+    }
+    let expected=engine_root(app)?.join("airplay-windows.exe");
+    // A prior MirroLeap version may have orphaned a pinned receiver. A
+    // verified exact executable path is required before killing any PID.
+    let matching=adopted.or_else(||crate::ios_receiver_process::verified_receiver_pid(&expected));
+    if let Some(pid)=matching {
+        if let Err(e)=crate::ios_receiver_process::stop_verified_pid(pid,&expected){
+            error=Some(e);
+        }
+    }
+    // Dropping the job is an extra OS-enforced fallback for its assigned PID.
+    if let Ok(mut job)=state.receiver_job.lock(){job.take();}
+    error.map_or(Ok(()),Err)
+}
+
+/// Called both on main-window close and RunEvent::Exit. Unlike relying on
+/// Drop alone, a normal Tauri shutdown now stops the pinned AirPlay receiver.
+#[cfg(target_os = "windows")]
+pub fn shutdown(app:&AppHandle){
+    if let Some(state)=app.try_state::<IosAirplayState>(){
+        if let Err(error)=stop_owned_receiver(app,&state){
+            eprintln!("[iOS receiver] Shutdown cleanup failed: {error}");
+        }
+    }
+}
+
 #[tauri::command]
 pub fn ios_airplay_stop(
     window: Window, app: AppHandle, state: State<'_, IosAirplayState>,
@@ -583,14 +735,7 @@ pub fn ios_airplay_stop(
     main_only(&window)?;
     #[cfg(target_os = "windows")]
     {
-        crate::ios_device_frame::close(&app);
-        *state.source_pixels.lock().map_err(|e|e.to_string())?=None;
-        if let Some(mut child)=state.child.lock().map_err(|e|e.to_string())?.take() {
-            if child.try_wait().map_err(|e|e.to_string())?.is_none() {
-                child.kill().map_err(|e|format!("Cannot stop AirPlay receiver: {e}"))?;
-                let _=child.wait();
-            }
-        }
+        stop_owned_receiver(&app,&state)?;
         status_for(&app,&state)
     }
     #[cfg(not(target_os = "windows"))]

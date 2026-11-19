@@ -155,8 +155,9 @@ fn hollow_child(hwnd: HWND, size: Extent, inset: i32, ipad: bool, dpi: u32)
 }
 
 pub fn close(app: &AppHandle) {
-    app.state::<crate::ios_airplay::IosAirplayState>().frame_attached
-        .store(false, Ordering::Release);
+    let state=app.state::<crate::ios_airplay::IosAirplayState>();
+    state.frame_attached.store(false, Ordering::Release);
+    if let Ok(mut error)=state.frame_error.lock(){*error=None;}
     if let Some(old) = app.get_webview_window(LABEL) {
         let _ = old.close();
     }
@@ -201,8 +202,7 @@ async fn follow(app: AppHandle, view: WebviewWindow, pid: u32) {
         if app.get_webview_window(LABEL).and_then(|v|v.hwnd().ok())
             .map(|hwnd|hwnd.0 as usize) != Some(own) { break; }
         let state = app.state::<crate::ios_airplay::IosAirplayState>();
-        let active_pid = state.child.lock().ok()
-            .and_then(|v|v.as_ref().map(|c|c.id()));
+        let active_pid = crate::ios_airplay::active_receiver_pid(&state);
         if active_pid != Some(pid) { break; }
         let style = state.window_style.lock().ok()
             .map(|v|v.clone()).unwrap_or_default();
@@ -229,6 +229,9 @@ async fn follow(app: AppHandle, view: WebviewWindow, pid: u32) {
             if let Err(error) = attach_shell(child, video) {
                 eprintln!("[iOS bezel] {error}");
                 state.frame_attached.store(false, Ordering::Release);
+                if let Ok(mut reason)=state.frame_error.lock(){
+                    *reason=Some(format!("原生子窗口绑定失败：{error}"));
+                }
                 break; // No detached-window fallback.
             }
             last = None;
@@ -246,16 +249,25 @@ async fn follow(app: AppHandle, view: WebviewWindow, pid: u32) {
             }.is_err() {
                 if visible { let _=view.hide(); visible=false; }
                 state.frame_attached.store(false, Ordering::Release);
+                if let Ok(mut reason)=state.frame_error.lock(){
+                    *reason=Some("Windows 拒绝设置边框子窗口位置".into());
+                }
                 continue;
             }
             if client_extent(child) != Some(size) || !parent_matches(child,video) {
                 if visible { let _=view.hide(); visible=false; }
                 state.frame_attached.store(false, Ordering::Release);
+                if let Ok(mut reason)=state.frame_error.lock(){
+                    *reason=Some("边框子窗口尺寸与视频客户区不一致".into());
+                }
                 continue;
             }
             if hollow_child(child, size, inset, ipad, dpi).is_err() {
                 if visible { let _=view.hide(); visible=false; }
                 state.frame_attached.store(false, Ordering::Release);
+                if let Ok(mut reason)=state.frame_error.lock(){
+                    *reason=Some("原生透明边框裁剪失败".into());
+                }
                 continue;
             }
             last = Some(layout);
@@ -275,6 +287,7 @@ async fn follow(app: AppHandle, view: WebviewWindow, pid: u32) {
         }
         if visible && parent_matches(child,video) && client_extent(child)==Some(size) {
             state.frame_attached.store(true, Ordering::Release);
+            if let Ok(mut reason)=state.frame_error.lock(){*reason=None;}
         } else {
             if visible { let _=view.hide(); visible=false; }
             state.frame_attached.store(false, Ordering::Release);

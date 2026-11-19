@@ -97,10 +97,25 @@ describe('single-page iOS AirPlay experience',()=>{
         expect(screen.queryByText('iPhone 已连接')).not.toBeInTheDocument();
     });
     it('does not misreport an unattached or incompatible receiver bezel as working',async()=>{
-        invokeMock.mockResolvedValue({...ready,installed:true,running:true,frameAttached:false});
+        invokeMock.mockResolvedValue({...ready,installed:true,running:true,frameAttached:false,
+            frameError:'原生子窗口绑定失败：Windows refused'});
         render(<IosReceiverPanel locale="zh-CN"/>);
         expect(await screen.findByTestId('ios-frame-attachment'))
             .toHaveTextContent('为防止错位，暂不显示边框');
+        expect(screen.getByTestId('ios-frame-error'))
+            .toHaveTextContent('原生子窗口绑定失败');
+        expect(screen.getByText(/关闭 MirroLeap 主窗口也会停止接收器/))
+            .toBeInTheDocument();
+    });
+    it('offers Stop for a previously running receiver without launching a duplicate',async()=>{
+        const running={...ready,installed:true,running:true,frameAttached:false};
+        const stopped={...running,running:false};
+        invokeMock.mockImplementation(async(name:string)=>
+            name==='ios_airplay_stop'?stopped:running);
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        fireEvent.click(await screen.findByRole('button',{name:'停止接收'}));
+        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith('ios_airplay_stop'));
+        expect(invokeMock).not.toHaveBeenCalledWith('ios_airplay_start');
     });
     it('keeps connection help collapsed, then shows firewall and DRM limits',async()=>{
         invokeMock.mockResolvedValue(ready);

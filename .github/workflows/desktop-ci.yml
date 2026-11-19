@@ -94,6 +94,8 @@ jobs:
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib ios_airplay::tests
       - name: Windows iOS Air bezel alignment (DPI, client rect and multi-monitor) tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib ios_device_frame::tests
+      - name: Windows AirPlay receiver verified process recovery and cleanup tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib ios_receiver_process::tests
       # Linux CI excludes Windows-only Magnification.dll code. Run its
       # geometry, wheel bounds and source-centering tests on Windows too.
       - name: Windows native MirroCreator magnifier wheel tests

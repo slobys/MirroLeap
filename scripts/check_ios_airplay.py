@@ -22,7 +22,7 @@ assert 'root.join("LICENSE").is_file()' in native
 assert 'root.join("THIRD_PARTY_NOTICES.md").is_file()' in native
 assert "only after a user click" in native and "start" in native
 assert "Only the main MirroLeap window" in native
-assert "let is_running=running(state)?" in native and "running: is_running" in native
+assert "let is_running=running(app,state)?" in native and "running: is_running" in native
 assert "status_for(&app,&state)" in native
 assert "app.manage(ios_airplay::IosAirplayState::default())" in lib
 for command in ("ios_airplay_status","ios_airplay_install","ios_airplay_start",
@@ -63,6 +63,13 @@ assert "SetWindowPos(child, Some(HWND_TOP), 0, 0" in frame
 assert "hollow_child(child, size, inset, ipad, dpi)" in frame
 assert "place_ios_companion(" not in frame and "ClientToScreen(" not in frame
 assert "frame_attached" in native and "frame_attached" in frame
+process=(root/"src-tauri/src/ios_receiver_process.rs").read_text(encoding="utf-8")
+assert "CreateToolhelp32Snapshot" in process
+assert "QueryFullProcessImageNameW" in process and "same_executable" in process
+assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in process
+assert "stop_verified_pid" in process and "TerminateProcess" in process
+assert "on_window_event" in lib and "ios_airplay::shutdown" in lib
+assert "ios_receiver_process::tests" in workflow
 assert "ios_device_frame::tests" in workflow
 assert 'arg("--log")' in native and "decoded_texture_from_line" in native
 assert "source_pixels" in native and "sourceWidth" in ui and "displayWidth" in ui

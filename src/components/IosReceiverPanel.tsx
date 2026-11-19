@@ -21,6 +21,7 @@ export type IosAirplayStatus = {
     displayHeight?:number|null;
     /** Confirmed native parent-child relationship with the AirPlay HWND. */
     frameAttached?:boolean;
+    frameError?:string|null;
 };
 type Props={locale:string};
 const windowStyles=[
@@ -181,6 +182,9 @@ export default function IosReceiverPanel({locale}:Props) {
                 : copy('真机边框：尚未绑定；为防止错位，暂不显示边框',
                     'Device frame: not attached; hidden to prevent misalignment')}
         </p>}
+        {isRunning && !status?.frameAttached && status?.frameError &&
+            <p role="alert" className="text-red-500 text-[11px] leading-5 mt-1"
+                data-testid="ios-frame-error">{status.frameError}</p>}
         {isRunning && <p className="ml-muted text-[11px] leading-5" role="note" data-testid="ios-actual-resolution">
             {status?.sourceWidth && status?.sourceHeight
                 ? copy('实际解码画面：','Decoded stream: ')
@@ -200,6 +204,10 @@ export default function IosReceiverPanel({locale}:Props) {
                     'The window is upscaling received pixels. Shrink it or try a higher quality tier after stopping.')}
             </p>}
         {error && <p role="alert" className="mt-2 text-xs text-red-500 break-words">{error}</p>}
+        {isRunning && <p className="ml-muted mt-1 text-[11px]" role="note">
+            {copy('点击主页「停止接收」即可关闭投屏；关闭 MirroLeap 主窗口也会停止接收器。旧版本残留的独立接收窗口可点击后按 Alt+F4。',
+                'Use Stop receiver to end mirroring; closing MirroLeap also stops its receiver. For an old orphaned receiver window, focus it and press Alt+F4.')}
+        </p>}
         {feedback && <p role="status" className="mt-2 text-xs">{feedback}</p>}
         <div className="mt-2 flex items-center justify-between flex-wrap gap-2">
             <button type="button" aria-expanded={helpOpen} onClick={()=>setHelpOpen(o=>!o)}

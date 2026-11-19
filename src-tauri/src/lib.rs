@@ -20,6 +20,8 @@ mod hq_runtime;
 mod app_update;
 mod ios_airplay;
 #[cfg(target_os = "windows")]
+mod ios_receiver_process;
+#[cfg(target_os = "windows")]
 mod ios_device_frame;
 mod android_rotation;
 mod capture_compositor;
@@ -155,6 +157,18 @@ pub fn run() {
 
             Ok(())
         })
+        .on_window_event(|window,event| {
+            // The AirPlay receiver is a separate Windows process. When the
+            // user closes MirroLeap's MAIN window, stop that process before
+            // the UI disappears so its borderless mirror cannot be stranded.
+            #[cfg(target_os="windows")]
+            if window.label()=="main" &&
+                matches!(event,tauri::WindowEvent::CloseRequested{..}) {
+                ios_airplay::shutdown(window.app_handle());
+            }
+            #[cfg(not(target_os="windows"))]
+            let _=(window,event);
+        })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::check_scrcpy,
@@ -213,8 +227,18 @@ pub fn run() {
             close_splashscreen,
             get_app_version
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app,event|{
+            // Also cover programmatic quit/update paths that skip main Close.
+            // Idempotent with the main-window handler above.
+            #[cfg(target_os="windows")]
+            if matches!(event,tauri::RunEvent::Exit){
+                ios_airplay::shutdown(app);
+            }
+            #[cfg(not(target_os="windows"))]
+            let _=(app,event);
+        });
 }
 
 #[tauri::command]
