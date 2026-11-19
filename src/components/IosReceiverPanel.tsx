@@ -177,8 +177,8 @@ export default function IosReceiverPanel({locale}:Props) {
                 'The bezel uses a native Windows transparent layer, not cross-process WebView parenting. Video is untouched. Switch styles live.')}
         </p>}
         {status?.installed && <p className="ml-muted text-[11px] leading-5" role="note">
-            {copy('投屏窗口右上方新增「—」最小化与「×」关闭按钮。智能清晰度会参考上次实际窗口尺寸，在下一次启动时匹配 iOS 视频分辨率，减少过度缩小造成的图标锯齿。',
-                'Native minimize and close buttons appear above the mirror’s top right. Adaptive detail uses the last measured window pixels on the next launch to reduce excessive downscaling.')}
+            {copy('鼠标移到投屏窗口右上角，会显示更大的圆角「—」最小化与「×」关闭按钮；移开后自动隐藏。智能清晰度在下次连接时按实际窗口像素约 1:1 匹配，减少图标缩放锯齿。',
+                'Hover near the top-right for larger rounded minimize/close controls; they hide when idle. Adaptive detail targets near 1:1 source/display pixels on the next connection.')}
         </p>}
         {isRunning && style.startsWith('device-') && <p role="status"
             data-testid="ios-frame-attachment" className="ml-muted text-[11px] mt-1">

@@ -81,6 +81,10 @@ assert "WM_LBUTTONUP" in controls and "ControlAction::Minimize" in controls
 assert "ControlAction::Close" in controls and "minimize_receiver" in controls
 assert "ios_window_controls::tests" in workflow
 assert "NativeControls::create()" in frame and "ControlAction::Close" in frame
+assert "apply_video_corner_clip" in frame and "clear_video_corner_clip" in frame
+assert "native_clip_intact" in frame and "RGN_DIFF" in frame
+assert "update_hover" in frame and "HIDE_AFTER_MS" in controls
+assert "GetCursorPos" in controls and "SIZE:i32=46" in controls
 assert "safe_corner_x" in frame and "each_inner_round_corner_is_covered" in frame
 assert "adaptive_quality_cap" in native and "last-display-size.txt" in native
 assert "智能清晰" in ui and "qualityTier" in ui

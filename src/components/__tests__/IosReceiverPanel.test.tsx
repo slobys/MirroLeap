@@ -74,7 +74,7 @@ describe('single-page iOS AirPlay experience',()=>{
         fireEvent.change(quality,{target:{value:'adaptive'}});
         await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith(
             'ios_airplay_set_quality_tier',{tier:'adaptive'}));
-        expect(screen.getByText(/上次实际窗口尺寸/)).toBeInTheDocument();
+        expect(screen.getByText(/实际窗口像素/)).toBeInTheDocument();
     });
     it('allows switching device and clean styles live but blocks unsafe quality changes',async()=>{
         let current={...ready,installed:true,running:true};

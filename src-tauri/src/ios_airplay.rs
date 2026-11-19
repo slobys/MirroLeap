@@ -135,14 +135,15 @@ fn quality_cap(tier:&str)->Option<(u32,u32)> {
         _=>None,
     }
 }
-/// Use 12% headroom over the *actual last SDL video client*, rather than
-/// always asking iOS to send 3840 pixels for a ~1800px window. This reduces
-/// severe minification aliasing in the unchanged upstream SDL2 renderer.
+/// Use ~3% headroom over the *actual last SDL video client*, rather than
+/// asking iOS to send 3840px for a ~1800px window. Earlier 12% headroom
+/// still left >1.15x scale after rounding; 1:1-ish is more appropriate for
+/// upstream SDL2's single bilinear pass, especially for high-contrast icons.
 fn adaptive_quality_cap(display:Option<(u32,u32)>)->u32{
     let longest=display.and_then(|(w,h)|
         (w>=320 && h>=240 && w<=7680 && h<=7680).then_some(w.max(h))
     ).unwrap_or(1714);
-    let desired=((longest as u64*112+99)/100).clamp(1280,3840) as u32;
+    let desired=((longest as u64*103+99)/100).clamp(1280,3840) as u32;
     ((desired+63)/64*64).min(3840)
 }
 fn parse_last_display(text:&str)->Option<(u32,u32)>{
@@ -860,7 +861,7 @@ mod tests {
     #[test]
     fn adaptive_cap_prevents_excessive_4k_minification_for_small_windows(){
         assert_eq!(adaptive_quality_cap(None),1920);
-        assert_eq!(adaptive_quality_cap(Some((1272,1830))),2112);
+        assert_eq!(adaptive_quality_cap(Some((1272,1830))),1920);
         assert_eq!(adaptive_quality_cap(Some((3840,2160))),3840);
         assert_eq!(adaptive_quality_cap(Some((2,3))),1920);
         assert_eq!(parse_last_display("1272x1830\n"),Some((1272,1830)));

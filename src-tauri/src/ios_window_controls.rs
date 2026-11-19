@@ -4,9 +4,10 @@
 //! All HWND manipulation and cleanup happen on the iOS bezel worker thread.
 #![cfg(target_os="windows")]
 
-use std::{ffi::c_void,ptr,ptr::NonNull,sync::atomic::{AtomicIsize,AtomicU8,Ordering}};
-use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Gdi::{GetMonitorInfoW,MonitorFromWindow,MONITORINFO,MONITOR_DEFAULTTONEAREST};
+use std::{ffi::c_void,ptr,ptr::NonNull,sync::atomic::{AtomicIsize,AtomicU8,Ordering},time::{Duration,Instant}};
+use windows::Win32::Foundation::{HWND,POINT};
+use windows::Win32::Graphics::Gdi::{GetMonitorInfoW,MonitorFromWindow,MONITORINFO,MONITOR_DEFAULTTONEAREST,
+    CreateRoundRectRgn,DeleteObject,HGDIOBJ,SetWindowRgn};
 const EX_TOOLWINDOW:u32=0x80;
 const EX_NOACTIVATE:u32=0x0800_0000;
 const STYLE_POPUP:u32=0x8000_0000;
@@ -15,8 +16,10 @@ const SW_SHOW_NOACTIVATE:i32=4;
 const SW_MINIMIZE:i32=6;
 const GWLP_WNDPROC:i32=-4;
 const WM_LBUTTONUP:u32=0x0202;
-const SIZE:i32=32;
-const SPACE:i32=4;
+const SIZE:i32=46;
+const SPACE:i32=6;
+const HIDE_AFTER_MS:u64=1400;
+const START_HINT_MS:u64=2200;
 static MIN_HWND:AtomicIsize=AtomicIsize::new(0);
 static CLOSE_HWND:AtomicIsize=AtomicIsize::new(0);
 static OLD_MIN_PROC:AtomicIsize=AtomicIsize::new(0);
@@ -36,6 +39,7 @@ unsafe extern "system" {
     fn SetWindowLongPtrW(hwnd:*mut c_void,index:i32,new:isize)->isize;
     fn CallWindowProcW(old:isize,hwnd:*mut c_void,message:u32,wparam:usize,lparam:isize)->isize;
     fn DefWindowProcW(hwnd:*mut c_void,message:u32,wparam:usize,lparam:isize)->isize;
+    fn GetCursorPos(cursor:*mut POINT)->i32;
 }
 
 unsafe extern "system" fn button_proc(
@@ -56,17 +60,27 @@ unsafe extern "system" fn button_proc(
 fn make_button(text:&str)->Result<NonNull<c_void>,&'static str>{
     let class:Vec<u16>="BUTTON".encode_utf16().chain(Some(0)).collect();
     let caption:Vec<u16>=text.encode_utf16().chain(Some(0)).collect();
-    NonNull::new(unsafe{
+    let hwnd=NonNull::new(unsafe{
         CreateWindowExW(EX_TOOLWINDOW|EX_NOACTIVATE,class.as_ptr(),caption.as_ptr(),
             STYLE_POPUP,0,0,SIZE,SIZE,
             ptr::null_mut(),ptr::null_mut(),ptr::null_mut(),ptr::null_mut())
-    }).ok_or("Cannot create native AirPlay minimize/close button")
+    }).ok_or("Cannot create native AirPlay minimize/close button")?;
+    // Large soft-corner hit targets, instead of square 32px default boxes.
+    let region=unsafe{CreateRoundRectRgn(0,0,SIZE+1,SIZE+1,16,16)};
+    if !region.0.is_null() {
+        if unsafe{SetWindowRgn(HWND(hwnd.as_ptr()),Some(region),true)}==0{
+            let _=unsafe{DeleteObject(HGDIOBJ(region.0))};
+        }
+    }
+    Ok(hwnd)
 }
 
 pub struct NativeControls{
     minimize:NonNull<c_void>,
     close:NonNull<c_void>,
     shown:bool,
+    created_at:Instant,
+    last_nearby:Instant,
 }
 impl NativeControls{
     pub fn create()->Result<Self,&'static str>{
@@ -96,7 +110,8 @@ impl NativeControls{
             OLD_CLOSE_PROC.store(0,Ordering::Release);
             return Err("Cannot install native AirPlay control window handler");
         }
-        Ok(Self{minimize,close,shown:false})
+        Ok(Self{minimize,close,shown:false,
+            created_at:Instant::now(),last_nearby:Instant::now()})
     }
     pub fn action()->Option<ControlAction>{
         match ACTION.swap(0,Ordering::AcqRel) {
@@ -112,6 +127,24 @@ impl NativeControls{
                 ShowWindow(self.close.as_ptr(),SW_HIDE);
             }
             self.shown=false;
+        }
+    }
+    /// Follow the receiver only while the pointer is near its top-right
+    /// controls. Never leave white buttons hanging over the iPad when idle.
+    /// Include the space directly above the video where controls appear,
+    /// so a hidden button can be discovered with a simple mouse movement.
+    pub fn update_hover(&mut self,video:HWND,x:i32,y:i32,width:i32){
+        let mut cursor=POINT::default();
+        let nearby=unsafe{GetCursorPos(&mut cursor)}!=0 &&
+            near_controls(cursor.x,cursor.y,x,y,width);
+        if nearby{self.last_nearby=Instant::now();}
+        let active=nearby ||
+            self.last_nearby.elapsed()<Duration::from_millis(HIDE_AFTER_MS) ||
+            self.created_at.elapsed()<Duration::from_millis(START_HINT_MS);
+        if active{
+            if self.position(video,x,y,width).is_err(){self.hide();}
+        }else{
+            self.hide();
         }
     }
     pub fn position(&mut self,video:HWND,x:i32,y:i32,width:i32)->Result<(),String>{
@@ -132,6 +165,12 @@ impl NativeControls{
     pub fn minimize_receiver(video:HWND){
         unsafe{ShowWindow(video.0,SW_MINIMIZE);}
     }
+}
+fn near_controls(mx:i32,my:i32,x:i32,y:i32,width:i32)->bool{
+    mx>=x.saturating_add(width).saturating_sub(185)
+        && mx<=x.saturating_add(width).saturating_add(16)
+        && my>=y.saturating_sub(SIZE+26)
+        && my<=y.saturating_add(100)
 }
 fn control_position(video:HWND,x:i32,y:i32,width:i32)->(i32,i32){
     let x=x.saturating_add(width).saturating_sub(2*SIZE+SPACE+8);
@@ -176,7 +215,14 @@ mod tests{
     fn controls_have_distinct_commands(){
         assert_eq!(ControlAction::Minimize,ControlAction::Minimize);
         assert_ne!(ControlAction::Minimize,ControlAction::Close);
-        assert_eq!(SIZE,32);
-        assert_eq!(SPACE,4);
+        assert_eq!(SIZE,46);
+        assert_eq!(SPACE,6);
+    }
+    #[test]
+    fn hover_displays_native_buttons_only_near_receiver_top_right(){
+        assert!(near_controls(920,65,0,75,970));
+        assert!(near_controls(970,20,0,75,970));
+        assert!(!near_controls(500,65,0,75,970));
+        assert!(!near_controls(920,600,0,75,970));
     }
 }

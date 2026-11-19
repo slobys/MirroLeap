@@ -23,7 +23,9 @@ use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
-    MONITOR_DEFAULTTONEAREST,
+    MONITOR_DEFAULTTONEAREST, CreateRectRgn,CreateRoundRectRgn,
+    CombineRgn,SetWindowRgn,DeleteObject,HGDIOBJ,RGN_DIFF,RGN_OR,
+    GetWindowRgn,PtInRegion,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -197,6 +199,112 @@ fn target_layout(video:VideoClient,style:&str,dpi:u32)->Option<CaseLayout>{
     })
 }
 
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+struct NativeVideoClip{
+    hwnd:usize,
+    width:i32,
+    height:i32,
+    local_left:i32,
+    local_top:i32,
+    ipad:bool,
+    dpi:u32,
+}
+fn clip_signature(hwnd:HWND,client:VideoClient,ipad:bool,dpi:u32)
+    ->Option<NativeVideoClip>
+{
+    let mut outer=RECT::default();
+    unsafe{GetWindowRect(hwnd,&mut outer)}.ok()?;
+    Some(NativeVideoClip{
+        hwnd:hwnd.0 as usize,width:client.width,height:client.height,
+        local_left:client.point.x.checked_sub(outer.left)?,
+        local_top:client.point.y.checked_sub(outer.top)?,
+        ipad,dpi,
+    })
+}
+fn clip_shape(client:VideoClient,outer:RECT,ipad:bool,dpi:u32)
+    ->Option<(i32,i32,i32,i32,i32)>
+{
+    let cover=seam_cover_px(dpi);
+    let left=client.point.x.checked_sub(outer.left)?.checked_add(cover)?;
+    let top=client.point.y.checked_sub(outer.top)?.checked_add(cover)?;
+    let right=left.checked_add(client.width-2*cover)?;
+    let bottom=top.checked_add(client.height-2*cover)?;
+    let radius=((if ipad{28.0}else{40.0})*dpi as f64/96.0)
+        .round().clamp(10.0,180.0) as i32;
+    (right>left+2*radius && bottom>top+2*radius)
+        .then_some((left,top,right,bottom,radius))
+}
+/// Reuse Android's native GDI clipping instead of exposing the SDL window's
+/// rectangular black corners THROUGH the transparent rounded outer case.
+/// Preserve the invisible non-client WS_THICKFRAME resize border: remove
+/// only the rectangular video CLIENT and add back the rounded video region.
+fn apply_video_corner_clip(hwnd:HWND,client:VideoClient,ipad:bool,dpi:u32)
+    ->Result<(),&'static str>
+{
+    let mut bounds=RECT::default();
+    unsafe{GetWindowRect(hwnd,&mut bounds)}
+        .map_err(|_|"Cannot inspect AirPlay HWND bounds")?;
+    let width=bounds.right-bounds.left;
+    let height=bounds.bottom-bounds.top;
+    if width<=0 || height<=0 || width>MAX_SIDE || height>MAX_SIDE {
+        return Err("Invalid AirPlay video HWND bounds");
+    }
+    let (left,top,right,bottom,r)=clip_shape(client,bounds,ipad,dpi)
+        .ok_or("Invalid rounded video aperture")?;
+    let full=unsafe{CreateRectRgn(0,0,width+1,height+1)};
+    let client_region=unsafe{CreateRectRgn(
+        client.point.x-bounds.left,client.point.y-bounds.top,
+        client.point.x-bounds.left+client.width+1,
+        client.point.y-bounds.top+client.height+1)};
+    let rounded=unsafe{CreateRoundRectRgn(
+        left,top,right+1,bottom+1,2*r,2*r)};
+    let rest=unsafe{CreateRectRgn(0,0,0,0)};
+    let result=unsafe{CreateRectRgn(0,0,0,0)};
+    let valid=!full.0.is_null() && !client_region.0.is_null() &&
+        !rounded.0.is_null() && !rest.0.is_null() && !result.0.is_null()
+        && unsafe{CombineRgn(Some(rest),Some(full),Some(client_region),RGN_DIFF)}.0>=1
+        && unsafe{CombineRgn(Some(result),Some(rest),Some(rounded),RGN_OR)}.0>=2;
+    for region in [full,client_region,rounded,rest]{
+        if !region.0.is_null(){let _=unsafe{DeleteObject(HGDIOBJ(region.0))};}
+    }
+    if !valid {
+        if !result.0.is_null(){let _=unsafe{DeleteObject(HGDIOBJ(result.0))};}
+        return Err("Cannot construct AirPlay native rounded clip");
+    }
+    if unsafe{SetWindowRgn(hwnd,Some(result),true)}==0 {
+        let _=unsafe{DeleteObject(HGDIOBJ(result.0))};
+        return Err("Windows rejected the video rounded clip");
+    }
+    Ok(())
+}
+fn native_clip_intact(hwnd:HWND,client:VideoClient,ipad:bool,dpi:u32)->bool{
+    let mut bounds=RECT::default();
+    if unsafe{GetWindowRect(hwnd,&mut bounds)}.is_err(){return false;}
+    let Some((left,top,right,bottom,_))=
+        clip_shape(client,bounds,ipad,dpi) else{return false};
+    let rgn=unsafe{CreateRectRgn(0,0,0,0)};
+    if rgn.0.is_null(){return false;}
+    let kind=unsafe{GetWindowRgn(hwnd,rgn)}.0;
+    let valid=kind>=2
+        && !unsafe{PtInRegion(rgn,left+1,top+1)}.as_bool()
+        && !unsafe{PtInRegion(rgn,right-2,bottom-2)}.as_bool()
+        && unsafe{PtInRegion(rgn,(left+right)/2,(top+bottom)/2)}.as_bool();
+    let _=unsafe{DeleteObject(HGDIOBJ(rgn.0))};
+    valid
+}
+fn clear_video_corner_clip(hwnd:HWND){
+    let _=unsafe{SetWindowRgn(hwnd,None,true)};
+}
+fn clear_clip_if_still_owned(pid:u32,applied:&mut Option<NativeVideoClip>){
+    if let Some(previous)=applied.take() {
+        if let Some(video)=crate::commands::find_window_by_pid(pid){
+            if video.0 as usize==previous.hwnd{
+                clear_video_corner_clip(video);
+            }
+        }
+    }
+}
+
 // Antialiased signed distance to an exact rounded rectangle in pixel space.
 fn round_coverage(px:f32,py:f32,left:f32,top:f32,w:f32,h:f32,r:f32)->f32 {
     let r=r.max(1.0).min(w.min(h)*0.5);
@@ -220,8 +328,8 @@ fn render_bezel(layout:CaseLayout)->Result<Vec<u8>,&'static str>{
     let inset=bezel_inset(layout.ipad,dpi);
     let inner_inset=inset+seam_cover_px(dpi);
     // Restore #44351521843's iPad Air silhouette and graphite screen lip.
-    let radius=(if layout.ipad {27.0}else{40.0})*scale;
-    let hole_radius=(if layout.ipad {16.0}else{27.0})*scale;
+    let radius=(if layout.ipad {40.0}else{54.0})*scale;
+    let hole_radius=(if layout.ipad {29.0}else{41.0})*scale;
     let mut pixels=vec![0u8;(w as usize)*(h as usize)*4];
     let safe_corner_x=inner_inset+hole_radius.ceil() as i32+2;
     let safe_corner_y=safe_corner_x;
@@ -536,9 +644,9 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
     let _location_hook=NativeLocationHook::install(pid);
     let mut surface=Surface::create()?;
     let mut controls=crate::ios_window_controls::NativeControls::create().ok();
-    let mut controls_at=Instant::now()-Duration::from_secs(1);
-    let mut controls_rect:Option<(i32,i32,i32)>=None;
     let mut previous_skin:Option<(i32,i32,bool,u32)>=None;
+    let mut applied_video_clip:Option<NativeVideoClip>=None;
+    let mut clip_checked_at=Instant::now()-Duration::from_secs(1);
     let mut shown=false;
     let mut applied=false;
     while !stop.load(Ordering::Acquire){
@@ -581,18 +689,11 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
         };
         // Two native buttons are available even in "clean" mode; control
         // only this AirPlay receiver, never the Android mirror/main GUI.
-        let desired=(screen.point.x,screen.point.y,screen.width);
-        if controls_rect!=Some(desired) ||
-            controls_at.elapsed()>Duration::from_millis(450){
-            if let Some(control)=controls.as_mut(){
-                if control.position(video,screen.point.x,screen.point.y,
-                    screen.width).is_ok(){
-                    controls_rect=Some(desired);
-                    controls_at=Instant::now();
-                }
-            }
+        if let Some(control)=controls.as_mut(){
+            control.update_hover(video,screen.point.x,screen.point.y,screen.width);
         }
         if !style.starts_with("device-") || is_fullscreen(video){
+            clear_clip_if_still_owned(pid,&mut applied_video_clip);
             hide(hwnd.as_ptr(),&mut shown);
             state.frame_attached.store(false,Ordering::Release);
             thread::sleep(Duration::from_millis(40));
@@ -606,6 +707,25 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
             thread::sleep(Duration::from_millis(80));
             continue;
         };
+        let desired_clip=clip_signature(video,screen,layout.ipad,dpi);
+        let needs_clip=desired_clip.is_some_and(|signature|
+            applied_video_clip!=Some(signature) ||
+                (clip_checked_at.elapsed()>Duration::from_millis(650) &&
+                !native_clip_intact(video,screen,layout.ipad,dpi)));
+        if needs_clip {
+            if let Err(error)=apply_video_corner_clip(video,screen,layout.ipad,dpi){
+                clear_clip_if_still_owned(pid,&mut applied_video_clip);
+                hide(hwnd.as_ptr(),&mut shown);
+                state.frame_attached.store(false,Ordering::Release);
+                set_error(&app,Some(error));
+                thread::sleep(Duration::from_millis(200));
+                continue;
+            }
+            applied_video_clip=desired_clip;
+        }
+        if clip_checked_at.elapsed()>Duration::from_millis(650){
+            clip_checked_at=Instant::now();
+        }
         let skin=(layout.width,layout.height,layout.ipad,layout.dpi);
         if previous_skin!=Some(skin){
             if let Err(reason)=surface.present(hwnd.as_ptr(),layout){
@@ -660,6 +780,7 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
         }
         thread::sleep(Duration::from_millis(FOLLOW_MS));
     }
+    clear_clip_if_still_owned(pid,&mut applied_video_clip);
     if let Some(state)=app.try_state::<crate::ios_airplay::IosAirplayState>(){
         state.frame_attached.store(false,Ordering::Release);
     }
@@ -752,6 +873,34 @@ mod tests{
                 assert_eq!(alpha(skin.width/2,skin.height/2),0);
             }
         }
+    }
+    #[test]
+    fn native_video_clip_geometry_has_larger_real_round_corners(){
+        let video=VideoClient{
+            point:Point{x:100,y:80},width:700,height:980
+        };
+        let outer=RECT{left:92,top:72,right:808,bottom:1068};
+        let (left,top,right,bottom,radius)=clip_shape(video,outer,true,96).unwrap();
+        assert_eq!((left,top,right,bottom),(12,12,704,984));
+        assert!(radius>=28);
+        let (_,_,_,_,hi_dpi)=clip_shape(video,outer,true,144).unwrap();
+        assert!(hi_dpi>radius);
+    }
+    #[test]
+    fn native_win32_gdi_region_clips_all_four_square_video_corners(){
+        let class:Vec<u16>="STATIC".encode_utf16().chain(Some(0)).collect();
+        let title:Vec<u16>="ios rounded test".encode_utf16().chain(Some(0)).collect();
+        let raw=unsafe{CreateWindowExW(0,class.as_ptr(),title.as_ptr(),
+            WS_POPUP,100,80,320,480,ptr::null_mut(),ptr::null_mut(),
+            ptr::null_mut(),ptr::null_mut())};
+        let Some(raw)=NonNull::new(raw) else {panic!("Cannot allocate native test HWND")};
+        let hwnd=HWND(raw.as_ptr());
+        let video=VideoClient{point:Point{x:100,y:80},width:320,height:480};
+        let result=apply_video_corner_clip(hwnd,video,true,96);
+        if result.is_ok(){assert!(native_clip_intact(hwnd,video,true,96));}
+        clear_video_corner_clip(hwnd);
+        unsafe{DestroyWindow(raw.as_ptr());}
+        result.unwrap();
     }
     #[test]
     fn target_geometry_tracks_physical_video_client_even_on_negative_monitors(){
