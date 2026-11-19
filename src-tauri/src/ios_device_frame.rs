@@ -45,6 +45,13 @@ const DIB_RGB_COLORS:u32=0;
 const MAX_SIDE:i32=5200;
 const MAX_PIXELS:i64=16_000_000;
 const FOLLOW_MS:u64=16;
+// Windows 11's focus border can leave a BRIGHT white curved arc on the
+// SDL HWND even while the MirroLeap metal overlay is completely hidden.
+const DWMWA_WINDOW_CORNER_PREFERENCE:u32=33;
+const DWMWA_BORDER_COLOR:u32=34;
+const DWMWCP_DONOTROUND:u32=1;
+const DWMWA_COLOR_NONE:u32=0xFFFF_FFFE;
+const DWMWA_COLOR_DEFAULT:u32=0xFFFF_FFFF;
 const MOVE_THRESHOLD_PX:i32=6;
 const MOTION_BURST_MS:u64=45;
 const STABLE_RESHOW_MS:u64=110;
@@ -132,6 +139,54 @@ struct WinMsg{
 }
 impl Default for WinMsg{
     fn default()->Self{unsafe{std::mem::zeroed()}}
+}
+
+#[link(name="dwmapi")]
+unsafe extern "system" {
+    fn DwmGetWindowAttribute(hwnd:*mut c_void,attribute:u32,
+        out:*mut c_void,bytes:u32)->i32;
+    fn DwmSetWindowAttribute(hwnd:*mut c_void,attribute:u32,
+        value:*const c_void,bytes:u32)->i32;
+}
+fn dwm_read_u32(hwnd:HWND,attribute:u32)->Option<u32>{
+    let mut value=0u32;
+    let result=unsafe{DwmGetWindowAttribute(hwnd.0,attribute,
+        (&mut value as *mut u32).cast(),4)};
+    (result>=0).then_some(value)
+}
+fn dwm_write_u32(hwnd:HWND,attribute:u32,value:u32)->bool{
+    unsafe{DwmSetWindowAttribute(hwnd.0,attribute,
+        (&value as *const u32).cast(),4)}>=0
+}
+/// Receiver-scoped DWM override. Restored when MirroLeap stops mirroring;
+/// unlike SetParent, this never changes MirroLeap's process DPI awareness.
+struct ReceiverDwmStyle{
+    hwnd:usize,
+    old_border:Option<u32>,
+    old_corner:Option<u32>,
+    wrote_border:bool,
+    wrote_corner:bool,
+}
+impl ReceiverDwmStyle {
+    fn attach(hwnd:HWND)->Self{
+        let old_border=dwm_read_u32(hwnd,DWMWA_BORDER_COLOR);
+        let old_corner=dwm_read_u32(hwnd,DWMWA_WINDOW_CORNER_PREFERENCE);
+        let wrote_border=dwm_write_u32(hwnd,DWMWA_BORDER_COLOR,DWMWA_COLOR_NONE);
+        let wrote_corner=dwm_write_u32(hwnd,DWMWA_WINDOW_CORNER_PREFERENCE,
+            DWMWCP_DONOTROUND);
+        Self{hwnd:hwnd.0 as usize,old_border,old_corner,wrote_border,wrote_corner}
+    }
+    fn restore(self){
+        let hwnd=HWND(self.hwnd as *mut _);
+        if self.wrote_border {
+            let _=dwm_write_u32(hwnd,DWMWA_BORDER_COLOR,
+                self.old_border.unwrap_or(DWMWA_COLOR_DEFAULT));
+        }
+        if self.wrote_corner{
+            let _=dwm_write_u32(hwnd,DWMWA_WINDOW_CORNER_PREFERENCE,
+                self.old_corner.unwrap_or(0));
+        }
+    }
 }
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
@@ -784,6 +839,8 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
     let mut controls=crate::ios_window_controls::NativeControls::create().ok();
     let mut previous_skin:Option<(i32,i32,bool,u32)>=None;
     let mut applied_video_clip:Option<NativeVideoClip>=None;
+    let mut receiver_dwm:Option<ReceiverDwmStyle>=None;
+    let mut checked_dwm_at=Instant::now()-Duration::from_secs(3);
     let mut clip_checked_at=Instant::now()-Duration::from_secs(1);
     let mut last_stacked=Instant::now()-Duration::from_secs(1);
     let mut last_anchor:Option<usize>=None;
@@ -814,12 +871,25 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
             .unwrap_or_default();
         let video=crate::commands::find_window_by_pid(pid);
         let Some(video)=video else{
+            receiver_dwm=None; // The former HWND vanished; never touch a recycled handle.
             if let Some(control)=controls.as_mut(){control.hide();}
             hide(hwnd.as_ptr(),&mut shown);
             state.frame_attached.store(false,Ordering::Release);
             thread::sleep(Duration::from_millis(50));
             continue;
         };
+        if receiver_dwm.as_ref().map(|style|style.hwnd)!=Some(video.0 as usize){
+            receiver_dwm=Some(ReceiverDwmStyle::attach(video));
+            checked_dwm_at=Instant::now();
+        }else if checked_dwm_at.elapsed()>Duration::from_secs(2){
+            // Some Windows themes redraw the focus border on window activation.
+            // Reassert the suppression only when the attribute changes.
+            if dwm_read_u32(video,DWMWA_BORDER_COLOR)
+                .is_some_and(|color|color!=DWMWA_COLOR_NONE){
+                let _=dwm_write_u32(video,DWMWA_BORDER_COLOR,DWMWA_COLOR_NONE);
+            }
+            checked_dwm_at=Instant::now();
+        }
         let Some(screen)=video_client(video) else{
             if let Some(control)=controls.as_mut(){control.hide();}
             hide(hwnd.as_ptr(),&mut shown);
@@ -956,6 +1026,14 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
         thread::sleep(Duration::from_millis(FOLLOW_MS));
     }
     clear_clip_if_still_owned(pid,&mut applied_video_clip);
+    // Restore the receiver's original Windows frame preferences only if
+    // its original HWND is still owned by this AirPlay process.
+    if let Some(style)=receiver_dwm{
+        if crate::commands::find_window_by_pid(pid)
+            .is_some_and(|hwnd|hwnd.0 as usize==style.hwnd){
+            style.restore();
+        }
+    }
     if let Some(state)=app.try_state::<crate::ios_airplay::IosAirplayState>(){
         state.frame_attached.store(false,Ordering::Release);
     }
@@ -1197,6 +1275,30 @@ mod tests{
         clear_video_corner_clip(hwnd);
         unsafe{DestroyWindow(raw.as_ptr());}
         result.unwrap();
+    }
+    #[test]
+    fn native_dwm_border_suppression_is_per_window_and_restorable(){
+        assert_eq!(DWMWA_WINDOW_CORNER_PREFERENCE,33);
+        assert_eq!(DWMWA_BORDER_COLOR,34);
+        assert_eq!(DWMWA_COLOR_NONE,0xFFFF_FFFE);
+        let class:Vec<u16>="STATIC".encode_utf16().chain(Some(0)).collect();
+        let title:Vec<u16>="ios dwm smoke".encode_utf16().chain(Some(0)).collect();
+        let raw=unsafe{CreateWindowExW(0,class.as_ptr(),title.as_ptr(),
+            WS_POPUP,100,80,320,480,ptr::null_mut(),ptr::null_mut(),
+            ptr::null_mut(),ptr::null_mut())};
+        let Some(raw)=NonNull::new(raw) else{panic!("Cannot allocate DWM test HWND")};
+        let hwnd=HWND(raw.as_ptr());
+        let before=dwm_read_u32(hwnd,DWMWA_BORDER_COLOR);
+        let override_state=ReceiverDwmStyle::attach(hwnd);
+        if override_state.wrote_border && before.is_some() {
+            assert_eq!(dwm_read_u32(hwnd,DWMWA_BORDER_COLOR),
+                Some(DWMWA_COLOR_NONE));
+        }
+        override_state.restore();
+        if let Some(original)=before {
+            assert_eq!(dwm_read_u32(hwnd,DWMWA_BORDER_COLOR),Some(original));
+        }
+        unsafe{DestroyWindow(raw.as_ptr());}
     }
     #[test]
     fn target_geometry_tracks_physical_video_client_even_on_negative_monitors(){

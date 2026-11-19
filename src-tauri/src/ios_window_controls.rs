@@ -15,16 +15,41 @@ const SW_HIDE:i32=0;
 const SW_SHOW_NOACTIVATE:i32=4;
 const SW_MINIMIZE:i32=6;
 const GWLP_WNDPROC:i32=-4;
+const WM_PAINT:u32=0x000F;
+const WM_ERASEBKGND:u32=0x0014;
 const WM_LBUTTONUP:u32=0x0202;
 const SIZE:i32=46;
 const SPACE:i32=6;
 const HIDE_AFTER_MS:u64=1400;
-const START_HINT_MS:u64=2200;
+const START_HINT_MS:u64=650;
 static MIN_HWND:AtomicIsize=AtomicIsize::new(0);
 static CLOSE_HWND:AtomicIsize=AtomicIsize::new(0);
 static OLD_MIN_PROC:AtomicIsize=AtomicIsize::new(0);
 static OLD_CLOSE_PROC:AtomicIsize=AtomicIsize::new(0);
 static ACTION:AtomicU8=AtomicU8::new(0);
+
+#[repr(C)]
+struct PaintStruct{
+    hdc:*mut c_void,
+    erase:i32,
+    paint:windows::Win32::Foundation::RECT,
+    restore:i32,
+    inc_update:i32,
+    reserved:[u8;32],
+}
+impl Default for PaintStruct {
+    fn default()->Self{unsafe{std::mem::zeroed()}}
+}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+struct ButtonColors{fill:u32,outline:u32,icon:u32}
+/// Graphite iPad Air control (COLORREF is 0x00BBGGRR).
+fn button_colors(close:bool)->ButtonColors{
+    ButtonColors{
+        fill:0x00231B17,
+        outline:0x006F635A,
+        icon:if close{0x00CCDDEB}else{0x00F2E8DB},
+    }
+}
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub enum ControlAction{Minimize,Close}
@@ -40,6 +65,55 @@ unsafe extern "system" {
     fn CallWindowProcW(old:isize,hwnd:*mut c_void,message:u32,wparam:usize,lparam:isize)->isize;
     fn DefWindowProcW(hwnd:*mut c_void,message:u32,wparam:usize,lparam:isize)->isize;
     fn GetCursorPos(cursor:*mut POINT)->i32;
+    fn BeginPaint(hwnd:*mut c_void,paint:*mut PaintStruct)->*mut c_void;
+    fn EndPaint(hwnd:*mut c_void,paint:*const PaintStruct)->i32;
+}
+#[link(name="gdi32")]
+unsafe extern "system" {
+    fn CreateSolidBrush(color:u32)->*mut c_void;
+    fn CreatePen(style:i32,width:i32,color:u32)->*mut c_void;
+    fn SelectObject(hdc:*mut c_void,obj:*mut c_void)->*mut c_void;
+    fn DeleteObject(obj:*mut c_void)->i32;
+    fn RoundRect(hdc:*mut c_void,left:i32,top:i32,right:i32,bottom:i32,
+        arc_width:i32,arc_height:i32)->i32;
+    fn MoveToEx(hdc:*mut c_void,x:i32,y:i32,old:*mut POINT)->i32;
+    fn LineTo(hdc:*mut c_void,x:i32,y:i32)->i32;
+}
+fn paint_button(hwnd:*mut c_void,close:bool){
+    let mut ps=PaintStruct::default();
+    let dc=unsafe{BeginPaint(hwnd,&mut ps)};
+    if dc.is_null(){return;}
+    let colors=button_colors(close);
+    let fill=unsafe{CreateSolidBrush(colors.fill)};
+    let outline=unsafe{CreatePen(0,1,colors.outline)};
+    if !fill.is_null() && !outline.is_null() {
+        let old_brush=unsafe{SelectObject(dc,fill)};
+        let old_pen=unsafe{SelectObject(dc,outline)};
+        unsafe{RoundRect(dc,1,1,SIZE-1,SIZE-1,18,18);}
+        if !old_brush.is_null(){unsafe{SelectObject(dc,old_brush);}}
+        if !old_pen.is_null(){unsafe{SelectObject(dc,old_pen);}}
+    }
+    if !outline.is_null(){unsafe{DeleteObject(outline);}}
+    if !fill.is_null(){unsafe{DeleteObject(fill);}}
+    let icon_pen=unsafe{CreatePen(0,2,colors.icon)};
+    if !icon_pen.is_null(){
+        let old=unsafe{SelectObject(dc,icon_pen)};
+        let center=SIZE/2;
+        unsafe{
+            if close {
+                MoveToEx(dc,center-7,center-7,ptr::null_mut());
+                LineTo(dc,center+7,center+7);
+                MoveToEx(dc,center+7,center-7,ptr::null_mut());
+                LineTo(dc,center-7,center+7);
+            }else{
+                MoveToEx(dc,center-8,center+3,ptr::null_mut());
+                LineTo(dc,center+8,center+3);
+            }
+            if !old.is_null(){SelectObject(dc,old);}
+            DeleteObject(icon_pen);
+        }
+    }
+    unsafe{EndPaint(hwnd,&ps);}
 }
 
 unsafe extern "system" fn button_proc(
@@ -47,6 +121,11 @@ unsafe extern "system" fn button_proc(
 )->isize{
     let is_min=hwnd as isize==MIN_HWND.load(Ordering::Relaxed);
     let is_close=hwnd as isize==CLOSE_HWND.load(Ordering::Relaxed);
+    if message==WM_ERASEBKGND{return 1;} // No white default BUTTON flash.
+    if message==WM_PAINT {
+        paint_button(hwnd,is_close);
+        return 0;
+    }
     if message==WM_LBUTTONUP {
         if is_min{ACTION.store(1,Ordering::Release);}
         if is_close{ACTION.store(2,Ordering::Release);}
@@ -81,6 +160,8 @@ pub struct NativeControls{
     shown:bool,
     created_at:Instant,
     last_nearby:Instant,
+    last_placement:Option<(usize,i32,i32)>,
+    stacked_at:Instant,
 }
 impl NativeControls{
     pub fn create()->Result<Self,&'static str>{
@@ -111,7 +192,8 @@ impl NativeControls{
             return Err("Cannot install native AirPlay control window handler");
         }
         Ok(Self{minimize,close,shown:false,
-            created_at:Instant::now(),last_nearby:Instant::now()})
+            created_at:Instant::now(),last_nearby:Instant::now(),
+            last_placement:None,stacked_at:Instant::now()-Duration::from_secs(2)})
     }
     pub fn action()->Option<ControlAction>{
         match ACTION.swap(0,Ordering::AcqRel) {
@@ -128,9 +210,10 @@ impl NativeControls{
             }
             self.shown=false;
         }
+        self.last_placement=None;
     }
     /// Follow the receiver only while the pointer is near its top-right
-    /// controls. Never leave white buttons hanging over the iPad when idle.
+    /// controls. Never leave distracting buttons over the iPad when idle.
     /// Include the space directly above the video where controls appear,
     /// so a hidden button can be discovered with a simple mouse movement.
     pub fn update_hover(&mut self,video:HWND,x:i32,y:i32,width:i32){
@@ -149,10 +232,20 @@ impl NativeControls{
     }
     pub fn position(&mut self,video:HWND,x:i32,y:i32,width:i32)->Result<(),String>{
         let (min_x,min_y)=control_position(video,x,y,width);
-        crate::device_frame::place_ios_companion(
-            HWND(self.minimize.as_ptr()),video,min_x,min_y,SIZE,SIZE)?;
-        crate::device_frame::place_ios_companion(
-            HWND(self.close.as_ptr()),video,min_x+SIZE+SPACE,min_y,SIZE,SIZE)?;
+        let next=(video.0 as usize,min_x,min_y);
+        // Re-stacking two foreign z-order companions every 16ms made the
+        // default buttons flash repeatedly as they crossed SDL's layer.
+        // Move only when geometry changes, on first reveal, or for a slow
+        // 2-second resilience refresh; stationary hover must not repaint.
+        if stable_placement_needed(self.last_placement,Some(next),
+            self.shown,self.stacked_at.elapsed()){
+            crate::device_frame::place_ios_companion(
+                HWND(self.minimize.as_ptr()),video,min_x,min_y,SIZE,SIZE)?;
+            crate::device_frame::place_ios_companion(
+                HWND(self.close.as_ptr()),video,min_x+SIZE+SPACE,min_y,SIZE,SIZE)?;
+            self.last_placement=Some(next);
+            self.stacked_at=Instant::now();
+        }
         if !self.shown{
             unsafe{
                 ShowWindow(self.minimize.as_ptr(),SW_SHOW_NOACTIVATE);
@@ -165,6 +258,14 @@ impl NativeControls{
     pub fn minimize_receiver(video:HWND){
         unsafe{ShowWindow(video.0,SW_MINIMIZE);}
     }
+}
+fn stable_placement_needed(
+    previous:Option<(usize,i32,i32)>,
+    requested:Option<(usize,i32,i32)>,
+    visible:bool,
+    since_last:Duration,
+)->bool{
+    !visible || previous!=requested || since_last>=Duration::from_secs(2)
 }
 fn near_controls(mx:i32,my:i32,x:i32,y:i32,width:i32)->bool{
     mx>=x.saturating_add(width).saturating_sub(185)
@@ -224,5 +325,24 @@ mod tests{
         assert!(near_controls(970,20,0,75,970));
         assert!(!near_controls(500,65,0,75,970));
         assert!(!near_controls(920,600,0,75,970));
+    }
+    #[test]
+    fn steady_hover_does_not_restack_or_flicker_every_frame(){
+        let pos=Some((123usize,800,36));
+        assert!(stable_placement_needed(None,pos,false,Duration::ZERO));
+        assert!(!stable_placement_needed(pos,pos,true,Duration::from_millis(16)));
+        assert!(!stable_placement_needed(pos,pos,true,Duration::from_millis(950)));
+        assert!(stable_placement_needed(pos,pos,true,Duration::from_secs(2)));
+        assert!(stable_placement_needed(pos,Some((123,801,36)),true,
+            Duration::from_millis(16)));
+    }
+    #[test]
+    fn graphite_control_palette_never_uses_a_white_button_background(){
+        let minimize=button_colors(false);
+        let close=button_colors(true);
+        assert_eq!(minimize.fill,close.fill);
+        assert_ne!(minimize.fill,0x00FF_FFFF);
+        assert_eq!(minimize.outline,close.outline);
+        assert_ne!(minimize.icon,close.icon);
     }
 }

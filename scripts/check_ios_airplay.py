@@ -91,6 +91,13 @@ assert "metal_round_caps_leave_only_the_correct_transparent_outside" in frame
 assert "MotionGate" in frame and "STABLE_RESHOW_MS:u64=110" in frame
 assert "dragging_temporarily_hides_shell_until_source_has_settled" in frame
 assert "ShowWindow(bezel,SW_HIDE)" in frame and "motion_hidden()" in frame
+assert "DwmSetWindowAttribute" in frame and "DWMWA_BORDER_COLOR" in frame
+assert "DWMWA_COLOR_NONE" in frame and "ReceiverDwmStyle" in frame
+assert "native_dwm_border_suppression_is_per_window_and_restorable" in frame
+assert "WM_PAINT" in controls and "WM_ERASEBKGND" in controls
+assert "paint_button" in controls and "button_colors" in controls
+assert "stable_placement_needed" in controls
+assert "steady_hover_does_not_restack_or_flicker_every_frame" in controls
 assert "update_hover" in frame and "HIDE_AFTER_MS" in controls
 assert "GetCursorPos" in controls and "SIZE:i32=46" in controls
 assert "safe_corner_x" in frame and "each_inner_round_corner_is_covered" in frame
