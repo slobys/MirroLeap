@@ -7,7 +7,7 @@
 use std::{ffi::c_void,ptr,ptr::NonNull,sync::atomic::{AtomicIsize,AtomicU8,Ordering},time::{Duration,Instant}};
 use windows::Win32::Foundation::{HWND,POINT};
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW,MonitorFromWindow,MONITORINFO,MONITOR_DEFAULTTONEAREST,
-    CreateRoundRectRgn,DeleteObject,HGDIOBJ,SetWindowRgn};
+    CreateRoundRectRgn,DeleteObject as GdiDeleteObject,HGDIOBJ,SetWindowRgn};
 const EX_TOOLWINDOW:u32=0x80;
 const EX_NOACTIVATE:u32=0x0800_0000;
 const STYLE_POPUP:u32=0x8000_0000;
@@ -148,7 +148,7 @@ fn make_button(text:&str)->Result<NonNull<c_void>,&'static str>{
     let region=unsafe{CreateRoundRectRgn(0,0,SIZE+1,SIZE+1,16,16)};
     if !region.0.is_null() {
         if unsafe{SetWindowRgn(HWND(hwnd.as_ptr()),Some(region),true)}==0{
-            let _=unsafe{DeleteObject(HGDIOBJ(region.0))};
+            let _=unsafe{GdiDeleteObject(HGDIOBJ(region.0))};
         }
     }
     Ok(hwnd)

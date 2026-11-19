@@ -155,8 +155,8 @@ fn dwm_read_u32(hwnd:HWND,attribute:u32)->Option<u32>{
     (result>=0).then_some(value)
 }
 fn dwm_write_u32(hwnd:HWND,attribute:u32,value:u32)->bool{
-    unsafe{DwmSetWindowAttribute(hwnd.0,attribute,
-        (&value as *const u32).cast(),4)}>=0
+    (unsafe{DwmSetWindowAttribute(hwnd.0,attribute,
+        (&value as *const u32).cast(),4)})>=0
 }
 /// Receiver-scoped DWM override. Restored when MirroLeap stops mirroring;
 /// unlike SetParent, this never changes MirroLeap's process DPI awareness.
