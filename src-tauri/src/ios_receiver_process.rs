@@ -86,7 +86,7 @@ pub fn verified_receiver_pid(path: &Path) -> Option<u32> {
 pub fn verified_pid_alive(pid: u32, path: &Path) -> bool {
     let Some(handle) = process_handle(pid) else { return false; };
     let handle = HANDLE(handle.as_raw_handle());
-    unsafe { WaitForSingleObject(handle, 0) } == WAIT_TIMEOUT
+    (unsafe { WaitForSingleObject(handle, 0) }) == WAIT_TIMEOUT
         && full_path(handle).as_deref().is_some_and(|f|same_executable(f,path))
 }
 
