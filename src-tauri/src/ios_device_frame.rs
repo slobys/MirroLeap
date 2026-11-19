@@ -17,7 +17,7 @@ use std::{
     ptr::{self, NonNull},
     sync::{atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering}, Arc, Mutex, OnceLock},
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration,Instant},
 };
 use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
@@ -223,12 +223,21 @@ fn render_bezel(layout:CaseLayout)->Result<Vec<u8>,&'static str>{
     let radius=(if layout.ipad {27.0}else{40.0})*scale;
     let hole_radius=(if layout.ipad {16.0}else{27.0})*scale;
     let mut pixels=vec![0u8;(w as usize)*(h as usize)*4];
+    let safe_corner_x=inner_inset+hole_radius.ceil() as i32+2;
+    let safe_corner_y=safe_corner_x;
     for y in 0..h {
         let yf=y as f32+0.5;
         let inside_y=y>=inner_inset+2 && y<h-inner_inset-2;
         for x in 0..w {
-            // Only evaluate near the perimeter; interior pixels stay ZERO.
-            if inside_y && x>=inner_inset+2 && x<w-inner_inset-2 {continue;}
+            // Old optimization skipped the ENTIRE rectangular centre,
+            // including all 4 rounded-hole corners. Those video corners
+            // remained square and looked like broken/cut device rims.
+            // Skip ONLY the provably transparent straight-edge interior.
+            if inside_y && x>=inner_inset+2 && x<w-inner_inset-2
+                && ((x>=safe_corner_x && x<w-safe_corner_x)
+                    || (y>=safe_corner_y && y<h-safe_corner_y)){
+                continue;
+            }
             let xf=x as f32+0.5;
             let outer=round_coverage(xf,yf,0.0,0.0,w as f32,h as f32,radius);
             if outer==0.0{continue;}
@@ -526,11 +535,30 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
     let _window=WindowOwner(hwnd);
     let _location_hook=NativeLocationHook::install(pid);
     let mut surface=Surface::create()?;
+    let mut controls=crate::ios_window_controls::NativeControls::create().ok();
+    let mut controls_at=Instant::now()-Duration::from_secs(1);
+    let mut controls_rect:Option<(i32,i32,i32)>=None;
     let mut previous_skin:Option<(i32,i32,bool,u32)>=None;
     let mut shown=false;
     let mut applied=false;
     while !stop.load(Ordering::Acquire){
         pump_messages();
+        match crate::ios_window_controls::NativeControls::action(){
+            Some(crate::ios_window_controls::ControlAction::Minimize)=>{
+                if let Some(video)=crate::commands::find_window_by_pid(pid){
+                    crate::ios_window_controls::NativeControls::minimize_receiver(video);
+                }
+            }
+            Some(crate::ios_window_controls::ControlAction::Close)=>{
+                // Receiver shutdown joins this bezel worker. Run it on a
+                // different thread to avoid self-join deadlocks.
+                let owner=app.clone();
+                let _=thread::Builder::new().name("ios-receiver-close".into())
+                    .spawn(move||crate::ios_airplay::shutdown(&owner));
+                break;
+            }
+            None=>{},
+        }
         let Some(state)=app.try_state::<crate::ios_airplay::IosAirplayState>()
             else{break};
         if crate::ios_airplay::active_receiver_pid(&state)!=Some(pid){break;}
@@ -538,23 +566,38 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
             .unwrap_or_default();
         let video=crate::commands::find_window_by_pid(pid);
         let Some(video)=video else{
+            if let Some(control)=controls.as_mut(){control.hide();}
             hide(hwnd.as_ptr(),&mut shown);
             state.frame_attached.store(false,Ordering::Release);
             thread::sleep(Duration::from_millis(50));
             continue;
         };
+        let Some(screen)=video_client(video) else{
+            if let Some(control)=controls.as_mut(){control.hide();}
+            hide(hwnd.as_ptr(),&mut shown);
+            state.frame_attached.store(false,Ordering::Release);
+            thread::sleep(Duration::from_millis(40));
+            continue;
+        };
+        // Two native buttons are available even in "clean" mode; control
+        // only this AirPlay receiver, never the Android mirror/main GUI.
+        let desired=(screen.point.x,screen.point.y,screen.width);
+        if controls_rect!=Some(desired) ||
+            controls_at.elapsed()>Duration::from_millis(450){
+            if let Some(control)=controls.as_mut(){
+                if control.position(video,screen.point.x,screen.point.y,
+                    screen.width).is_ok(){
+                    controls_rect=Some(desired);
+                    controls_at=Instant::now();
+                }
+            }
+        }
         if !style.starts_with("device-") || is_fullscreen(video){
             hide(hwnd.as_ptr(),&mut shown);
             state.frame_attached.store(false,Ordering::Release);
             thread::sleep(Duration::from_millis(40));
             continue;
         }
-        let Some(screen)=video_client(video) else{
-            hide(hwnd.as_ptr(),&mut shown);
-            state.frame_attached.store(false,Ordering::Release);
-            thread::sleep(Duration::from_millis(40));
-            continue;
-        };
         let dpi=unsafe{GetDpiForWindow(video)}.clamp(96,384);
         let Some(layout)=target_layout(screen,&style,dpi) else{
             hide(hwnd.as_ptr(),&mut shown);
@@ -687,6 +730,28 @@ mod tests{
         assert_eq!(&bgra[..4],&[0,0,0,0]);
         assert_eq!(bgra[((2*420+210)*4+3) as usize]>0,true);
         assert!(render_bezel(layout(6000,6000,true,96)).is_err());
+    }
+    #[test]
+    fn each_inner_round_corner_is_covered_not_skipped_as_rectangle(){
+        for ipad in [true,false] {
+            for dpi in [96,144] {
+                let skin=layout(520,880,ipad,dpi);
+                let pixels=render_bezel(skin).unwrap();
+                let inset=bezel_inset(ipad,dpi)+seam_cover_px(dpi);
+                let alpha=|x:i32,y:i32|pixels[((y*skin.width+x)*4+3) as usize];
+                // The old rectangular shortcut made all four inner
+                // corners transparent, creating visible square notches.
+                for (x,y) in [
+                    (inset+2,inset+2),
+                    (skin.width-inset-3,inset+2),
+                    (inset+2,skin.height-inset-3),
+                    (skin.width-inset-3,skin.height-inset-3),
+                ] {
+                    assert_eq!(alpha(x,y),255,"corner ({x},{y}) at {dpi} DPI");
+                }
+                assert_eq!(alpha(skin.width/2,skin.height/2),0);
+            }
+        }
     }
     #[test]
     fn target_geometry_tracks_physical_video_client_even_on_negative_monitors(){

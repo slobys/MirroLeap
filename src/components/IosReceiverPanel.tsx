@@ -32,8 +32,9 @@ const windowStyles=[
     {value:'classic',zh:'接收器原版界面',en:'Original receiver UI'},
 ];
 const qualityTiers=[
+    {value:'adaptive',zh:'智能清晰 · 匹配窗口（推荐）',en:'Adaptive detail · match window (recommended)'},
     {value:'balanced',zh:'流畅 · 1920',en:'Balanced · 1920'},
-    {value:'high',zh:'高清 · 2868（推荐）',en:'High detail · 2868'},
+    {value:'high',zh:'高清 · 2868',en:'High detail · 2868'},
     {value:'ultra',zh:'极致 · 3840',en:'Ultra · 3840'},
 ];
 type Action='install'|'start'|'stop';
@@ -109,7 +110,7 @@ export default function IosReceiverPanel({locale}:Props) {
     const working=busy!==null || Boolean(status?.installing);
     const isRunning=Boolean(status?.running);
     const style=status?.windowStyle || (status?.compactMode===false?'classic':'device-auto');
-    const quality=status?.qualityTier || 'high';
+    const quality=status?.qualityTier || 'adaptive';
     const canChangeStyle=!working && Boolean(status?.installed) && (!isRunning || style!=='classic');
 
     return <section id="ios-airplay-home" aria-label={copy('iPhone / iPad 无线投屏','iPhone / iPad wireless mirroring')}
@@ -174,6 +175,10 @@ export default function IosReceiverPanel({locale}:Props) {
         {status?.installed && <p className="ml-muted mt-2 text-[11px] leading-5" role="note">
             {copy('真机边框使用 Windows 原生透明图层，避免跨进程绑定造成主窗口 DPI 异常。画面保持原样，外壳不参与视频解码。可运行中切换真机/纯画面。',
                 'The bezel uses a native Windows transparent layer, not cross-process WebView parenting. Video is untouched. Switch styles live.')}
+        </p>}
+        {status?.installed && <p className="ml-muted text-[11px] leading-5" role="note">
+            {copy('投屏窗口右上方新增「—」最小化与「×」关闭按钮。智能清晰度会参考上次实际窗口尺寸，在下一次启动时匹配 iOS 视频分辨率，减少过度缩小造成的图标锯齿。',
+                'Native minimize and close buttons appear above the mirror’s top right. Adaptive detail uses the last measured window pixels on the next launch to reduce excessive downscaling.')}
         </p>}
         {isRunning && style.startsWith('device-') && <p role="status"
             data-testid="ios-frame-attachment" className="ml-muted text-[11px] mt-1">

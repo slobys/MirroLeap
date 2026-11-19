@@ -62,6 +62,20 @@ describe('single-page iOS AirPlay experience',()=>{
         await waitFor(()=>expect(invokeMock)
             .toHaveBeenCalledWith('ios_airplay_set_quality_tier',{tier:'ultra'}));
     });
+    it('offers a window-matched source cap instead of relying only on maximum 4K',async()=>{
+        let current={...ready,installed:true};
+        invokeMock.mockImplementation(async(name:string,args?:{tier?:string})=>{
+            if(name==='ios_airplay_set_quality_tier')current={...current,qualityTier:args?.tier};
+            return current;
+        });
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        const quality=await screen.findByRole('combobox',{name:'iOS 画质'});
+        expect(screen.getByRole('option',{name:/智能清晰/})).toBeInTheDocument();
+        fireEvent.change(quality,{target:{value:'adaptive'}});
+        await waitFor(()=>expect(invokeMock).toHaveBeenCalledWith(
+            'ios_airplay_set_quality_tier',{tier:'adaptive'}));
+        expect(screen.getByText(/上次实际窗口尺寸/)).toBeInTheDocument();
+    });
     it('allows switching device and clean styles live but blocks unsafe quality changes',async()=>{
         let current={...ready,installed:true,running:true};
         invokeMock.mockImplementation(async(name:string,args?:{style?:string})=>{

@@ -36,6 +36,7 @@ pub struct IosAirplayState {
     /// Verified decoded texture dimensions from THIS receiver process only.
     /// The advertised AirPlay resolution is a ceiling, not actual pixels.
     source_pixels: Mutex<Option<(u32,u32)>>,
+    last_display_size: Mutex<Option<(u32,u32)>>,
 }
 impl Drop for IosAirplayState {
     fn drop(&mut self) {
@@ -121,7 +122,7 @@ fn valid_window_style(value:&str)->bool {
     matches!(value,"device-auto"|"device-iphone"|"device-ipad"|"clean"|"classic")
 }
 fn valid_quality_tier(value:&str)->bool {
-    matches!(value,"balanced"|"high"|"ultra")
+    matches!(value,"adaptive"|"balanced"|"high"|"ultra")
 }
 /// Upstream AirPlay-Windows uses the announced dimensions for iOS's /info
 /// sender handshake; its default 2560×1440 envelope downsizes portrait.
@@ -133,6 +134,24 @@ fn quality_cap(tier:&str)->Option<(u32,u32)> {
         "ultra"=>Some((3840,3840)),
         _=>None,
     }
+}
+/// Use 12% headroom over the *actual last SDL video client*, rather than
+/// always asking iOS to send 3840 pixels for a ~1800px window. This reduces
+/// severe minification aliasing in the unchanged upstream SDL2 renderer.
+fn adaptive_quality_cap(display:Option<(u32,u32)>)->u32{
+    let longest=display.and_then(|(w,h)|
+        (w>=320 && h>=240 && w<=7680 && h<=7680).then_some(w.max(h))
+    ).unwrap_or(1714);
+    let desired=((longest as u64*112+99)/100).clamp(1280,3840) as u32;
+    ((desired+63)/64*64).min(3840)
+}
+fn parse_last_display(text:&str)->Option<(u32,u32)>{
+    let (w,h)=text.trim().split_once('x')?;
+    if !w.chars().all(|c|c.is_ascii_digit()) ||
+        !h.chars().all(|c|c.is_ascii_digit()){return None;}
+    let w=w.parse().ok()?;
+    let h=h.parse().ok()?;
+    (w>=320 && h>=240 && w<=7680 && h<=7680).then_some((w,h))
 }
 #[cfg(target_os="windows")]
 fn extra_pref(app:&AppHandle,name:&str)->Result<std::path::PathBuf,String> {
@@ -167,7 +186,7 @@ fn prefer_window_style(app:&AppHandle)->Result<String,String>{
 }
 #[cfg(target_os="windows")]
 fn prefer_quality_tier(app:&AppHandle)->Result<String,String>{
-    read_pref(app,"quality-tier.txt","high",valid_quality_tier)
+    read_pref(app,"quality-tier.txt","adaptive",valid_quality_tier)
 }
 
 fn update_receiver_ini(existing:&str,compact:bool)->String {
@@ -188,6 +207,9 @@ fn update_receiver_ini(existing:&str,compact:bool)->String {
 /// receiver name, saved window geometry, selected codec or hardware decoder.
 fn update_receiver_quality_ini(existing:&str,tier:&str)->Result<String,String>{
     let (width,height)=quality_cap(tier).ok_or("Unsupported iOS quality tier")?;
+    Ok(update_receiver_quality_dims_ini(existing,width,height))
+}
+fn update_receiver_quality_dims_ini(existing:&str,width:u32,height:u32)->String{
     let mut lines=Vec::new();
     let mut found=std::collections::HashSet::new();
     let keys=[("mirror_width",width),("mirror_height",height),("max_fps",60)];
@@ -202,7 +224,7 @@ fn update_receiver_quality_ini(existing:&str,tier:&str)->Result<String,String>{
         lines.push(line.trim_end_matches('\r').to_string());
     }
     for (key,value) in keys {if found.insert(key.to_string()) {lines.push(format!("{key}={value}"));}}
-    Ok(lines.join("\n")+"\n")
+    lines.join("\n")+"\n"
 }
 #[cfg(target_os="windows")]
 fn configure_receiver_window(app:&AppHandle,compact:bool,quality:&str)->Result<(),String> {
@@ -218,7 +240,15 @@ fn configure_receiver_window(app:&AppHandle,compact:bool,quality:&str)->Result<(
         Err(error) if error.kind()==std::io::ErrorKind::NotFound=>String::new(),
         Err(error)=>return Err(format!("Cannot read AirPlay settings: {error}"))
     };
-    let updated=update_receiver_quality_ini(&update_receiver_ini(&old,compact),quality)?;
+    let base=update_receiver_ini(&old,compact);
+    let updated=if quality=="adaptive"{
+        let last=std::fs::read_to_string(extra_pref(app,"last-display-size.txt")?)
+            .ok().and_then(|text|parse_last_display(&text));
+        let side=adaptive_quality_cap(last);
+        update_receiver_quality_dims_ini(&base,side,side)
+    }else{
+        update_receiver_quality_ini(&base,quality)?
+    };
     if updated==old {return Ok(());}
     if let Some(parent)=file.parent() {
         std::fs::create_dir_all(parent).map_err(|e|e.to_string())?;
@@ -303,6 +333,17 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
         let display=if is_running {
             active_receiver_pid(state).and_then(crate::ios_device_frame::receiver_client_size)
         }else{None};
+        if let Some(size)=display {
+            let mut observed=state.last_display_size.lock().map_err(|e|e.to_string())?;
+            if *observed!=Some(size) {
+                // Persist only this user's window dimensions, not sender IP,
+                // filename, contents or raw AirPlay traffic.
+                if save_pref(app,"last-display-size.txt",
+                    &format!("{}x{}",size.0,size.1)).is_ok(){
+                    *observed=Some(size);
+                }
+            }
+        }
         Ok(IosAirplayStatus {
             supported: true,
             installed: installed(&root),
@@ -815,6 +856,22 @@ mod tests {
             "VideoRenderer texture (NV12) created 999999999x1"),None);
         assert_eq!(decoded_texture_from_line(
             "VideoRenderer texture (NV12) created garbage"),None);
+    }
+    #[test]
+    fn adaptive_cap_prevents_excessive_4k_minification_for_small_windows(){
+        assert_eq!(adaptive_quality_cap(None),1920);
+        assert_eq!(adaptive_quality_cap(Some((1272,1830))),2112);
+        assert_eq!(adaptive_quality_cap(Some((3840,2160))),3840);
+        assert_eq!(adaptive_quality_cap(Some((2,3))),1920);
+        assert_eq!(parse_last_display("1272x1830\n"),Some((1272,1830)));
+        assert_eq!(parse_last_display("../1900x2000"),None);
+        assert_eq!(parse_last_display("400000x1800"),None);
+        assert!(valid_quality_tier("adaptive"));
+        assert!(!valid_quality_tier("adaptive/../../bad"));
+        let adaptive=update_receiver_quality_dims_ini("receiver_name=Office\n",2112,2112);
+        assert!(adaptive.contains("mirror_width=2112\n"));
+        assert!(adaptive.contains("mirror_height=2112\n"));
+        assert!(adaptive.contains("receiver_name=Office\n"));
     }
     #[cfg(target_os = "windows")]
     #[test]

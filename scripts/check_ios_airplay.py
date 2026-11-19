@@ -75,6 +75,15 @@ assert "QueryFullProcessImageNameW" in process and "same_executable" in process
 assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in process
 assert "stop_verified_pid" in process and "TerminateProcess" in process
 assert "on_window_event" in lib and "ios_airplay::shutdown" in lib
+controls=(root/"src-tauri/src/ios_window_controls.rs").read_text(encoding="utf-8")
+assert "mod ios_window_controls;" in lib
+assert "WM_LBUTTONUP" in controls and "ControlAction::Minimize" in controls
+assert "ControlAction::Close" in controls and "minimize_receiver" in controls
+assert "ios_window_controls::tests" in workflow
+assert "NativeControls::create()" in frame and "ControlAction::Close" in frame
+assert "safe_corner_x" in frame and "each_inner_round_corner_is_covered" in frame
+assert "adaptive_quality_cap" in native and "last-display-size.txt" in native
+assert "智能清晰" in ui and "qualityTier" in ui
 assert "ios_receiver_process::tests" in workflow
 assert "ios_device_frame::tests" in workflow
 assert 'arg("--log")' in native and "decoded_texture_from_line" in native

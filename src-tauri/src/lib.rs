@@ -22,6 +22,8 @@ mod ios_airplay;
 #[cfg(target_os = "windows")]
 mod ios_receiver_process;
 #[cfg(target_os = "windows")]
+mod ios_window_controls;
+#[cfg(target_os = "windows")]
 mod ios_device_frame;
 mod android_rotation;
 mod capture_compositor;
