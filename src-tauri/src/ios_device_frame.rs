@@ -15,7 +15,7 @@
 use std::{
     ffi::c_void,
     ptr::{self, NonNull},
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, OnceLock},
+    sync::{atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering}, Arc, Mutex, OnceLock},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -42,7 +42,28 @@ const AC_SRC_ALPHA:u8=1;
 const DIB_RGB_COLORS:u32=0;
 const MAX_SIDE:i32=5200;
 const MAX_PIXELS:i64=16_000_000;
-const FOLLOW_MS:u64=12;
+const FOLLOW_MS:u64=16;
+// Reuse Android's verified native bezel overscan concept: extend the opaque
+// iPad lip a few physical pixels OVER the SDL video, not merely up to it.
+// This removes transparent wallpaper leaks during native window movement.
+const VIDEO_SEAM_COVER_LOGICAL:i32=crate::frame_layout::BEZEL_CLIP_OVERSCAN_PX+3;
+// Android's interactive drag updates SDL + frame in a single native batch.
+// A separate AirPlay/SDL process doesn't expose that drag lock. Instead,
+// listen to its HWND location-change event and move the border immediately,
+// rather than waiting for the 12ms periodic health follower.
+const EVENT_OBJECT_LOCATIONCHANGE:u32=0x800B;
+const OBJID_WINDOW:i32=0;
+const CHILDID_SELF:i32=0;
+const WINEVENT_OUTOFCONTEXT:u32=0;
+const SWP_NOSIZE:u32=0x0001;
+const SWP_NOZORDER:u32=0x0004;
+const SWP_NOACTIVATE:u32=0x0010;
+static HOOK_VIDEO:AtomicIsize=AtomicIsize::new(0);
+static HOOK_BEZEL:AtomicIsize=AtomicIsize::new(0);
+static HOOK_INSET:AtomicI32=AtomicI32::new(0);
+static HOOK_VIDEO_W:AtomicI32=AtomicI32::new(0);
+static HOOK_VIDEO_H:AtomicI32=AtomicI32::new(0);
+static HOOK_READY:AtomicBool=AtomicBool::new(false);
 
 #[repr(C)]
 #[derive(Clone,Copy,Default,Debug,PartialEq,Eq)]
@@ -78,6 +99,12 @@ unsafe extern "system" {
     fn PeekMessageW(msg:*mut WinMsg,hwnd:*mut c_void,min:u32,max:u32,remove:u32)->i32;
     fn TranslateMessage(msg:*const WinMsg)->i32;
     fn DispatchMessageW(msg:*const WinMsg)->isize;
+    fn SetWindowPos(hwnd:*mut c_void,insert_after:*mut c_void,
+        x:i32,y:i32,width:i32,height:i32,flags:u32)->i32;
+    fn SetWinEventHook(min_event:u32,max_event:u32,module:*mut c_void,
+        callback:Option<unsafe extern "system" fn(*mut c_void,u32,*mut c_void,i32,i32,u32,u32)>,
+        process_id:u32,thread_id:u32,flags:u32)->*mut c_void;
+    fn UnhookWinEvent(hook:*mut c_void)->i32;
 }
 #[link(name="gdi32")]
 unsafe extern "system" {
@@ -150,6 +177,10 @@ fn bezel_inset(ipad:bool,dpi:u32)->i32{
     ((logical as i64 * i64::from(dpi.clamp(96,384))+48)/96)
         .clamp(10,72) as i32
 }
+fn seam_cover_px(dpi:u32)->i32 {
+    ((VIDEO_SEAM_COVER_LOGICAL as i64*i64::from(dpi.clamp(96,384))+48)/96)
+        .clamp(4,16) as i32
+}
 fn target_layout(video:VideoClient,style:&str,dpi:u32)->Option<CaseLayout>{
     let ipad=choose_ipad(style,video.width,video.height);
     let inset=bezel_inset(ipad,dpi);
@@ -187,31 +218,40 @@ fn render_bezel(layout:CaseLayout)->Result<Vec<u8>,&'static str>{
     let dpi=layout.dpi.clamp(96,384);
     let scale=dpi as f32/96.0;
     let inset=bezel_inset(layout.ipad,dpi);
-    let radius=(if layout.ipad {26.0}else{38.0})*scale;
-    let hole_radius=(if layout.ipad {15.0}else{26.0})*scale;
+    let inner_inset=inset+seam_cover_px(dpi);
+    // Restore #44351521843's iPad Air silhouette and graphite screen lip.
+    let radius=(if layout.ipad {27.0}else{40.0})*scale;
+    let hole_radius=(if layout.ipad {16.0}else{27.0})*scale;
     let mut pixels=vec![0u8;(w as usize)*(h as usize)*4];
     for y in 0..h {
         let yf=y as f32+0.5;
-        let inside_y=y>=inset-2 && y<h-inset+2;
+        let inside_y=y>=inner_inset+2 && y<h-inner_inset-2;
         for x in 0..w {
             // Only evaluate near the perimeter; interior pixels stay ZERO.
-            if inside_y && x>=inset-2 && x<w-inset+2 {continue;}
+            if inside_y && x>=inner_inset+2 && x<w-inner_inset-2 {continue;}
             let xf=x as f32+0.5;
             let outer=round_coverage(xf,yf,0.0,0.0,w as f32,h as f32,radius);
             if outer==0.0{continue;}
-            let inner=round_coverage(xf,yf,inset as f32,inset as f32,
-                (w-2*inset) as f32,(h-2*inset) as f32,hole_radius);
+            let inner=round_coverage(xf,yf,inner_inset as f32,inner_inset as f32,
+                (w-2*inner_inset) as f32,(h-2*inner_inset) as f32,hole_radius);
             let opacity=(outer*(1.0-inner)).clamp(0.0,1.0);
             if opacity==0.0{continue;}
             let min_edge=x.min(y).min(w-1-x).min(h-1-y) as f32;
-            let shine=((w as f32-xf)/w as f32*0.24)+
-                ((h as f32-yf)/h as f32*0.08);
-            let (r,g,b)=if min_edge<2.2*scale{
-                (164.0+45.0*shine,179.0+42.0*shine,191.0+36.0*shine)
-            }else if min_edge<4.2*scale{
-                (44.0+24.0*shine,55.0+23.0*shine,66.0+22.0*shine)
+            // Original iPad Air: #9caeb4 2px anodized silver hairline,
+            // #3d454c graphite transition, #090c11 flat matte front.
+            // Intentionally avoid the cyan/blue glowing edge of the preview.
+            let shine=((w as f32-xf)/w as f32*0.10)+
+                ((h as f32-yf)/h as f32*0.035);
+            let (r,g,b)=if min_edge<1.8*scale{
+                (156.0+10.0*shine,174.0+9.0*shine,180.0+8.0*shine)
+            }else if min_edge<3.2*scale{
+                (61.0+6.0*shine,69.0+6.0*shine,76.0+6.0*shine)
+            }else if min_edge<5.2*scale{
+                (21.0,26.0,31.0)
+            }else if min_edge>inner_inset as f32-1.7*scale{
+                (17.0,22.0,28.0)
             }else{
-                (8.0+13.0*shine,12.0+14.0*shine,18.0+17.0*shine)
+                (9.0+3.0*shine,12.0+3.0*shine,17.0+3.0*shine)
             };
             let a=(opacity*255.0).round() as u8;
             let pos=((y as usize)*(w as usize)+x as usize)*4;
@@ -393,6 +433,7 @@ fn pump_messages(){
     }
 }
 fn hide(hwnd:*mut c_void,shown:&mut bool){
+    HOOK_READY.store(false,Ordering::Release);
     if *shown{unsafe{ShowWindow(hwnd,SW_HIDE);}}
     *shown=false;
 }
@@ -405,6 +446,57 @@ fn set_error(app:&AppHandle,reason:Option<&str>){
         if let Ok(mut error)=state.frame_error.lock(){
             if error.as_deref()!=reason{*error=reason.map(str::to_owned);}
         }
+    }
+}
+fn moved_video_target(screen:VideoClient,inset:i32,expected_w:i32,expected_h:i32)
+    ->Option<Point>
+{
+    if screen.width!=expected_w || screen.height!=expected_h{return None;}
+    Some(Point{
+        x:screen.point.x.checked_sub(inset)?,
+        y:screen.point.y.checked_sub(inset)?,
+    })
+}
+/// Out-of-context accessibility location event. It executes on the native
+/// bezel worker's message pump (no Windows cross-process DLL injection).
+/// The only affected HWND is our own click-through native layer.
+unsafe extern "system" fn on_video_location_change(
+    _hook:*mut c_void,_event:u32,hwnd:*mut c_void,
+    object_id:i32,child_id:i32,_thread:u32,_time:u32,
+){
+    if object_id!=OBJID_WINDOW || child_id!=CHILDID_SELF ||
+        !HOOK_READY.load(Ordering::Acquire) ||
+        hwnd as isize!=HOOK_VIDEO.load(Ordering::Relaxed){
+        return;
+    }
+    let bezel=HOOK_BEZEL.load(Ordering::Relaxed) as *mut c_void;
+    if bezel.is_null(){return;}
+    let Some(screen)=video_client(HWND(hwnd)) else{return;};
+    let Some(target)=moved_video_target(
+        screen,HOOK_INSET.load(Ordering::Relaxed),
+        HOOK_VIDEO_W.load(Ordering::Relaxed),
+        HOOK_VIDEO_H.load(Ordering::Relaxed),
+    )else{return;};
+    unsafe{SetWindowPos(bezel,ptr::null_mut(),target.x,target.y,0,0,
+        SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);}
+}
+struct NativeLocationHook(*mut c_void);
+impl NativeLocationHook{
+    fn install(pid:u32)->Self{
+        let hook=unsafe{SetWinEventHook(
+            EVENT_OBJECT_LOCATIONCHANGE,EVENT_OBJECT_LOCATIONCHANGE,
+            ptr::null_mut(),Some(on_video_location_change),
+            pid,0,WINEVENT_OUTOFCONTEXT
+        )};
+        Self(hook)
+    }
+}
+impl Drop for NativeLocationHook{
+    fn drop(&mut self){
+        HOOK_READY.store(false,Ordering::Release);
+        HOOK_VIDEO.store(0,Ordering::Relaxed);
+        HOOK_BEZEL.store(0,Ordering::Relaxed);
+        if !self.0.is_null(){unsafe{UnhookWinEvent(self.0);}}
     }
 }
 fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
@@ -432,6 +524,7 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
         fn drop(&mut self){unsafe{DestroyWindow(self.0.as_ptr());}}
     }
     let _window=WindowOwner(hwnd);
+    let _location_hook=NativeLocationHook::install(pid);
     let mut surface=Surface::create()?;
     let mut previous_skin:Option<(i32,i32,bool,u32)>=None;
     let mut shown=false;
@@ -512,6 +605,13 @@ fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
         // CSS, SetParent or DPI-virtualized browser client coordinates.
         show(hwnd.as_ptr(),&mut shown);
         if shown{
+            HOOK_READY.store(false,Ordering::Release);
+            HOOK_VIDEO.store(video.0 as isize,Ordering::Relaxed);
+            HOOK_BEZEL.store(hwnd.as_ptr() as isize,Ordering::Relaxed);
+            HOOK_INSET.store(bezel_inset(layout.ipad,layout.dpi),Ordering::Relaxed);
+            HOOK_VIDEO_W.store(screen.width,Ordering::Relaxed);
+            HOOK_VIDEO_H.store(screen.height,Ordering::Relaxed);
+            HOOK_READY.store(true,Ordering::Release);
             state.frame_attached.store(true,Ordering::Release);
             if !applied{set_error(&app,None);applied=true;}
         }
@@ -552,6 +652,36 @@ mod tests{
         assert_eq!(bgra[inside+3],0);
     }
     #[test]
+    fn android_style_native_overscan_seals_all_four_wallpaper_seams(){
+        let skin=layout(760,1080,true,96);
+        let bgra=render_bezel(skin).unwrap();
+        let inset=bezel_inset(true,96);
+        let overlap=seam_cover_px(96);
+        assert_eq!(overlap,crate::frame_layout::BEZEL_CLIP_OVERSCAN_PX+3);
+        let alpha=|x:i32,y:i32|bgra[((y*skin.width+x)*4+3) as usize];
+        // Original SDL pixels begin exactly at inset. Opaque graphite now
+        // overlaps the first FOUR video pixels instead of exposing desktop.
+        for step in 0..overlap {
+            assert_eq!(alpha(inset+step,skin.height/2),255);
+            assert_eq!(alpha(skin.width-inset-1-step,skin.height/2),255);
+            assert_eq!(alpha(skin.width/2,inset+step),255);
+            assert_eq!(alpha(skin.width/2,skin.height-inset-1-step),255);
+        }
+        assert_eq!(alpha(skin.width/2,skin.height/2),0);
+    }
+    #[test]
+    fn ipad_air_legacy_graphite_silver_hairline_not_cyan_glow(){
+        let skin=layout(420,820,true,96);
+        let bgra=render_bezel(skin).unwrap();
+        let p=((skin.height/2*skin.width+1)*4) as usize;
+        let (blue,green,red,alpha)=(bgra[p],bgra[p+1],bgra[p+2],bgra[p+3]);
+        assert_eq!(alpha,255);
+        assert!((150..=170).contains(&red));
+        assert!((170..=190).contains(&green));
+        assert!((176..=194).contains(&blue));
+        assert!(blue.saturating_sub(red)<32);
+    }
+    #[test]
     fn rounded_outer_corner_is_antialiased_and_zero_outside(){
         let bgra=render_bezel(layout(420,820,false,96)).unwrap();
         assert_eq!(&bgra[..4],&[0,0,0,0]);
@@ -566,5 +696,16 @@ mod tests{
         let expected=target_layout(input,"device-ipad",144).unwrap();
         assert_eq!(expected.point,Point{x:-1221,y:379});
         assert_eq!((expected.width,expected.height),(742,1042));
+    }
+    #[test]
+    fn location_hook_matches_video_client_and_rejects_stale_resizes(){
+        let initial=VideoClient{point:Point{x:-1200,y:400},width:700,height:1000};
+        let inset=bezel_inset(true,144);
+        assert_eq!(moved_video_target(initial,inset,700,1000),
+            Some(Point{x:-1221,y:379}));
+        let moved=VideoClient{point:Point{x:300,y:0},..initial};
+        assert_eq!(moved_video_target(moved,inset,700,1000),
+            Some(Point{x:279,y:-21}));
+        assert_eq!(moved_video_target(moved,inset,702,1000),None);
     }
 }

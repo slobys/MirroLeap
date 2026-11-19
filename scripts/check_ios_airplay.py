@@ -51,6 +51,8 @@ assert "find_window_by_pid" in native and "PostMessageW(Some(hwnd)" in native
 assert "chromeless" in native and "纯画面" in ui and "compactMode" in ui
 assert "ios_airplay_set_window_style" in ui and "ios_airplay_set_quality_tier" in ui
 assert "ios_airplay_window_action" in ui
+assert home.index('className="ml-dashboard-grid') < home.index('<IosReceiverPanel locale={locale}/>') < home.index('className="ml-home-footer')
+assert 'data-testid="ios-after-android"' in home
 assert "quality_cap" in native and "2868" in native and "3840" in native
 assert "ios_device_frame::start" in native and "ios_device_frame::close" in native
 assert "mod ios_device_frame;" in lib
@@ -63,6 +65,9 @@ assert "SetParent(" not in frame and "WS_CHILD" not in frame
 assert "WebviewWindowBuilder" not in frame and "get_webview_window" not in frame
 assert "target_layout" in frame and "place_ios_companion(" in frame
 assert "active_for" in frame and "frame_error" in frame
+assert "BEZEL_CLIP_OVERSCAN_PX" in frame and "seam_cover_px" in frame
+assert "SetWinEventHook" in frame and "UnhookWinEvent" in frame
+assert "moved_video_target" in frame and "on_video_location_change" in frame
 assert "frame_attached" in native and "frame_attached" in frame
 process=(root/"src-tauri/src/ios_receiver_process.rs").read_text(encoding="utf-8")
 assert "CreateToolhelp32Snapshot" in process

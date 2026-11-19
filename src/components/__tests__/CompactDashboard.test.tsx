@@ -41,6 +41,22 @@ describe('MirroLeap daily workspace', () => {
         expect(invokeMock).not.toHaveBeenCalledWith('ios_airplay_install');
         expect(screen.getByRole('button',{name:'开始投屏'})).toBeEnabled();
     });
+    it('prioritizes Android devices and mirroring above the optional iOS receiver',()=>{
+        const {container}=render(<CompactDashboard {...props()}/>);
+        const android=screen.getByRole('region',{name:'投屏控制'});
+        const devices=screen.getByRole('region',{name:'选择设备'});
+        const ios=screen.getByTestId('ios-home-panel');
+        const footer=container.querySelector('.ml-home-footer');
+        const after=screen.getByTestId('ios-after-android');
+        expect(after).toContainElement(ios);
+        expect(android.compareDocumentPosition(ios) & Node.DOCUMENT_POSITION_FOLLOWING)
+            .toBeTruthy();
+        expect(devices.compareDocumentPosition(ios) & Node.DOCUMENT_POSITION_FOLLOWING)
+            .toBeTruthy();
+        expect(footer).not.toBeNull();
+        expect(ios.compareDocumentPosition(footer!) & Node.DOCUMENT_POSITION_FOLLOWING)
+            .toBeTruthy();
+    });
     it('opens YouTube and Telegram using an allowlisted Rust OS browser handoff',async()=>{
         Object.defineProperty(window,'__TAURI_INTERNALS__',{value:{},configurable:true});
         render(<CompactDashboard {...props()}/>);

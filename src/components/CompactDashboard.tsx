@@ -141,8 +141,6 @@ export default function CompactDashboard({
                     </div>
                 </div>
 
-                <IosReceiverPanel locale={locale}/>
-
                 <div className="ml-dashboard-grid grid gap-4 items-stretch">
                     <section className="ml-card ml-device-card flex flex-col min-h-0" aria-label={copy('选择设备', 'Choose a device')}>
                         <div className="ml-card-head flex items-center justify-between">
@@ -296,6 +294,9 @@ export default function CompactDashboard({
                             </p>
                         )}
                     </section>
+                </div>
+                <div className="mt-4" data-testid="ios-after-android">
+                    <IosReceiverPanel locale={locale}/>
                 </div>
                 <footer className="ml-home-footer flex items-center justify-between gap-3 flex-wrap">
                     <span className="ml-muted text-[11px] flex items-center gap-1.5">
