@@ -55,13 +55,14 @@ assert "quality_cap" in native and "2868" in native and "3840" in native
 assert "ios_device_frame::start" in native and "ios_device_frame::close" in native
 assert "mod ios_device_frame;" in lib
 frame=(root/"src-tauri/src/ios_device_frame.rs").read_text(encoding="utf-8")
-assert "SetWindowRgn" in frame and "set_ignore_cursor_events(true)" in frame
+assert "CreateWindowExW" in frame and "UpdateLayeredWindow" in frame
 assert "device-auto" in ui
-assert "GetClientRect" in frame and "SetParent(child, Some(video))" in frame
-assert "GetParent(child)" in frame and "WS_CHILD" in frame
-assert "SetWindowPos(child, Some(HWND_TOP), 0, 0" in frame
-assert "hollow_child(child, size, inset, ipad, dpi)" in frame
-assert "place_ios_companion(" not in frame and "ClientToScreen(" not in frame
+assert "GetClientRect" in frame and "ClientToScreen" in frame
+assert "render_bezel" in frame and "Surface::create()" in frame
+assert "SetParent(" not in frame and "WS_CHILD" not in frame
+assert "WebviewWindowBuilder" not in frame and "get_webview_window" not in frame
+assert "target_layout" in frame and "place_ios_companion(" in frame
+assert "active_for" in frame and "frame_error" in frame
 assert "frame_attached" in native and "frame_attached" in frame
 process=(root/"src-tauri/src/ios_receiver_process.rs").read_text(encoding="utf-8")
 assert "CreateToolhelp32Snapshot" in process
@@ -73,6 +74,6 @@ assert "ios_receiver_process::tests" in workflow
 assert "ios_device_frame::tests" in workflow
 assert 'arg("--log")' in native and "decoded_texture_from_line" in native
 assert "source_pixels" in native and "sourceWidth" in ui and "displayWidth" in ui
-assert (root/"public/ios-bezel.html").is_file()
+assert (root/"public/ios-bezel.html").is_file()  # Legacy unused reference file
 assert "ios_airplay::tests" in workflow
 print("iOS AirPlay preview: inline home, aspect-safe quality caps, passive phone/tablet frame and verified GPL receiver checks passed")

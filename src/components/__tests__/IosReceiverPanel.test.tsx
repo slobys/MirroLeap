@@ -93,19 +93,31 @@ describe('single-page iOS AirPlay experience',()=>{
         expect(screen.getByText(/窗口在放大源画面/)).toBeInTheDocument();
         expect(screen.getByText('已接收镜像视频帧')).toBeInTheDocument();
         expect(screen.getByTestId('ios-frame-attachment'))
-            .toHaveTextContent('已绑定 AirPlay 视频窗口');
+            .toHaveTextContent('原生图层已对齐');
         expect(screen.queryByText('iPhone 已连接')).not.toBeInTheDocument();
     });
     it('does not misreport an unattached or incompatible receiver bezel as working',async()=>{
         invokeMock.mockResolvedValue({...ready,installed:true,running:true,frameAttached:false,
-            frameError:'原生子窗口绑定失败：Windows refused'});
+            frameError:'Windows 拒绝原生透明图层'});
         render(<IosReceiverPanel locale="zh-CN"/>);
         expect(await screen.findByTestId('ios-frame-attachment'))
-            .toHaveTextContent('为防止错位，暂不显示边框');
+            .toHaveTextContent('原生图层未显示');
         expect(screen.getByTestId('ios-frame-error'))
-            .toHaveTextContent('原生子窗口绑定失败');
+            .toHaveTextContent('Windows 拒绝原生透明图层');
         expect(screen.getByText(/关闭 MirroLeap 主窗口也会停止接收器/))
             .toBeInTheDocument();
+    });
+    it('warns when a 4K mirror is downscaled by more than 1.7x',async()=>{
+        invokeMock.mockResolvedValue({
+            ...ready,installed:true,running:true,qualityTier:'ultra',
+            sourceWidth:2668,sourceHeight:3840,
+            displayWidth:1272,displayHeight:1830,frameAttached:true,
+        });
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        expect(await screen.findByTestId('ios-downscale-warning'))
+            .toHaveTextContent('缩小超过 1.7 倍');
+        expect(screen.getByTestId('ios-downscale-warning'))
+            .toHaveTextContent('高清 2868');
     });
     it('offers Stop for a previously running receiver without launching a duplicate',async()=>{
         const running={...ready,installed:true,running:true,frameAttached:false};

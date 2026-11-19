@@ -70,6 +70,8 @@ pub struct IosAirplayStatus {
     pub source_height: Option<u32>,
     pub display_width: Option<u32>,
     pub display_height: Option<u32>,
+    /// True only while the native mouse-through rim is tracking the SDL
+    /// video client; it is NOT a cross-process child WebView.
     pub frame_attached: bool,
     pub frame_error: Option<String>,
 }
@@ -348,11 +350,10 @@ pub fn ios_airplay_status(
     #[cfg(target_os="windows")]
     {
         let current=status_for(&app,&state)?;
-        if current.running && current.installed
-            && app.get_webview_window("ios-device-bezel").is_none(){
+        if current.running && current.installed {
             if let Some(pid)=active_receiver_pid(&state){
                 let mut attempted=state.frame_attempted_pid.lock().map_err(|e|e.to_string())?;
-                if *attempted!=Some(pid){
+                if *attempted!=Some(pid) && !crate::ios_device_frame::active_for(pid){
                     *attempted=Some(pid);
                     drop(attempted);
                     *state.window_style.lock().map_err(|e|e.to_string())?=
@@ -490,7 +491,8 @@ pub async fn ios_airplay_start(
         if running(&app,&state)? {
             // MirroLeap can resume control of its verified receiver even
             // when an older GUI version exited without killing the stream.
-            if app.get_webview_window("ios-device-bezel").is_none(){
+            if active_receiver_pid(&state).is_some_and(|pid|
+                !crate::ios_device_frame::active_for(pid)){
                 if let Some(pid)=active_receiver_pid(&state){
                     *state.window_style.lock().map_err(|e|e.to_string())?=
                         prefer_window_style(&app)?;

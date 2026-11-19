@@ -1,336 +1,570 @@
-//! AirPlay video-attached iPad/iPhone shell (Windows only).
+//! Windows native AirPlay bezel. No Tauri/WebView2 overlay, and NO SetParent.
 //!
-//! The previous shell was another TOP-LEVEL window which chased the SDL video
-//! HWND by desktop coordinates. Even perfect ClientToScreen arithmetic cannot
-//! make two independently composited top-level windows move atomically.
-//! Instead, re-parent our transparent/mouse-through WebView as a WS_CHILD of
-//! the receiver's native SDL HWND. Windows itself moves them together. The
-//! shell is a thin INWARD rim, preserving the real video HWND, focus, keyboard,
-//! original renderer and audio. On any unsafe parent/geometry state hide it.
+//! Changing the parent of a Tauri WebView to the independent AirPlay/SDL
+//! process can reset process-wide DPI awareness (Microsoft SetParent docs).
+//! That is why the previous preview enlarged the entire MirroLeap GUI and
+//! still failed with "Could not enable native child-window style".
+//!
+//! This module uses a tiny native mouse-through layered HWND with an
+//! antialiased PREMULTIPLIED BGRA iPad Air-style rim. Its whole centre is
+//! transparent; it never captures, resizes or touches the video pixels.
+//! The HWND owns no WebView and has no invisible CSS/non-client margins.
+//! A dedicated Win32 worker follows the actual SDL client in screen pixels.
+#![cfg(target_os="windows")]
 
-use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
-use windows::Win32::Foundation::{HWND, RECT};
+use std::{
+    ffi::c_void,
+    ptr::{self, NonNull},
+    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, OnceLock},
+    thread::{self, JoinHandle},
+    time::Duration,
+};
+use tauri::{AppHandle, Manager};
+use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
-    CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, GetMonitorInfoW,
-    HGDIOBJ, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, RGN_DIFF,
-    SetWindowRgn,
+    ClientToScreen, GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
+    MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, GetParent, GetWindowLongPtrW, GetWindowRect, GWL_EXSTYLE,
-    GWL_STYLE, HWND_TOP, IsIconic, IsWindowVisible, SetParent, SetWindowLongPtrW,
-    SetWindowPos, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    WS_CAPTION, WS_CHILD, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT, WS_POPUP,
-    WS_THICKFRAME,
+    GetClientRect, GetWindowRect, IsIconic, IsWindowVisible,
 };
 
-const LABEL: &str = "ios-device-bezel";
+const EX_LAYERED:u32=0x00080000;
+const EX_TRANSPARENT:u32=0x00000020;
+const EX_TOOLWINDOW:u32=0x00000080;
+const EX_NOACTIVATE:u32=0x08000000;
+const WS_POPUP:u32=0x80000000;
+const SW_HIDE:i32=0;
+const SW_SHOWNOACTIVATE:i32=4;
+const ULW_ALPHA:u32=2;
+const AC_SRC_ALPHA:u8=1;
+const DIB_RGB_COLORS:u32=0;
+const MAX_SIDE:i32=5200;
+const MAX_PIXELS:i64=16_000_000;
+const FOLLOW_MS:u64=12;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Extent { width: i32, height: i32 }
+#[repr(C)]
+#[derive(Clone,Copy,Default,Debug,PartialEq,Eq)]
+struct Point{x:i32,y:i32}
+#[repr(C)]
+#[derive(Clone,Copy)]
+struct Size{cx:i32,cy:i32}
+#[repr(C)]
+#[derive(Clone,Copy)]
+struct Blend{operation:u8,flags:u8,constant_alpha:u8,alpha_format:u8}
+#[repr(C)]
+#[derive(Clone,Copy)]
+struct BitmapInfoHeader{
+    size:u32,width:i32,height:i32,planes:u16,bits_per_pixel:u16,
+    compression:u32,size_image:u32,ppm_x:i32,ppm_y:i32,
+    colors_used:u32,colors_important:u32,
+}
+#[repr(C)]
+struct BitmapInfo{header:BitmapInfoHeader,colors:[u32;1]}
 
-fn safe_extent(width: i32, height: i32) -> Option<Extent> {
-    (width >= 160 && height >= 120 && width <= 9000 && height <= 9000)
-        .then_some(Extent { width, height })
+#[link(name="user32")]
+unsafe extern "system" {
+    fn CreateWindowExW(ex:u32,class:*const u16,title:*const u16,style:u32,
+        x:i32,y:i32,w:i32,h:i32,parent:*mut c_void,menu:*mut c_void,
+        instance:*mut c_void,extra:*mut c_void)->*mut c_void;
+    fn DestroyWindow(hwnd:*mut c_void)->i32;
+    fn ShowWindow(hwnd:*mut c_void,command:i32)->i32;
+    fn GetDC(hwnd:*mut c_void)->*mut c_void;
+    fn ReleaseDC(hwnd:*mut c_void,dc:*mut c_void)->i32;
+    fn UpdateLayeredWindow(hwnd:*mut c_void,screen:*mut c_void,
+        dest:*const Point,size:*const Size,surface:*mut c_void,
+        src:*const Point,key:u32,blend:*const Blend,flags:u32)->i32;
+    fn PeekMessageW(msg:*mut WinMsg,hwnd:*mut c_void,min:u32,max:u32,remove:u32)->i32;
+    fn TranslateMessage(msg:*const WinMsg)->i32;
+    fn DispatchMessageW(msg:*const WinMsg)->isize;
+}
+#[link(name="gdi32")]
+unsafe extern "system" {
+    fn CreateCompatibleDC(dc:*mut c_void)->*mut c_void;
+    fn DeleteDC(dc:*mut c_void)->i32;
+    fn CreateDIBSection(dc:*mut c_void,info:*const BitmapInfo,usage:u32,
+        bits:*mut *mut c_void,section:*mut c_void,offset:u32)->*mut c_void;
+    fn SelectObject(dc:*mut c_void,object:*mut c_void)->*mut c_void;
+    fn DeleteObject(object:*mut c_void)->i32;
+}
+#[repr(C)]
+#[derive(Clone,Copy)]
+struct WinMsg{
+    hwnd:*mut c_void,message:u32,wparam:usize,lparam:isize,time:u32,
+    pt:Point,private:u32,
+}
+impl Default for WinMsg{
+    fn default()->Self{unsafe{std::mem::zeroed()}}
 }
 
-fn classify_ipad(style: &str, size: Extent) -> bool {
-    match style {
-        "device-ipad" => true,
-        "device-iphone" => false,
-        _ => (size.width.min(size.height) as f64 /
-            size.width.max(size.height) as f64) >= 0.62,
-    }
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+struct VideoClient{point:Point,width:i32,height:i32}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+struct CaseLayout{point:Point,width:i32,height:i32,ipad:bool,dpi:u32}
+
+fn video_client(hwnd:HWND)->Option<VideoClient>{
+    if unsafe{IsIconic(hwnd)}.as_bool() ||
+        !unsafe{IsWindowVisible(hwnd)}.as_bool(){return None;}
+    let mut rect=RECT::default();
+    unsafe{GetClientRect(hwnd,&mut rect)}.ok()?;
+    let mut origin=POINT::default();
+    if !unsafe{ClientToScreen(hwnd,&mut origin)}.as_bool(){return None;}
+    let width=rect.right-rect.left;
+    let height=rect.bottom-rect.top;
+    if !(160..=MAX_SIDE).contains(&width) ||
+        !(120..=MAX_SIDE).contains(&height){return None;}
+    Some(VideoClient{point:Point{x:origin.x,y:origin.y},width,height})
 }
 
-fn inset_px(ipad: bool, dpi: u32) -> i32 {
-    let logical: i32 = if ipad { 12 } else { 14 };
-    ((logical as i64 * dpi.clamp(96, 384) as i64 + 48) / 96)
-        .clamp(8, 56) as i32
+pub(crate) fn receiver_client_size(pid:u32)->Option<(u32,u32)>{
+    let hwnd=crate::commands::find_window_by_pid(pid)?;
+    let video=video_client(hwnd)?;
+    Some((video.width as u32,video.height as u32))
 }
 
-fn client_extent(hwnd: HWND) -> Option<Extent> {
-    let mut rect = RECT::default();
-    unsafe { GetClientRect(hwnd, &mut rect) }.ok()?;
-    safe_extent(rect.right - rect.left, rect.bottom - rect.top)
-}
-
-pub(crate) fn receiver_client_size(pid: u32) -> Option<(u32, u32)> {
-    let hwnd = crate::commands::find_window_by_pid(pid)?;
-    let size = client_extent(hwnd)?;
-    Some((size.width as u32, size.height as u32))
-}
-
-fn is_video_fullscreen(hwnd: HWND) -> bool {
-    let mut rect = RECT::default();
-    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() { return false; }
-    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
-    if monitor.0.is_null() { return false; }
-    let mut info = MONITORINFO {
-        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+fn is_fullscreen(hwnd:HWND)->bool{
+    let monitor=unsafe{MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST)};
+    if monitor.0.is_null(){return false;}
+    let mut info=MONITORINFO{
+        cbSize:std::mem::size_of::<MONITORINFO>() as u32,
         ..Default::default()
     };
-    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
-        return false;
-    }
-    let screen = info.rcMonitor;
-    rect.left <= screen.left + 4 && rect.top <= screen.top + 4
-        && rect.right >= screen.right - 4 && rect.bottom >= screen.bottom - 4
+    if !unsafe{GetMonitorInfoW(monitor,&mut info)}.as_bool(){return false;}
+    let mut rect=RECT::default();
+    if unsafe{GetWindowRect(hwnd,&mut rect)}.is_err(){return false;}
+    let screen=info.rcMonitor;
+    rect.left<=screen.left+4 && rect.top<=screen.top+4
+        && rect.right>=screen.right-4 && rect.bottom>=screen.bottom-4
 }
 
-fn parent_matches(child: HWND, video: HWND) -> bool {
-    unsafe { GetParent(child) }.ok() == Some(video)
+fn choose_ipad(style:&str,width:i32,height:i32)->bool{
+    match style {
+        "device-ipad"=>true,
+        "device-iphone"=>false,
+        _=>width.min(height) as f64 / width.max(height) as f64 >=0.62,
+    }
+}
+fn bezel_inset(ipad:bool,dpi:u32)->i32{
+    let logical=if ipad{14}else{18};
+    ((logical as i64 * i64::from(dpi.clamp(96,384))+48)/96)
+        .clamp(10,72) as i32
+}
+fn target_layout(video:VideoClient,style:&str,dpi:u32)->Option<CaseLayout>{
+    let ipad=choose_ipad(style,video.width,video.height);
+    let inset=bezel_inset(ipad,dpi);
+    let width=video.width.checked_add(inset*2)?;
+    let height=video.height.checked_add(inset*2)?;
+    if width>MAX_SIDE || height>MAX_SIDE ||
+        i64::from(width)*i64::from(height)>MAX_PIXELS{return None;}
+    Some(CaseLayout{
+        point:Point{
+            x:video.point.x.checked_sub(inset)?,
+            y:video.point.y.checked_sub(inset)?,
+        },
+        width,height,ipad,dpi,
+    })
 }
 
-/// Win32 relationship is the source of truth: never show a second top-level
-/// overlay as fallback. If cross-process/DPI safety rejects SetParent, keep
-/// mirroring unobstructed with the shell hidden.
-fn attach_shell(child: HWND, video: HWND) -> Result<(), String> {
-    if parent_matches(child, video) { return Ok(()); }
-    let original = unsafe { GetWindowLongPtrW(child, GWL_STYLE) };
-    let child_style = (original &
-        !((WS_POPUP.0 | WS_CAPTION.0 | WS_THICKFRAME.0) as isize))
-        | WS_CHILD.0 as isize;
-    unsafe { SetWindowLongPtrW(child, GWL_STYLE, child_style); }
-    let current = unsafe { GetWindowLongPtrW(child, GWL_STYLE) };
-    if current & WS_CHILD.0 as isize == 0 {
-        unsafe { SetWindowLongPtrW(child, GWL_STYLE, original); }
-        return Err("Could not enable native child-window style".into());
-    }
-    let ex = unsafe { GetWindowLongPtrW(child, GWL_EXSTYLE) };
-    unsafe {
-        SetWindowLongPtrW(child, GWL_EXSTYLE,
-            ex | WS_EX_NOACTIVATE.0 as isize | WS_EX_TRANSPARENT.0 as isize);
-    }
-    if let Err(error) = unsafe { SetParent(child, Some(video)) } {
-        unsafe { SetWindowLongPtrW(child, GWL_STYLE, original); }
-        return Err(format!("Windows refused iOS bezel parent attachment: {error}"));
-    }
-    if !parent_matches(child, video) {
-        return Err("iOS bezel was not attached to the active AirPlay video".into());
-    }
-    Ok(())
+// Antialiased signed distance to an exact rounded rectangle in pixel space.
+fn round_coverage(px:f32,py:f32,left:f32,top:f32,w:f32,h:f32,r:f32)->f32 {
+    let r=r.max(1.0).min(w.min(h)*0.5);
+    let dx=(px-(left+w*0.5)).abs()-(w*0.5-r);
+    let dy=(py-(top+h*0.5)).abs()-(h*0.5-r);
+    let outside=(dx.max(0.0)*dx.max(0.0)+dy.max(0.0)*dy.max(0.0)).sqrt();
+    let distance=outside+dx.max(dy).min(0.0)-r;
+    (0.5-distance).clamp(0.0,1.0)
 }
 
-/// A tiny OS-level rim INSIDE the parent video client. The middle is removed
-/// using a GDI region so Chromium cannot ever paint over moving video pixels.
-/// We do not touch the receiver HWND region or alter any AirPlay frames.
-fn hollow_child(hwnd: HWND, size: Extent, inset: i32, ipad: bool, dpi: u32)
-    -> Result<(), String>
-{
-    let radius = ((if ipad { 27.0 } else { 39.0 }) *
-        f64::from(dpi) / 96.0).round() as i32;
-    let inner_radius = ((if ipad { 15.0 } else { 25.0 }) *
-        f64::from(dpi) / 96.0).round() as i32;
-    let outer = unsafe {
-        CreateRoundRectRgn(0, 0, size.width + 1, size.height + 1,
-            radius * 2, radius * 2)
-    };
-    if outer.0.is_null() { return Err("Could not create iOS outer rim".into()); }
-    let inner = unsafe {
-        CreateRoundRectRgn(inset, inset,
-            size.width - inset + 1, size.height - inset + 1,
-            inner_radius * 2, inner_radius * 2)
-    };
-    let rim = unsafe { CreateRectRgn(0, 0, 0, 0) };
-    let valid = !inner.0.is_null() && !rim.0.is_null()
-        && unsafe { CombineRgn(Some(rim), Some(outer), Some(inner), RGN_DIFF) }.0 >= 2;
-    let _ = unsafe { DeleteObject(HGDIOBJ(outer.0)) };
-    if !inner.0.is_null() {
-        let _ = unsafe { DeleteObject(HGDIOBJ(inner.0)) };
+/// Build alpha-premultiplied silver/graphite ring in pure code. The middle is
+/// COMPLETELY transparent (zero BGRA), so no white/opaque WebView rectangles.
+fn render_bezel(layout:CaseLayout)->Result<Vec<u8>,&'static str>{
+    let w=layout.width;
+    let h=layout.height;
+    if w<=0 || h<=0 || i64::from(w)*i64::from(h)>MAX_PIXELS {
+        return Err("Invalid native bezel surface");
     }
-    if !valid {
-        if !rim.0.is_null() {
-            let _ = unsafe { DeleteObject(HGDIOBJ(rim.0)) };
+    let dpi=layout.dpi.clamp(96,384);
+    let scale=dpi as f32/96.0;
+    let inset=bezel_inset(layout.ipad,dpi);
+    let radius=(if layout.ipad {26.0}else{38.0})*scale;
+    let hole_radius=(if layout.ipad {15.0}else{26.0})*scale;
+    let mut pixels=vec![0u8;(w as usize)*(h as usize)*4];
+    for y in 0..h {
+        let yf=y as f32+0.5;
+        let inside_y=y>=inset-2 && y<h-inset+2;
+        for x in 0..w {
+            // Only evaluate near the perimeter; interior pixels stay ZERO.
+            if inside_y && x>=inset-2 && x<w-inset+2 {continue;}
+            let xf=x as f32+0.5;
+            let outer=round_coverage(xf,yf,0.0,0.0,w as f32,h as f32,radius);
+            if outer==0.0{continue;}
+            let inner=round_coverage(xf,yf,inset as f32,inset as f32,
+                (w-2*inset) as f32,(h-2*inset) as f32,hole_radius);
+            let opacity=(outer*(1.0-inner)).clamp(0.0,1.0);
+            if opacity==0.0{continue;}
+            let min_edge=x.min(y).min(w-1-x).min(h-1-y) as f32;
+            let shine=((w as f32-xf)/w as f32*0.24)+
+                ((h as f32-yf)/h as f32*0.08);
+            let (r,g,b)=if min_edge<2.2*scale{
+                (164.0+45.0*shine,179.0+42.0*shine,191.0+36.0*shine)
+            }else if min_edge<4.2*scale{
+                (44.0+24.0*shine,55.0+23.0*shine,66.0+22.0*shine)
+            }else{
+                (8.0+13.0*shine,12.0+14.0*shine,18.0+17.0*shine)
+            };
+            let a=(opacity*255.0).round() as u8;
+            let pos=((y as usize)*(w as usize)+x as usize)*4;
+            pixels[pos]=(b*a as f32/255.0).round() as u8;
+            pixels[pos+1]=(g*a as f32/255.0).round() as u8;
+            pixels[pos+2]=(r*a as f32/255.0).round() as u8;
+            pixels[pos+3]=a;
         }
-        return Err("Could not create hollow iOS bezel".into());
     }
-    if unsafe { SetWindowRgn(hwnd, Some(rim), true) } == 0 {
-        let _ = unsafe { DeleteObject(HGDIOBJ(rim.0)) };
-        return Err("Windows rejected hollow iOS bezel".into());
+    // Small iPad Air front camera on the rim, on long or short edge
+    // depending on the actual orientation, never in the video aperture.
+    let landscape=w>h;
+    let center=if landscape{
+        (w as f32-7.0*scale,h as f32*0.5)
+    }else{(w as f32*0.5,7.0*scale)};
+    let cr=if layout.ipad{2.8*scale}else{3.2*scale};
+    let area=(6.0*scale).ceil() as i32;
+    for y in (center.1 as i32-area).max(0)..(center.1 as i32+area).min(h){
+        for x in (center.0 as i32-area).max(0)..(center.0 as i32+area).min(w){
+            let distance=((x as f32+0.5-center.0).powi(2)+
+                (y as f32+0.5-center.1).powi(2)).sqrt();
+            let coverage=(cr+0.5-distance).clamp(0.0,1.0);
+            if coverage==0.0{continue;}
+            let a=(coverage*255.0).round() as u8;
+            let pos=((y as usize)*(w as usize)+x as usize)*4;
+            let shade=if distance<cr*0.57{(24,42,55)}else{(4,7,12)};
+            pixels[pos]=((shade.2 as u16*a as u16)/255) as u8;
+            pixels[pos+1]=((shade.1 as u16*a as u16)/255) as u8;
+            pixels[pos+2]=((shade.0 as u16*a as u16)/255) as u8;
+            pixels[pos+3]=a;
+        }
     }
-    Ok(())
+    Ok(pixels)
 }
 
-pub fn close(app: &AppHandle) {
-    let state=app.state::<crate::ios_airplay::IosAirplayState>();
-    state.frame_attached.store(false, Ordering::Release);
-    if let Ok(mut error)=state.frame_error.lock(){*error=None;}
-    if let Some(old) = app.get_webview_window(LABEL) {
-        let _ = old.close();
+struct Surface {
+    dc:NonNull<c_void>,
+    bitmap:Option<NonNull<c_void>>,
+    default_bitmap:Option<NonNull<c_void>>,
+    pixels:Option<NonNull<u8>>,
+    size:Option<(i32,i32)>,
+}
+impl Surface {
+    fn create()->Result<Self,&'static str>{
+        let dc=unsafe{CreateCompatibleDC(ptr::null_mut())};
+        Ok(Self{
+            dc:NonNull::new(dc).ok_or("Cannot create native bezel memory DC")?,
+            bitmap:None,default_bitmap:None,pixels:None,size:None,
+        })
+    }
+    fn resize(&mut self,width:i32,height:i32)->Result<(),&'static str>{
+        if self.size==Some((width,height)){return Ok(());}
+        if width<=0 || height<=0 || width>MAX_SIDE || height>MAX_SIDE ||
+            i64::from(width)*i64::from(height)>MAX_PIXELS {
+            return Err("Bezel surface size is invalid");
+        }
+        let info=BitmapInfo{
+            header:BitmapInfoHeader{
+                size:std::mem::size_of::<BitmapInfoHeader>() as u32,
+                width,height:-height,planes:1,bits_per_pixel:32,compression:0,
+                size_image:(i64::from(width)*i64::from(height)*4) as u32,
+                ppm_x:0,ppm_y:0,colors_used:0,colors_important:0,
+            },
+            colors:[0],
+        };
+        let mut bits=ptr::null_mut();
+        let bitmap=unsafe{
+            CreateDIBSection(ptr::null_mut(),&info,DIB_RGB_COLORS,
+                &mut bits,ptr::null_mut(),0)
+        };
+        let bitmap=NonNull::new(bitmap).ok_or("Cannot allocate bezel BGRA DIB")?;
+        let Some(pixels)=NonNull::new(bits as *mut u8) else {
+            unsafe{DeleteObject(bitmap.as_ptr());}
+            return Err("Bezel DIB returned no pixel buffer");
+        };
+        let previous=unsafe{SelectObject(self.dc.as_ptr(),bitmap.as_ptr())};
+        let Some(previous)=NonNull::new(previous).filter(|p|p.as_ptr() as isize !=-1) else {
+            unsafe{DeleteObject(bitmap.as_ptr());}
+            return Err("Cannot select bezel DIB in memory DC");
+        };
+        if self.bitmap.is_none(){self.default_bitmap=Some(previous);}
+        if let Some(old)=self.bitmap.replace(bitmap){
+            unsafe{DeleteObject(old.as_ptr());}
+        }
+        self.pixels=Some(pixels);
+        self.size=Some((width,height));
+        Ok(())
+    }
+    fn present(&mut self,hwnd:*mut c_void,layout:CaseLayout)
+        ->Result<(),&'static str>
+    {
+        let bgra=render_bezel(layout)?;
+        self.resize(layout.width,layout.height)?;
+        let bits=self.pixels.ok_or("Bezel bitmap buffer is missing")?;
+        unsafe{ptr::copy_nonoverlapping(bgra.as_ptr(),bits.as_ptr(),bgra.len());}
+        let point=layout.point;
+        let size=Size{cx:layout.width,cy:layout.height};
+        let zero=Point::default();
+        let blend=Blend{
+            operation:0,flags:0,constant_alpha:255,alpha_format:AC_SRC_ALPHA
+        };
+        let screen=unsafe{GetDC(ptr::null_mut())};
+        if screen.is_null(){return Err("No Windows desktop DC for bezel");}
+        let result=unsafe{
+            UpdateLayeredWindow(hwnd,screen,&point,&size,self.dc.as_ptr(),
+                &zero,0,&blend,ULW_ALPHA)
+        };
+        unsafe{ReleaseDC(ptr::null_mut(),screen);}
+        if result==0{return Err("Windows refused native layered bezel pixels");}
+        Ok(())
+    }
+}
+impl Drop for Surface{
+    fn drop(&mut self){
+        unsafe{
+            if let Some(default)=self.default_bitmap{
+                SelectObject(self.dc.as_ptr(),default.as_ptr());
+            }
+            if let Some(bitmap)=self.bitmap{DeleteObject(bitmap.as_ptr());}
+            DeleteDC(self.dc.as_ptr());
+        }
     }
 }
 
-pub fn start(app: &AppHandle, pid: u32) -> Result<(), String> {
+struct NativeWorker{
+    pid:u32,
+    stop:Arc<AtomicBool>,
+    alive:Arc<AtomicBool>,
+    thread:Option<JoinHandle<()>>,
+}
+static ACTIVE:OnceLock<Mutex<Option<NativeWorker>>>=OnceLock::new();
+fn active()->&'static Mutex<Option<NativeWorker>>{
+    ACTIVE.get_or_init(||Mutex::new(None))
+}
+pub fn active_for(pid:u32)->bool{
+    active().lock().ok().and_then(|worker|worker.as_ref()
+        .map(|w|w.pid==pid && w.alive.load(Ordering::Acquire)))
+        .unwrap_or(false)
+}
+pub fn close(app:&AppHandle){
+    let worker=active().lock().ok().and_then(|mut w|w.take());
+    if let Some(mut worker)=worker{
+        worker.stop.store(true,Ordering::Release);
+        if let Some(thread)=worker.thread.take(){let _=thread.join();}
+    }
+    if let Some(state)=app.try_state::<crate::ios_airplay::IosAirplayState>(){
+        state.frame_attached.store(false,Ordering::Release);
+        if let Ok(mut error)=state.frame_error.lock(){*error=None;}
+    }
+}
+pub fn start(app:&AppHandle,pid:u32)->Result<(),String>{
     close(app);
-    let view = WebviewWindowBuilder::new(
-        app, LABEL, WebviewUrl::App("ios-bezel.html".into()))
-        .title("MirroLeap iOS device bezel")
-        .background_color(tauri::window::Color(0,0,0,0))
-        .transparent(true)
-        .decorations(false)
-        .shadow(false)
-        .resizable(false)
-        .skip_taskbar(true)
-        .focused(false)
-        .visible(false)
-        .inner_size(400.0,700.0)
-        .build()
-        .map_err(|e|format!("Cannot create iOS bezel: {e}"))?;
-    if let Err(error) = view.set_ignore_cursor_events(true) {
-        let _ = view.close();
-        return Err(format!("iOS bezel must be mouse-through: {error}"));
-    }
-    tokio::spawn(follow(app.clone(), view, pid));
+    let stop=Arc::new(AtomicBool::new(false));
+    let alive=Arc::new(AtomicBool::new(true));
+    let stop_worker=stop.clone();
+    let alive_worker=alive.clone();
+    let app_worker=app.clone();
+    let thread=thread::Builder::new().name("ios-native-bezel".into())
+        .spawn(move||{
+            if let Err(reason)=run_native(app_worker.clone(),pid,&stop_worker){
+                if let Some(state)=app_worker.try_state::<crate::ios_airplay::IosAirplayState>(){
+                    state.frame_attached.store(false,Ordering::Release);
+                    if let Ok(mut error)=state.frame_error.lock(){
+                        *error=Some(reason.to_string());
+                    }
+                }
+            }
+            alive_worker.store(false,Ordering::Release);
+        }).map_err(|e|format!("Cannot start native iOS bezel worker: {e}"))?;
+    *active().lock().map_err(|e|e.to_string())?=Some(NativeWorker{
+        pid,stop,alive,thread:Some(thread)
+    });
     Ok(())
 }
-
-async fn follow(app: AppHandle, view: WebviewWindow, pid: u32) {
-    tokio::time::sleep(Duration::from_millis(350)).await;
-    let own = match view.hwnd() {
-        Ok(hwnd) => hwnd.0 as usize, Err(_) => return
+fn pump_messages(){
+    let mut msg=WinMsg::default();
+    while unsafe{PeekMessageW(&mut msg,ptr::null_mut(),0,0,1)}!=0{
+        unsafe{TranslateMessage(&msg);DispatchMessageW(&msg);}
+    }
+}
+fn hide(hwnd:*mut c_void,shown:&mut bool){
+    if *shown{unsafe{ShowWindow(hwnd,SW_HIDE);}}
+    *shown=false;
+}
+fn show(hwnd:*mut c_void,shown:&mut bool){
+    if !*shown{unsafe{ShowWindow(hwnd,SW_SHOWNOACTIVATE);}}
+    *shown=true;
+}
+fn set_error(app:&AppHandle,reason:Option<&str>){
+    if let Some(state)=app.try_state::<crate::ios_airplay::IosAirplayState>(){
+        if let Ok(mut error)=state.frame_error.lock(){
+            if error.as_deref()!=reason{*error=reason.map(str::to_owned);}
+        }
+    }
+}
+fn run_native(app:AppHandle,pid:u32,stop:&AtomicBool)
+    ->Result<(),&'static str>
+{
+    // Static Win32 window class is already registered by user32. This HWND
+    // belongs entirely to the native worker, never to WebView2 or another PID.
+    let class:Vec<u16>="STATIC".encode_utf16().chain(Some(0)).collect();
+    let title:Vec<u16>="MirroLeap iOS native device bezel".encode_utf16()
+        .chain(Some(0)).collect();
+    let hwnd=unsafe{
+        CreateWindowExW(
+            EX_LAYERED|EX_TRANSPARENT|EX_TOOLWINDOW|EX_NOACTIVATE,
+            class.as_ptr(),title.as_ptr(),WS_POPUP,
+            0,0,1,1,ptr::null_mut(),ptr::null_mut(),
+            ptr::null_mut(),ptr::null_mut())
     };
-    let mut last: Option<(Extent, bool, u32)> = None;
-    let mut visible = false;
-    let mut last_style_update = Instant::now() - Duration::from_secs(1);
-    let mut ticker = tokio::time::interval(Duration::from_millis(80));
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    loop {
-        ticker.tick().await;
-        if app.get_webview_window(LABEL).and_then(|v|v.hwnd().ok())
-            .map(|hwnd|hwnd.0 as usize) != Some(own) { break; }
-        let state = app.state::<crate::ios_airplay::IosAirplayState>();
-        let active_pid = crate::ios_airplay::active_receiver_pid(&state);
-        if active_pid != Some(pid) { break; }
-        let style = state.window_style.lock().ok()
-            .map(|v|v.clone()).unwrap_or_default();
-        let video = crate::commands::find_window_by_pid(pid);
-        let Some(video) = video else {
-            if visible { let _=view.hide(); visible=false; }
-            state.frame_attached.store(false, Ordering::Release);
+    let Some(hwnd)=NonNull::new(hwnd) else{
+        return Err("无法创建 Windows 原生透明边框窗口");
+    };
+    // Exclusive thread ownership ensures DestroyWindow always runs on the
+    // same thread that created it, also for a failed rendering attempt.
+    struct WindowOwner(NonNull<c_void>);
+    impl Drop for WindowOwner{
+        fn drop(&mut self){unsafe{DestroyWindow(self.0.as_ptr());}}
+    }
+    let _window=WindowOwner(hwnd);
+    let mut surface=Surface::create()?;
+    let mut previous_skin:Option<(i32,i32,bool,u32)>=None;
+    let mut shown=false;
+    let mut applied=false;
+    while !stop.load(Ordering::Acquire){
+        pump_messages();
+        let Some(state)=app.try_state::<crate::ios_airplay::IosAirplayState>()
+            else{break};
+        if crate::ios_airplay::active_receiver_pid(&state)!=Some(pid){break;}
+        let style=state.window_style.lock().ok().map(|s|s.clone())
+            .unwrap_or_default();
+        let video=crate::commands::find_window_by_pid(pid);
+        let Some(video)=video else{
+            hide(hwnd.as_ptr(),&mut shown);
+            state.frame_attached.store(false,Ordering::Release);
+            thread::sleep(Duration::from_millis(50));
             continue;
         };
-        if !style.starts_with("device-")
-            || !unsafe { IsWindowVisible(video) }.as_bool()
-            || unsafe { IsIconic(video) }.as_bool()
-            || is_video_fullscreen(video) {
-            if visible { let _=view.hide(); visible=false; }
-            state.frame_attached.store(false, Ordering::Release);
+        if !style.starts_with("device-") || is_fullscreen(video){
+            hide(hwnd.as_ptr(),&mut shown);
+            state.frame_attached.store(false,Ordering::Release);
+            thread::sleep(Duration::from_millis(40));
             continue;
         }
-        let Some(size) = client_extent(video) else { continue; };
-        // Keep HWND values scoped to the current tick: raw HWND pointers are
-        // intentionally never held across .await on the multithread runtime.
-        let child = HWND(own as *mut _);
-        if !parent_matches(child, video) {
-            if visible { let _=view.hide(); visible=false; }
-            if let Err(error) = attach_shell(child, video) {
-                eprintln!("[iOS bezel] {error}");
-                state.frame_attached.store(false, Ordering::Release);
-                if let Ok(mut reason)=state.frame_error.lock(){
-                    *reason=Some(format!("原生子窗口绑定失败：{error}"));
-                }
-                break; // No detached-window fallback.
-            }
-            last = None;
-        }
-        let dpi = unsafe { GetDpiForWindow(video) }.clamp(96, 384);
-        let ipad = classify_ipad(&style, size);
-        let inset = inset_px(ipad, dpi);
-        let layout = (size, ipad, dpi);
-        // Child-local (0,0), not screen coordinates. Moving the SDL parent
-        // moves the child atomically, even between these 80-ms health ticks.
-        if last != Some(layout) {
-            if unsafe {
-                SetWindowPos(child, Some(HWND_TOP), 0, 0,
-                    size.width, size.height, SWP_NOACTIVATE | SWP_FRAMECHANGED)
-            }.is_err() {
-                if visible { let _=view.hide(); visible=false; }
-                state.frame_attached.store(false, Ordering::Release);
-                if let Ok(mut reason)=state.frame_error.lock(){
-                    *reason=Some("Windows 拒绝设置边框子窗口位置".into());
-                }
+        let Some(screen)=video_client(video) else{
+            hide(hwnd.as_ptr(),&mut shown);
+            state.frame_attached.store(false,Ordering::Release);
+            thread::sleep(Duration::from_millis(40));
+            continue;
+        };
+        let dpi=unsafe{GetDpiForWindow(video)}.clamp(96,384);
+        let Some(layout)=target_layout(screen,&style,dpi) else{
+            hide(hwnd.as_ptr(),&mut shown);
+            state.frame_attached.store(false,Ordering::Release);
+            set_error(&app,Some("视频窗口过大，已安全隐藏真机边框"));
+            thread::sleep(Duration::from_millis(80));
+            continue;
+        };
+        let skin=(layout.width,layout.height,layout.ipad,layout.dpi);
+        if previous_skin!=Some(skin){
+            if let Err(reason)=surface.present(hwnd.as_ptr(),layout){
+                hide(hwnd.as_ptr(),&mut shown);
+                state.frame_attached.store(false,Ordering::Release);
+                set_error(&app,Some(reason));
+                thread::sleep(Duration::from_millis(250));
                 continue;
             }
-            if client_extent(child) != Some(size) || !parent_matches(child,video) {
-                if visible { let _=view.hide(); visible=false; }
-                state.frame_attached.store(false, Ordering::Release);
-                if let Ok(mut reason)=state.frame_error.lock(){
-                    *reason=Some("边框子窗口尺寸与视频客户区不一致".into());
-                }
-                continue;
-            }
-            if hollow_child(child, size, inset, ipad, dpi).is_err() {
-                if visible { let _=view.hide(); visible=false; }
-                state.frame_attached.store(false, Ordering::Release);
-                if let Ok(mut reason)=state.frame_error.lock(){
-                    *reason=Some("原生透明边框裁剪失败".into());
-                }
-                continue;
-            }
-            last = Some(layout);
-            last_style_update = Instant::now() - Duration::from_secs(1);
+            previous_skin=Some(skin);
         }
-        if last_style_update.elapsed() > Duration::from_millis(700) {
-            let _ = view.eval(format!(
-                "window.mirroleapIosSkin?.('{}','{}',{})",
-                if ipad {"ipad"}else{"iphone"},
-                if size.width>size.height {"landscape"}else{"portrait"},
-                inset as f64 * 96.0 / f64::from(dpi)
-            ));
-            last_style_update = Instant::now();
+        // Use native Win32 stacking; position above the SDL HWND in the
+        // SAME z-order band rather than creating an always-topmost overlay.
+        let location=crate::device_frame::place_ios_companion(
+            HWND(hwnd.as_ptr()),video,layout.point.x,layout.point.y,
+            layout.width,layout.height);
+        if location.is_err(){
+            hide(hwnd.as_ptr(),&mut shown);
+            state.frame_attached.store(false,Ordering::Release);
+            set_error(&app,Some("Windows 拒绝将原生边框放在投屏窗口上方"));
+            thread::sleep(Duration::from_millis(100));
+            continue;
         }
-        if !visible {
-            if view.show().is_ok() { visible=true; }
+        let mut actual=RECT::default();
+        let hwnd_readable=unsafe{
+            GetWindowRect(HWND(hwnd.as_ptr()),&mut actual)
+        }.is_ok();
+        if !hwnd_readable ||
+            (actual.left-layout.point.x).abs()>1 ||
+            (actual.top-layout.point.y).abs()>1 ||
+            (actual.right-actual.left-layout.width).abs()>1 ||
+            (actual.bottom-actual.top-layout.height).abs()>1 {
+            hide(hwnd.as_ptr(),&mut shown);
+            state.frame_attached.store(false,Ordering::Release);
+            set_error(&app,Some("原生外壳位置验证失败，已隐藏以防止边框分离"));
+            thread::sleep(Duration::from_millis(45));
+            continue;
         }
-        if visible && parent_matches(child,video) && client_extent(child)==Some(size) {
-            state.frame_attached.store(true, Ordering::Release);
-            if let Ok(mut reason)=state.frame_error.lock(){*reason=None;}
-        } else {
-            if visible { let _=view.hide(); visible=false; }
-            state.frame_attached.store(false, Ordering::Release);
-            last = None;
+        // Transparent centre is guaranteed by BGRA alpha=0, not by WebView
+        // CSS, SetParent or DPI-virtualized browser client coordinates.
+        show(hwnd.as_ptr(),&mut shown);
+        if shown{
+            state.frame_attached.store(true,Ordering::Release);
+            if !applied{set_error(&app,None);applied=true;}
         }
+        thread::sleep(Duration::from_millis(FOLLOW_MS));
     }
-    app.state::<crate::ios_airplay::IosAirplayState>().frame_attached
-        .store(false, Ordering::Release);
-    if app.get_webview_window(LABEL).and_then(|v|v.hwnd().ok())
-        .map(|hwnd|hwnd.0 as usize)==Some(own) { let _=view.close(); }
+    if let Some(state)=app.try_state::<crate::ios_airplay::IosAirplayState>(){
+        state.frame_attached.store(false,Ordering::Release);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
-mod tests {
+mod tests{
     use super::*;
-    #[test]
-    fn only_valid_native_video_client_sizes_are_allowed() {
-        assert_eq!(safe_extent(1024,1366), Some(Extent{width:1024,height:1366}));
-        for (w,h) in [(0,120),(100,100),(9200,800),(-1,900)] {
-            assert_eq!(safe_extent(w,h),None);
-        }
+    fn layout(w:i32,h:i32,ipad:bool,dpi:u32)->CaseLayout{
+        CaseLayout{point:Point{x:100,y:150},width:w,height:h,ipad,dpi}
     }
     #[test]
-    fn device_classification_and_rim_are_bounded_for_all_dpi() {
-        let ipad=Extent{width:1000,height:1380};
-        let iphone=Extent{width:400,height:865};
-        assert!(classify_ipad("device-auto",ipad));
-        assert!(!classify_ipad("device-auto",iphone));
-        assert!(classify_ipad("device-ipad",iphone));
-        assert!(!classify_ipad("device-iphone",ipad));
-        assert_eq!(inset_px(true,96),12);
-        assert_eq!(inset_px(true,144),18);
-        assert_eq!(inset_px(false,192),28);
-        assert!(inset_px(true,384)<=56);
+    fn native_layer_does_not_reparent_tauri_or_modify_any_webview(){
+        assert!(!active_for(0));
+        assert_eq!(bezel_inset(true,96),14);
+        assert_eq!(bezel_inset(true,144),21);
+        assert_eq!(bezel_inset(false,192),36);
+        assert!(choose_ipad("device-auto",1024,1366));
+        assert!(!choose_ipad("device-auto",500,1120));
     }
     #[test]
-    fn attached_rim_uses_child_local_geometry_not_desktop_coordinates() {
-        // Moving a parent from (-1200,200) to (750,320) changes neither
-        // child position nor the hollow bezel aperture; desktop offsets
-        // are no longer part of the placement equation.
-        let parent=Extent{width:1024,height:1366};
-        let inset=inset_px(true,96);
-        assert_eq!(parent.width - 2*inset,1000);
-        assert_eq!(parent.height - 2*inset,1342);
+    fn hollow_rim_preserves_entire_unscaled_video_centre(){
+        let view=layout(760,1080,true,96);
+        let bgra=render_bezel(view).unwrap();
+        assert_eq!(bgra.len(),760*1080*4);
+        let centre=((540*760+380)*4) as usize;
+        assert_eq!(&bgra[centre..centre+4],&[0,0,0,0]);
+        let top=((1*760+380)*4) as usize;
+        assert!(bgra[top+3]>0);
+        // Camera is part of the bezel, never a rendered video pixel.
+        let inside=((30*760+380)*4) as usize;
+        assert_eq!(bgra[inside+3],0);
+    }
+    #[test]
+    fn rounded_outer_corner_is_antialiased_and_zero_outside(){
+        let bgra=render_bezel(layout(420,820,false,96)).unwrap();
+        assert_eq!(&bgra[..4],&[0,0,0,0]);
+        assert_eq!(bgra[((2*420+210)*4+3) as usize]>0,true);
+        assert!(render_bezel(layout(6000,6000,true,96)).is_err());
+    }
+    #[test]
+    fn target_geometry_tracks_physical_video_client_even_on_negative_monitors(){
+        let input=VideoClient{
+            point:Point{x:-1200,y:400},width:700,height:1000
+        };
+        let expected=target_layout(input,"device-ipad",144).unwrap();
+        assert_eq!(expected.point,Point{x:-1221,y:379});
+        assert_eq!((expected.width,expected.height),(742,1042));
     }
 }

@@ -19,7 +19,7 @@ export type IosAirplayStatus = {
     /** Win32 physical SDL client area (may be smaller/larger than source). */
     displayWidth?:number|null;
     displayHeight?:number|null;
-    /** Confirmed native parent-child relationship with the AirPlay HWND. */
+    /** Native mouse-through BGRA bezel is visibly aligned with the video. */
     frameAttached?:boolean;
     frameError?:string|null;
 };
@@ -172,15 +172,15 @@ export default function IosReceiverPanel({locale}:Props) {
                 <Expand size={15}/>{copy('全屏','Fullscreen')}</button>}
         </div>}
         {status?.installed && <p className="ml-muted mt-2 text-[11px] leading-5" role="note">
-            {copy('真机边框现在固定在视频窗口内部，与画面一起移动；最外侧占用约 12–14 像素，避免旧版独立窗口错位。可运行中切换真机/纯画面。',
-                'The device bezel is attached inside the video window and moves with it, using a thin 12–14px inner rim. Switch device/clean style live.')}
+            {copy('真机边框使用 Windows 原生透明图层，避免跨进程绑定造成主窗口 DPI 异常。画面保持原样，外壳不参与视频解码。可运行中切换真机/纯画面。',
+                'The bezel uses a native Windows transparent layer, not cross-process WebView parenting. Video is untouched. Switch styles live.')}
         </p>}
         {isRunning && style.startsWith('device-') && <p role="status"
             data-testid="ios-frame-attachment" className="ml-muted text-[11px] mt-1">
             {status?.frameAttached
-                ? copy('真机边框：已绑定 AirPlay 视频窗口','Device frame: attached to the AirPlay video window')
-                : copy('真机边框：尚未绑定；为防止错位，暂不显示边框',
-                    'Device frame: not attached; hidden to prevent misalignment')}
+                ? copy('真机边框：原生图层已对齐','Device frame: native layer aligned')
+                : copy('真机边框：原生图层未显示，正在同步视频位置',
+                    'Device frame: native layer not visible; synchronizing video position')}
         </p>}
         {isRunning && !status?.frameAttached && status?.frameError &&
             <p role="alert" className="text-red-500 text-[11px] leading-5 mt-1"
@@ -202,6 +202,15 @@ export default function IosReceiverPanel({locale}:Props) {
             <p role="note" className="text-amber-500 text-[11px] leading-5">
                 {copy('当前窗口在放大源画面，可能出现模糊。可以缩小接收窗口，或停止后尝试更高画质档位。',
                     'The window is upscaling received pixels. Shrink it or try a higher quality tier after stopping.')}
+            </p>}
+        {isRunning && status?.sourceWidth && status.sourceHeight &&
+            status.displayWidth && status.displayHeight &&
+            Math.min(status.sourceWidth/status.displayWidth,
+                status.sourceHeight/status.displayHeight)>1.7 &&
+            <p role="note" data-testid="ios-downscale-warning"
+                className="text-amber-500 text-[11px] leading-5">
+                {copy('当前高分辨率画面正在缩小超过 1.7 倍，普通线性采样可能让 App 图标边缘出现锯齿。建议停止接收后对比「高清 2868」与「流畅 1920」，选择在当前窗口看起来更自然的档位；不一定是 4K 最清晰。',
+                    'The decoded frame is reduced over 1.7×; linear sampling can alias sharp app icons. Stop and compare 2868 versus 1920; 4K is not always sharpest at this window size.')}
             </p>}
         {error && <p role="alert" className="mt-2 text-xs text-red-500 break-words">{error}</p>}
         {isRunning && <p className="ml-muted mt-1 text-[11px]" role="note">
