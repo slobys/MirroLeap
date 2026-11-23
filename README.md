@@ -1,4 +1,4 @@
-# MirroLeap
+# <img src="src-tauri/icons/128x128.png" width="44" height="44" alt="MirroLeap 客户端图标"> MirroLeap
 
 MirroLeap 可以把安卓手机、iPhone 和 iPad 的画面投到 Windows 电脑。投屏时可以用画笔标注、打开聚光灯或放大画面。安卓投屏还支持用电脑键鼠操作手机、截图和录屏。
 
