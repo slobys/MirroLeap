@@ -192,7 +192,8 @@ for name in ("arrow", "rect", "step"):
 assert 'scrcpy 原始录像' in read("README.md")
 assert 'creator-mask' not in phone_toolbar and 'ink_mask" => Some(' not in frame_native
 assert '防窥' in phone_toolbar  # independent opt-in spotlight shade remains
-assert 'refresh_presenter_image(app, &device, None)' in frame_native, 'Snapshot mode must still refresh ADB stills'
+assert 'if !is_ios_video(device){\n        return crate::commands::refresh_presenter_image(app,device,None).await;' in frame_native, \
+    'Android snapshot mode must still refresh ADB stills'
 # Screen video must be magnified natively by Windows instead of polling
 # Android PNG screenshots, and never intercept taps or capture in background.
 native_lens = read("src-tauri/src/native_live_lens.rs")

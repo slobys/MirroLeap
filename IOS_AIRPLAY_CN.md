@@ -1,4 +1,4 @@
-# MirroLeap iOS AirPlay 投屏指南（v5.4.1 体验改进测试分支）
+# MirroLeap iPhone / iPad 投屏指南（v5.4.1）
 
 本版本保留原来的 Android scrcpy 投屏。在**主页同一张卡片**中直接启停独立 AirPlay 接收器、设置真机边框和画质，**没有中间说明弹窗**。启动后仅需在手机选择 AirPlay 目标，画面仍在接收器自己的 Windows 窗口中显示。
 
@@ -10,7 +10,7 @@
 4. 将 iPhone/iPad 和电脑连接到同一个局域网。在设备的 **控制中心 → 屏幕镜像** 选择首页显示的接收器。收到画面后显示投屏窗口。设备停止镜像后，接收器回到首页的等待状态。
 5. 停止镜像时在 iOS 控制中心选择「停止镜像」，或在主页点击 **停止接收**。
 
-Windows 测试版内嵌 SDL 启动适配器，让接收窗口从创建时起保持隐藏。构建时运行 `python scripts/build-airplay-sdl-background.py <接收器目录中的 SDL2.dll> <输出 DLL 路径>`，再把输出 DLL 的绝对路径设置到 `MIRROLEAP_AIRPLAY_SDL_ADAPTER`。脚本需要 Windows x64 C 编译器和 Windows SDK，可用 `--compiler` 指定 `cl.exe` 或 `clang-cl.exe`。缺少适配器时，构建使用窗口创建后的隐藏处理。
+Windows 正式版内嵌 SDL 启动适配器，让接收窗口从创建时起保持隐藏。构建时运行 `python scripts/build-airplay-sdl-background.py <接收器目录中的 SDL2.dll> <输出 DLL 路径>`，再把输出 DLL 的绝对路径设置到 `MIRROLEAP_AIRPLAY_SDL_ADAPTER`。脚本需要 Windows x64 C 编译器和 Windows SDK，可用 `--compiler` 指定 `cl.exe` 或 `clang-cl.exe`。缺少适配器时，构建使用窗口创建后的隐藏处理。
 
 ## USB 有线投屏
 
@@ -20,7 +20,7 @@ Windows 测试版内嵌 SDL 启动适配器，让接收窗口从创建时起保�
 
 有线窗口按设备尺寸显示真机边框，悬停侧边可打开工具栏，使用画笔、放大镜、聚光灯、全屏和置顶。可以从工具栏关闭窗口，或在首页点击「停止 USB 投屏」。再次投屏需要重新点击按钮，退出 MirroLeap 会结束有线会话。
 
-本地测试版内嵌预览程序和来自 [USB Mirror v0.4.1](https://github.com/elghifari/USBMirror/releases/tag/v0.4.1) 的原始捕获运行时。构建时使用 `scripts/build-ios-usb.ps1` 验证固定上游版本和可执行文件 SHA-256，生成归档，再通过 `MIRROLEAP_IOS_USB_BUNDLE` 嵌入 Windows 构建。预览源文件 `scripts/ios-usb-preview.cpp` 使用 GPL-3.0-only，归档包含上游组件的许可证和源码出处。
+Windows 正式版内嵌预览程序和基于 [USB Mirror v0.4.1](https://github.com/elghifari/USBMirror/releases/tag/v0.4.1) 的捕获运行时。构建时使用 `scripts/build-ios-usb.ps1` 验证固定上游版本和可执行文件 SHA-256，应用 QuickTime 恢复补丁并生成归档，再通过 `MIRROLEAP_IOS_USB_BUNDLE` 嵌入 Windows 构建。预览程序的源代码、构建脚本和补丁在本仓库，发布附件提供对应的上游源码。
 
 ## 关闭投屏和恢复旧版本残留接收器
 

@@ -109,4 +109,4 @@ const root = document.getElementById('root')!;
 root.style.height = '100vh';
 root.style.display = 'flex';
 root.style.flexDirection = 'column';
-ReactDOM.createRoot(root).render(<I18nProvider><SettingsFixture/></I18nProvider>);
+ReactDOM.createRoot(root).render(<I18nProvider initialLocale="zh-CN"><SettingsFixture/></I18nProvider>);
