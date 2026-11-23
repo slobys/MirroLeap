@@ -1,0 +1,79 @@
+name: Publish MirroLeap v5.4.1 at the scheduled time
+
+on:
+  schedule:
+    # Start a runner five minutes before 08:00 Asia/Shanghai. The job itself
+    # waits for the exact UTC boundary. Later runs cover scheduler delays.
+    - cron: '55 23 25 11 *'
+    - cron: '0,5,15,30 0 26 11 *'
+    - cron: '0 1 26 11 *'
+  workflow_dispatch:
+
+concurrency:
+  group: publish-mirroleap-v5.4.1
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    steps:
+      - name: Verify the pinned release and publish only within its scheduled window
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: '455086548'
+          RELEASE_COMMIT: '714bae65d62b63c0e5800ade2f5f41ece5ae918a'
+          ASSET_DIGESTS: '{"MirroLeap_5.4.1_x64-setup.exe":"sha256:9e67e81eb08684aa54be187a4f4ba8e898c1e0ef4409f4d5f4811a57a45267e8","MirroLeap_5.4.1_x64_en-US.msi":"sha256:b377e8ef4df7d9d9bbf3d3907563f1ff8f335df343bfed70f13b322fb86c6c47","MirroLeap_5.4.1_x64_Portable.zip":"sha256:8caa24c040ee49d4c78fd46d1da04943b1fcce9fe2148e493743ef534579bd8c","SHA256SUMS.txt":"sha256:da88371cf0c60d5156ff0fd09c449a075cdc56f4ac17881a8fc5199a7158042f","MirroLeap_5.4.1_x64-setup.exe.sig":"sha256:9ff12c29df4f486e975c14849020cc46fdb012b27452bfe8947e34ff6bc02ef5","latest.json":"sha256:8cde6826540c32c63f3697d7077d5feadbb148f354afe8466180e875a625bbdd","MirroLeap_5.4.1_iOS_USB_Upstream_Source.zip":"sha256:d214d835f27ea0fa426c9c236d0e42226a0db4b1986b150498980a2f095023be"}'
+          PUBLISH_AT: '2026-11-26T00:00:00Z'
+        shell: bash
+        run: |
+          set -euo pipefail
+          publish_at=$(date -u -d "$PUBLISH_AT" +%s)
+          now=$(date -u +%s)
+
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]] && (( now < publish_at - 600 || now >= publish_at + 7200 )); then
+            echo 'Outside the one-time publication window.'
+            exit 0
+          fi
+
+          release_path="repos/$GH_REPO/releases/$RELEASE_ID"
+          verify_release() {
+            release=$(gh api "$release_path")
+            jq -e --arg sha "$RELEASE_COMMIT" --argjson assets "$ASSET_DIGESTS" '
+              .tag_name == "v5.4.1" and .target_commitish == $sha and .prerelease == false and
+              ((.assets | length) == ($assets | length)) and
+              ((.assets | map({key: .name, value: .digest}) | from_entries) == $assets)
+            ' <<< "$release"
+          }
+          verify_release
+
+          if [[ "$GITHUB_EVENT_NAME" != schedule ]]; then
+            echo 'Manual verification complete. Publication is triggered only by the schedule.'
+            exit 0
+          fi
+          if [[ $(jq -r .draft <<< "$release") == false ]]; then
+            echo 'This verified release is already public.'
+            exit 0
+          fi
+          now=$(date -u +%s)
+          if (( now < publish_at )); then
+            sleep "$(( publish_at - now ))"
+            verify_release
+            if [[ $(jq -r .draft <<< "$release") == false ]]; then
+              echo 'This verified release is already public.'
+              exit 0
+            fi
+          fi
+          now=$(date -u +%s)
+          if (( now < publish_at || now >= publish_at + 7200 )); then
+            echo 'Publication fell outside the verified release window.' >&2
+            exit 1
+          fi
+
+          gh api --method PATCH "$release_path" -f tag_name=v5.4.1 -f "target_commitish=$RELEASE_COMMIT" \
+            -F draft=false -F prerelease=false -f make_latest=true \
+            --jq '{tag: .tag_name, draft, prerelease, published_at, url: .html_url}'
+          gh api "$release_path" | jq -e '.draft == false and .prerelease == false and .published_at != null'
