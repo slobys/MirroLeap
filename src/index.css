@@ -464,6 +464,13 @@ body {
 .ml-primary-action:hover:not(:disabled), .ml-stop-action:hover { filter: brightness(1.08); }
 .ml-primary-action:active:not(:disabled), .ml-stop-action:active { transform: scale(.99); }
 .ml-primary-action:disabled { opacity: .45; cursor: not-allowed; }
+.ml-ios-usb-action { min-width: 116px; }
+.ml-ios-usb-action:disabled {
+  opacity: 1;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--primary) 13%, var(--bg-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 45%, var(--border-base));
+}
 .ml-home-footer {
   min-height: 42px;
   padding: 9px 0 0;

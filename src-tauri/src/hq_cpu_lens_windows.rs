@@ -105,6 +105,7 @@ fn wide(value:&str)->Vec<u16> {value.encode_utf16().chain(Some(0)).collect()}
 /// Premultiplied BGRA circular mask. Antialiasing is only applied at the
 /// outer circle boundary; all interior pixels preserve their decoded-source
 /// BGRA values without a second Windows Magnification pass.
+#[cfg(test)]
 pub(crate) fn circular_premultiplied_bgra(
     bgra:&[u8],diameter:u32,
 )->Result<Vec<u8>,&'static str> {
@@ -115,25 +116,33 @@ pub(crate) fn circular_premultiplied_bgra(
     let expected=size.checked_mul(size)
         .and_then(|area|area.checked_mul(4)).ok_or("HQ circle size overflow")?;
     if bgra.len()!=expected {return Err("HQ source BGRA length mismatch");}
-    let radius=diameter as f32*0.5;
     let mut result=vec![0u8;expected];
+    apply_lens_mask(bgra,&mut result,&lens_mask(diameter));
+    Ok(result)
+}
+
+fn lens_mask(diameter:u32)->Vec<u8>{
+    let size=diameter as usize;
+    let radius=diameter as f32*0.5;
+    let mut mask=vec![0;size*size];
     for y in 0..size {
         let dy=(y as f32+0.5)-radius;
         for x in 0..size {
             let dx=(x as f32+0.5)-radius;
-            let distance=(dx*dx+dy*dy).sqrt();
-            let coverage=(radius-distance).clamp(0.0,1.0);
-            if coverage==0.0 {continue;}
-            let pos=(y*size+x)*4;
-            let alpha=(bgra[pos+3] as f32*coverage).round() as u8;
-            for component in 0..3 {
-                result[pos+component]=
-                    ((bgra[pos+component] as u16 * alpha as u16+127)/255) as u8;
-            }
-            result[pos+3]=alpha;
+            mask[y*size+x]=((radius-(dx*dx+dy*dy).sqrt()).clamp(0.0,1.0)*255.0).round() as u8;
         }
     }
-    Ok(result)
+    mask
+}
+
+fn apply_lens_mask(source:&[u8],target:&mut [u8],mask:&[u8]){
+    for ((s,t),coverage) in source.chunks_exact(4).zip(target.chunks_exact_mut(4)).zip(mask){
+        if *coverage==255 && s[3]==255 {t.copy_from_slice(s);continue;}
+        if *coverage==0 {t.fill(0);continue;}
+        let alpha=(s[3] as u16*(*coverage as u16)+127)/255;
+        for channel in 0..3 {t[channel]=((s[channel] as u16*alpha+127)/255) as u8;}
+        t[3]=alpha as u8;
+    }
 }
 
 /// Use 64-bit Windows coordinates to guard against malformed/excessive
@@ -198,6 +207,7 @@ pub struct HqDecodedCpuLens {
     bitmap:Option<NonNull<c_void>>,
     pixels:Option<NonNull<u8>>,
     dimension:u32,
+    alpha_mask:Vec<u8>,
     previous_key:Option<PresentationKey>,
     cached_frame:Option<(u32,crate::hq_protocol::OwnedFrame)>,
     last_generation:u64,
@@ -227,7 +237,7 @@ impl HqDecodedCpuLens {
         Ok(Self {
             hwnd,dc,
             default_bitmap:NonNull::dangling(),
-            bitmap:None,pixels:None,dimension:0,previous_key:None,cached_frame:None,
+            bitmap:None,pixels:None,dimension:0,alpha_mask:Vec::new(),previous_key:None,cached_frame:None,
             last_generation:0,presented_rect:None,
             last_paint:None,paint_interval:HQ_MIN_PAINT_INTERVAL,
         })
@@ -273,6 +283,7 @@ impl HqDecodedCpuLens {
         }
         self.pixels=Some(new_pixels);
         self.dimension=diameter;
+        self.alpha_mask=lens_mask(diameter);
         Ok(())
     }
 
@@ -348,13 +359,14 @@ impl HqDecodedCpuLens {
         Ok(true)
     }
 
-    fn present_bgra(&mut self,bgra:&[u8],x:i32,y:i32,diameter:u32)
+    pub(crate) fn present_bgra(&mut self,bgra:&[u8],x:i32,y:i32,diameter:u32)
         ->Result<(),&'static str>
     {
-        let masked=circular_premultiplied_bgra(bgra,diameter)?;
         self.allocate_surface(diameter)?;
         let Some(bits)=self.pixels else {return Err("HQ BGRA surface missing");};
-        unsafe {ptr::copy_nonoverlapping(masked.as_ptr(),bits.as_ptr(),masked.len());}
+        if bgra.len()!=self.alpha_mask.len()*4{return Err("HQ source BGRA length mismatch");}
+        let target=unsafe{std::slice::from_raw_parts_mut(bits.as_ptr(),bgra.len())};
+        apply_lens_mask(bgra,target,&self.alpha_mask);
         let point=Point{x,y};
         let size=Size{cx:diameter as i32,cy:diameter as i32};
         let source=Point{x:0,y:0};

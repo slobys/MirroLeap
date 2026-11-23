@@ -135,6 +135,94 @@ async function check(page, mode, viewport, scale) {
       : '(fits window)');
 }
 
+async function checkAirPlayWaiting(browser, scale) {
+  const context = await browser.newContext({
+    viewport: {width: 900, height: 680}, deviceScaleFactor: scale,
+  });
+  try {
+    await context.addInitScript(() => {
+      const status = {
+        supported: true, installed: true, running: false, installing: false,
+        receiverReady: false, receiverName: 'AirPlay-Windows', receiverIp: null,
+        usbStatus: 'ready', windowStyle: 'device-auto',
+      };
+      window.addEventListener('fixture-wifi-frame', () => {
+        Object.assign(status, {sourceWidth: 1246, sourceHeight: 1792});
+      });
+      window.__TAURI_INTERNALS__ = {
+        invoke: async (command, args) => {
+          if (command === 'ios_airplay_start') {
+            Object.assign(status, {running: true, receiverReady: true, receiverIp: '192.0.2.107'});
+          } else if (command === 'ios_airplay_stop') {
+            Object.assign(status, {running: false, receiverReady: false, receiverIp: null});
+          } else if (command === 'ios_usb_control') {
+            status.usbStatus = args.start ? 'streaming' : 'ready';
+          } else if (command === 'ios_airplay_set_receiver_name') {
+            status.receiverName = args.name;
+          }
+          return {...status};
+        },
+      };
+    });
+    const page = await context.newPage();
+    await page.goto(origin + '/tests/layout/index.html');
+    const panel = page.getByTestId('ios-home-panel');
+    const connection = panel.getByTestId('ios-connection-info');
+    const usb = panel.getByText('USB已连接', {exact: true});
+    const toggle = panel.getByRole('button', {name: '投屏详情'});
+    const details = panel.locator('#ios-receiver-details');
+    await usb.waitFor({state: 'visible'});
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+    assert(await details.isHidden());
+    const usbBounds = await usb.boundingBox();
+    const toggleBounds = await toggle.boundingBox();
+    const titleBounds = await panel.getByRole('heading', {name: 'iPhone / iPad 投屏'}).boundingBox();
+    const sizeBounds = await panel.getByRole('combobox', {name: 'iOS 投屏窗口大小'}).boundingBox();
+    assert(usbBounds && toggleBounds && titleBounds && sizeBounds &&
+      usbBounds.x >= titleBounds.x + titleBounds.width &&
+      usbBounds.y < sizeBounds.y && toggleBounds.y >= sizeBounds.y + sizeBounds.height,
+    'USB status should sit beside the title and the details button below the settings');
+    await toggle.click();
+    assert(await details.isVisible());
+    await toggle.click();
+    assert(await details.isHidden() && await usb.isVisible());
+    await panel.getByRole('button', {name: '启动 iOS 投屏'}).click();
+    await connection.getByText('AirPlay-Windows', {exact: true}).waitFor();
+    await connection.getByText('192.0.2.107', {exact: true}).waitFor();
+    await connection.getByRole('button', {name: '编辑接收器名称'}).click();
+    await connection.getByRole('textbox', {name: '接收器名称'}).fill('书房 iPad');
+    await connection.getByRole('button', {name: '保存'}).click();
+    await connection.getByText('书房 iPad', {exact: true}).waitFor();
+    assert(await panel.getByText('接收器已启动 · 等待手机连接').isVisible());
+    assert.equal(await panel.getByRole('button', {name: '全屏'}).count(), 0);
+    const panelRect = await panel.boundingBox();
+    const infoRect = await connection.boundingBox();
+    assert(panelRect && infoRect && infoRect.x >= panelRect.x &&
+      infoRect.x + infoRect.width <= panelRect.x + panelRect.width);
+    const wifi = panel.getByText('WiFi连接', {exact: true});
+    const usbMirroring = panel.getByText('USB连接', {exact: true});
+    assert.equal(await wifi.count(), 0);
+    await page.evaluate(() => window.dispatchEvent(new Event('fixture-wifi-frame')));
+    await wifi.waitFor({state: 'visible'});
+    await panel.getByRole('button', {name: 'USB投屏'}).click();
+    await usbMirroring.waitFor({state: 'visible'});
+    await page.setViewportSize({width: 620, height: 480});
+    const narrowSize = await panel.getByRole('combobox', {name: 'iOS 投屏窗口大小'}).boundingBox();
+    const narrowWifi = await wifi.boundingBox();
+    const narrowUsb = await usbMirroring.boundingBox();
+    assert(narrowSize && narrowWifi && narrowUsb &&
+      narrowWifi.y + narrowWifi.height < narrowSize.y &&
+      narrowUsb.y + narrowUsb.height < narrowSize.y,
+    'Both transport labels must remain in the header on narrow windows');
+    await panel.getByRole('button', {name: '停止接收'}).click();
+    await wifi.waitFor({state: 'detached'});
+    assert(await usbMirroring.isVisible());
+    console.log('PASS receiver rename, USB/WiFi labels, and collapsed details at scale', scale);
+  } finally {
+    await context.close();
+  }
+}
+
 try {
   await serverReady();
   browser = await chromium.launch({
@@ -160,6 +248,9 @@ try {
       }
     }
     await context.close();
+  }
+  for (const scale of [1, 1.25, 1.5]) {
+    await checkAirPlayWaiting(browser, scale);
   }
 } finally {
   await browser?.close();

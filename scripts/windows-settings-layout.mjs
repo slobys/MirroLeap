@@ -40,11 +40,19 @@ async function verify(page, viewport, scale) {
   // Windows IPC and WebView2 startup are checked in separate CI gates.
   await page.addInitScript(() => {
     let callback = 0;
+    window.fixtureProjectLinks = [];
+    window.fixtureBrowserUnavailable = false;
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {
         transformCallback: () => ++callback,
-        invoke: async () => 1,
+        invoke: async (command, args) => {
+          if (command === 'open_official_project_link') {
+            if (window.fixtureBrowserUnavailable) throw Error('No default browser');
+            window.fixtureProjectLinks.push(args.destination);
+          }
+          return 1;
+        },
       },
     });
     Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', {
@@ -209,6 +217,15 @@ async function verify(page, viewport, scale) {
     .evaluate(el => (getComputedStyle(el).gridTemplateColumns.match(/minmax\([^)]*\)|\S+/g) || []).length);
   assert.equal(appearanceColumns, viewport.width > 1050 ? 2 : 1,
     desc + ': appearance layout is not responsive');
+  const attribution = page.locator('.ml-appearance-layout footer');
+  for (const name of ['MirroLeap 源码', '原始项目', 'scrcpy']) {
+    await attribution.getByRole('link',{name,exact:true}).click();
+  }
+  assert.deepEqual(await page.evaluate(() => window.fixtureProjectLinks),
+    ['mirroleap','scrcpy_gui','scrcpy'], desc + ': project links must use the desktop browser handoff');
+  await page.evaluate(() => {window.fixtureBrowserUnavailable = true;});
+  await attribution.getByRole('link',{name:'scrcpy',exact:true}).click();
+  await attribution.getByRole('alert').waitFor({state:'visible'});
 
   const toolsTab = page.locator('.ml-settings-nav button').nth(4);
   await toolsTab.click();
@@ -228,7 +245,7 @@ async function verify(page, viewport, scale) {
     desc + ': presenter settings should not duplicate floating controls');
   assert.deepEqual(problems, [], desc + ': React layout errors');
   console.log('PASS', desc,
-    'mirror / grouped behavior / appearance / compact tools / scroll');
+    'mirror / behavior / appearance / project links / tools / scroll');
 }
 
 try {

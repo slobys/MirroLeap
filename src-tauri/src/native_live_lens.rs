@@ -14,7 +14,7 @@ use std::{
     ptr::{null, null_mut},
     sync::{atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering}, mpsc::{sync_channel, Receiver, SyncSender, TrySendError}, Arc, Mutex, OnceLock},
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration,Instant},
 };
 
 type RawHwnd = *mut c_void;
@@ -277,7 +277,7 @@ fn visible_circle(view:ViewUpdate,settings:LensSettings)->Option<PrivacyCircle> 
 
 struct Lens { host:RawHwnd, magnifier:RawHwnd, visible:bool, size:i32, exclusion:(usize,usize), settings:LensSettings, view:Option<ViewUpdate> }
 impl Lens {
-    fn create()->Result<Self,String> {
+    fn create(zoom:f32)->Result<Self,String> {
         unsafe {
             if MagInitialize()==0 {
                 return Err("Windows Magnification API could not initialize on this desktop".into());
@@ -306,7 +306,6 @@ impl Lens {
                 MagUninitialize();
                 return Err("Windows Magnification control is unavailable on this system".into());
             }
-            let zoom=DEFAULT_FACTOR;
             let transform=MagTransform {v:[
                 [zoom,0.,0.],
                 [0.,zoom,0.],
@@ -318,7 +317,8 @@ impl Lens {
                 MagUninitialize();
                 return Err("Windows could not enable live graphics magnification".into());
             }
-            Ok(Self{host,magnifier:control,visible:false,size:0,exclusion:(0,0),settings:LensSettings::default(),view:None})
+            Ok(Self{host,magnifier:control,visible:false,size:0,exclusion:(0,0),
+                settings:LensSettings{zoom,..LensSettings::default()},view:None})
         }
     }
     fn resize(&mut self,size:i32) {
@@ -427,7 +427,7 @@ struct Session {
 #[derive(serde::Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct LensSourceStatus {
-    pub mode:&'static str, // off, desktop or hq_cpu
+    pub mode:&'static str, // off, desktop, window or hq_cpu
     pub hq_requested:bool,
     pub source_width:u32,
     pub source_height:u32,
@@ -441,9 +441,9 @@ pub fn source_status(device:&str)->LensSourceStatus {
         return unavailable;
     };
     let mode=match session.mode.load(Ordering::Acquire) {
-        2=>"hq_cpu",1=>"desktop",_=>"off",
+        3=>"window",2=>"hq_cpu",1=>"desktop",_=>"off",
     };
-    let source=if mode=="hq_cpu" {session.source_size.load(Ordering::Acquire)}
+    let source=if matches!(mode,"hq_cpu"|"window") {session.source_size.load(Ordering::Acquire)}
         else {0};
     LensSourceStatus {
         mode,hq_requested:session.hq_requested,
@@ -461,13 +461,102 @@ pub fn privacy_circle(device:&str)->Option<PrivacyCircle> {
 static CURRENT:OnceLock<Mutex<Option<Session>>>=OnceLock::new();
 fn current()->&'static Mutex<Option<Session>> {CURRENT.get_or_init(||Mutex::new(None))}
 
+struct WindowLens {
+    preview:HqDecodedCpuLens,
+    capture:Option<(usize,crate::mirror_snapshot::WindowCapture)>,
+    next_open:Instant,
+    last_pose:Option<(GeometryKey,(u32,u32,u32,u32))>,
+    crop:Vec<u8>,
+    scaled:Vec<u8>,
+}
+
+#[derive(Clone,Copy,PartialEq,Eq)]
+struct GeometryKey(i32,i32,i32);
+
+impl WindowLens {
+    fn create()->Option<Self>{
+        Some(Self{preview:HqDecodedCpuLens::create().ok()?,capture:None,
+            next_open:Instant::now(),last_pose:None,crop:Vec::new(),scaled:Vec::new()})
+    }
+
+    fn pause(&mut self){
+        if self.last_pose.take().is_some(){self.preview.hide();}
+        self.capture=None;
+    }
+
+    fn update(&mut self,view:ViewUpdate,target:Geometry)->Result<Option<(u32,u32)>,String>{
+        if self.capture.as_ref().is_none_or(|(hwnd,_)|*hwnd!=view.video_hwnd){
+            if Instant::now()<self.next_open{return Ok(None);}
+            self.next_open=Instant::now()+Duration::from_millis(750);
+            self.capture=Some((view.video_hwnd,crate::mirror_snapshot::WindowCapture::open(view.video_hwnd)?));
+            self.next_open=Instant::now();
+            self.last_pose=None;
+        }
+        let capture=&mut self.capture.as_mut().unwrap().1;
+        let fresh=capture.poll()?;
+        let (width,height)=capture.dimensions();
+        let (x,y,w,h)=lens_crop(view,target,width,height);
+        let pose=(GeometryKey(target.x,target.y,target.size),(x,y,w,h));
+        if fresh || self.last_pose!=Some(pose){
+            if !capture.read((x,y,w,h),&mut self.crop)?{return Ok(None);}
+            resize_lens_bgra(&self.crop,w,h,target.size as u32,&mut self.scaled);
+            self.preview.present_bgra(&self.scaled,target.x,target.y,target.size as u32)?;
+            self.last_pose=Some(pose);
+        }
+        let visible=self.preview.maintain_visible(view.video_hwnd,view.frame_hwnd,view.controls_hwnd)?;
+        Ok(visible.then_some((width,height)))
+    }
+}
+
+fn lens_crop(view:ViewUpdate,g:Geometry,width:u32,height:u32)->(u32,u32,u32,u32){
+    let x_scale=width as f32/view.width as f32;
+    let y_scale=height as f32/view.height as f32;
+    let crop_width=(((g.source.right-g.source.left) as f32*x_scale).round() as u32).clamp(1,width);
+    let crop_height=(((g.source.bottom-g.source.top) as f32*y_scale).round() as u32).clamp(1,height);
+    let x=(((g.source.left-view.x) as f32*x_scale).round() as u32).min(width-crop_width);
+    let y=(((g.source.top-view.y) as f32*y_scale).round() as u32).min(height-crop_height);
+    (x,y,crop_width,crop_height)
+}
+
+fn resize_lens_bgra(source:&[u8],width:u32,height:u32,size:u32,target:&mut Vec<u8>){
+    target.resize(size as usize*size as usize*4,255);
+    let sample_axis=|i:u32,len:u32,step:f32|{
+        let value=((i as f32+0.5)*step-0.5).clamp(0.0,(len-1) as f32);
+        let low=value as u32;
+        (low,(low+1).min(len-1),value-low as f32)
+    };
+    let mut columns=[(0,0,0.0);PREVIEW_MAX as usize];
+    let step_x=width as f32/size as f32;
+    let step_y=height as f32/size as f32;
+    for (x,column) in columns.iter_mut().take(size as usize).enumerate(){
+        *column=sample_axis(x as u32,width,step_x);
+    }
+    let mix=|a:u8,b:u8,t:f32|a as f32+(b as f32-a as f32)*t;
+    for y in 0..size{
+        let (top,bottom,fy)=sample_axis(y,height,step_y);
+        for x in 0..size{
+            let (left,right,fx)=columns[x as usize];
+            let a=((top*width+left)*4) as usize;
+            let b=((top*width+right)*4) as usize;
+            let c=((bottom*width+left)*4) as usize;
+            let d=((bottom*width+right)*4) as usize;
+            let out=((y*size+x)*4) as usize;
+            for channel in 0..3{
+                let top=mix(source[a+channel],source[b+channel],fx);
+                let bottom=mix(source[c+channel],source[d+channel],fx);
+                target[out+channel]=(top+(bottom-top)*fy).round() as u8;
+            }
+        }
+    }
+}
+
 fn work_loop(
     rx:Receiver<Command>,started:SyncSender<Result<(),String>>,
-    owner:Option<Arc<HqMappingOwner>>,
+    owner:Option<Arc<HqMappingOwner>>,window_capture:bool,
     actual_mode:Arc<AtomicU32>,source_size:Arc<AtomicU64>,
     circle:Arc<Mutex<Option<PrivacyCircle>>>,
 ) {
-    let mut lens=match Lens::create() {
+    let mut lens=match Lens::create(if window_capture{1.65}else{DEFAULT_FACTOR}) {
         Ok(lens)=>lens,
         Err(e)=>{let _=started.send(Err(e));return},
     };
@@ -480,13 +569,15 @@ fn work_loop(
     // Independent BGRA layered window for the reviewed CPU reference path.
     // If the desktop compositor refuses it, keep Magnification.dll working.
     let mut hq=owner.as_ref().and_then(|_|HqDecodedCpuLens::create().ok());
+    let mut window_lens=window_capture.then(WindowLens::create).flatten();
     let mut hq_hard_failures=0u8;
     let mut hq_consumer_active=false;
     let _=started.send(Ok(()));
     loop {
         match rx.recv_timeout(Duration::from_millis(16)) {
-            Ok(Command::Update(update))=> {
-                if owner.is_none() || hq.is_none() {
+            Ok(Command::Update(mut update))=> {
+                for Command::Update(newer) in rx.try_iter(){update=newer;}
+                if window_lens.is_none() && (owner.is_none() || hq.is_none()) {
                     lens.display(update);
                 } else {
                     lens.view=Some(update);
@@ -502,7 +593,7 @@ fn work_loop(
                 DispatchMessageW(&msg);
             }
         }
-        lens.apply_wheel(hq.as_ref().is_none_or(|preview|!preview.is_presenting()));
+        lens.apply_wheel(window_lens.is_none() && hq.as_ref().is_none_or(|preview|!preview.is_presenting()));
         // The patched decoder is attached for the lifetime of this session,
         // but it must NOT copy 2K YUV pixels until the real user actively
         // opens the HQ lens AND the pointer is within the foreground phone.
@@ -516,7 +607,26 @@ fn work_loop(
             hq_consumer_active=wants_frames;
         }
         let mut presented_source=None;
+        let mut window_presented=false;
         let mut deactivate_hq=false;
+        if let (Some(preview),Some(view))=(window_lens.as_mut(),lens.view){
+            if let Some(target)=lens_geometry(view,lens.settings){
+                match preview.update(view,target){
+                    Ok(Some(dimensions))=>{
+                        presented_source=Some(dimensions);
+                        window_presented=true;
+                        lens.set_visible(false);
+                        set_wheel_target(view);
+                    }
+                    Ok(None)=>lens.display(view),
+                    Err(_)=>{preview.pause();preview.next_open=Instant::now()+Duration::from_millis(750);lens.display(view);}
+                }
+            }else{
+                preview.pause();
+                lens.set_visible(false);
+                set_wheel_target(view);
+            }
+        }
         if let (Some(owner),Some(preview),Some(view))=(owner.as_ref(),hq.as_mut(),lens.view) {
             if !view.active || !view.inside() {
                 preview.hide();
@@ -575,7 +685,7 @@ fn work_loop(
         // any device-frame bytes, screen coordinates, tokens or thumbnails.
         if let Some((w,h))=presented_source {
             source_size.store(((w as u64)<<32) | h as u64,Ordering::Release);
-            actual_mode.store(2,Ordering::Release);
+            actual_mode.store(if window_presented {3}else{2},Ordering::Release);
         } else {
             source_size.store(0,Ordering::Release);
             let displaying_legacy=lens.view.is_some_and(|v|v.active && v.inside())
@@ -599,9 +709,13 @@ fn work_loop(
     WHEEL_ACTIVE.store(0,Ordering::SeqCst);
 }
 
-pub fn start(device:&str)->Result<(),String> { start_with_hq(device,None) }
+pub fn start(device:&str)->Result<(),String> { start_session(device,None,true) }
 
 pub fn start_with_hq(device:&str,owner:Option<Arc<HqMappingOwner>>)->Result<(),String> {
+    start_session(device,owner,false)
+}
+
+fn start_session(device:&str,owner:Option<Arc<HqMappingOwner>>,window_capture:bool)->Result<(),String> {
     stop_all();
     let (tx,rx)=sync_channel(5);
     let (ready_tx,ready_rx)=sync_channel(1);
@@ -613,7 +727,7 @@ pub fn start_with_hq(device:&str,owner:Option<Arc<HqMappingOwner>>)->Result<(),S
     let circle=Arc::new(Mutex::new(None));
     let circle_worker=circle.clone();
     let worker=thread::Builder::new().name("mirroleap-live-magnifier".into())
-        .spawn(move||work_loop(rx,ready_tx,owner,mode_worker,size_worker,circle_worker))
+        .spawn(move||work_loop(rx,ready_tx,owner,window_capture,mode_worker,size_worker,circle_worker))
         .map_err(|e|format!("Cannot start native live magnifier: {e}"))?;
     match ready_rx.recv_timeout(Duration::from_secs(4)) {
         Ok(Ok(()))=>{
@@ -662,6 +776,20 @@ mod tests {
         assert_eq!(status.mode,"off");
         assert_eq!(status.source_width,0);
         assert!(!status.hq_requested);
+    }
+
+    #[test]
+    fn ios_lens_interpolates_pixels_and_keeps_edge_samples_inside_the_video(){
+        let mut output=Vec::new();
+        let source=[0,0,0,255, 255,255,255,255];
+        resize_lens_bgra(&source,2,1,3,&mut output);
+        assert_eq!(&output[..12],&[0,0,0,255,128,128,128,255,255,255,255,255]);
+        let view=ViewUpdate{x:30,y:40,width:300,height:600,cursor_x:31,cursor_y:41,
+            active:true,video_hwnd:1,frame_hwnd:2,controls_hwnd:3};
+        let geometry=lens_geometry(view,LensSettings::default()).unwrap();
+        let (x,y,w,h)=lens_crop(view,geometry,600,1200);
+        assert_eq!((x,y),(0,0));
+        assert!(w>0 && h>0 && w<=600 && h<=1200);
     }
     #[test]
     fn native_circle_stays_inside_all_phone_edges_while_sample_tracks_pointer() {

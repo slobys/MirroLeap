@@ -50,6 +50,19 @@ assert "configure_receiver_window" in native and "update_receiver_ini" in native
 assert "find_window_by_pid" in native and "PostMessageW(Some(hwnd)" in native
 assert "chromeless" in native and "纯画面" in ui and "compactMode" in ui
 assert "ios_airplay_set_window_style" in ui and "ios_airplay_set_quality_tier" in ui
+assert "ios_airplay_set_window_size" in lib and "ios_airplay_set_window_size" in ui
+assert "show_window(0)" in native and "prepare_background_window" in native
+assert 'data-testid="ios-connection-info"' in ui and "receiverIp" in ui
+shared_frame=(root/"src-tauri/src/device_frame.rs").read_text(encoding="utf-8")
+airplay_tools=shared_frame.split("async fn follow_airplay",1)[1].split("pub fn start(",1)[0]
+assert "inking || is_present_panel_open(device) || is_quick_open(device)" in airplay_tools
+assert "toolbar_placement(frame,frame.y+top,work,palette_open,dpi)" in airplay_tools
+assert "ios_usb::start(app.handle())" in lib and "usbStatus" in ui
+assert "ios_usb_install_driver" in lib and "ios_usb_start" not in ui
+assert "ios_usb_control" in lib and "ios_usb_control" in ui
+assert "SDL_WINDOWS_DPI_AWARENESS" in native and "permonitorv2" in native
+assert "IOS_USB_KEY" in shared_frame
+assert "refresh_control_snapshot" in shared_frame
 assert "ios_airplay_window_action" in ui
 assert home.index('className="ml-dashboard-grid') < home.index('<IosReceiverPanel locale={locale}/>') < home.index('className="ml-home-footer')
 assert 'data-testid="ios-after-android"' in home
@@ -57,6 +70,7 @@ assert "quality_cap" in native and "2868" in native and "3840" in native
 assert "ios_device_frame::start" in native and "ios_device_frame::close" in native
 assert "mod ios_device_frame;" in lib
 frame=(root/"src-tauri/src/ios_device_frame.rs").read_text(encoding="utf-8")
+assert "start_usb" in frame
 assert "CreateWindowExW" in frame and "UpdateLayeredWindow" in frame
 assert "device-auto" in ui
 assert "GetClientRect" in frame and "ClientToScreen" in frame
@@ -83,17 +97,19 @@ assert "ios_window_controls::tests" in workflow
 assert "NativeControls::create()" in frame and "ControlAction::Close" in frame
 assert "apply_video_corner_clip" in frame and "clear_video_corner_clip" in frame
 assert "native_clip_intact" in frame and "BezelGeometry" in frame
-assert "full HWND - rectangular client" in frame
-assert "outer_inner_and_native_video_arcs_are_concentric_at_all_dpis" in frame
+assert "inner_aperture_and_native_video_arcs_are_concentric_at_all_dpis" in frame
+assert "ipad_clip_scales_the_smaller_radius_to_receiver_units" in frame
+assert "dpi_unaware_video_fills_the_original_aperture_and_clips_all_four_corners" in frame
 assert "round_signed_distance" in frame and "metal_band" in frame
 assert "silver_metal_contour_is_continuous_across_all_four_curved_corners" in frame
 assert "metal_round_caps_leave_only_the_correct_transparent_outside" in frame
-assert "MotionGate" in frame and "STABLE_RESHOW_MS:u64=110" in frame
-assert "dragging_temporarily_hides_shell_until_source_has_settled" in frame
-assert "ShowWindow(bezel,SW_HIDE)" in frame and "motion_hidden()" in frame
+assert "MsgWaitForMultipleObjectsEx" in frame and "move_existing_bezel" in frame
+assert "EVENT_SYSTEM_MOVESIZEEND" in frame and "HOOK_MOVE_ENDED" in frame
+assert "location_hook_keeps_bezel_visible_through_rapid_position_changes" in frame
 assert "DwmSetWindowAttribute" in frame and "DWMWA_BORDER_COLOR" in frame
 assert "DWMWA_COLOR_NONE" in frame and "ReceiverDwmStyle" in frame
-assert "native_dwm_border_suppression_is_per_window_and_restorable" in frame
+assert "DWMWA_SYSTEMBACKDROP_TYPE" in frame and "DWMSBT_NONE" in frame
+assert "native_dwm_border_and_backdrop_suppression_is_per_window_and_restorable" in frame
 assert "WM_PAINT" in controls and "WM_ERASEBKGND" in controls
 assert "paint_button" in controls and "button_colors" in controls
 assert "stable_placement_needed" in controls

@@ -71,6 +71,10 @@ fn verified_source()->Result<(&'static str,&'static str),String> {
     }
     Ok((url,sha))
 }
+
+pub(crate) fn has_verified_download()->bool {
+    verified_source().is_ok()
+}
 fn marker_matches(actual:&str,expected:&str)->bool {
     valid_sha256(expected) && actual.trim()==format!("hq5.0.1-protocol-v2:{expected}")
 }

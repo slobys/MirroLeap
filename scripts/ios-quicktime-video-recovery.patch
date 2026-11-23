@@ -1,0 +1,97 @@
+--- a/src/Core/src/Capture/CaptureSession.h
++++ b/src/Core/src/Capture/CaptureSession.h
+@@ -97,6 +97,17 @@
+ private:
+     std::optional<Clock::time_point> last_media_at_;
+ };
++
++enum class VideoSilenceAction { None, RequestFrame, ReopenStream };
++
++constexpr VideoSilenceAction video_silence_action(
++    bool received_video, std::chrono::milliseconds video_silence,
++    std::chrono::milliseconds media_silence) noexcept {
++    constexpr auto Trigger = std::chrono::milliseconds(2500);
++    if (!received_video || video_silence < Trigger) return VideoSilenceAction::None;
++    return media_silence < Trigger ? VideoSilenceAction::RequestFrame :
++        VideoSilenceAction::ReopenStream;
++}
+ 
+ // A video-stream reconnect remains in flight until the source produces a
+ // video frame again. This blocks a tight retry loop but permits a later
+--- a/src/Core/src/Protocol/QuickTimeSession.h
++++ b/src/Core/src/Protocol/QuickTimeSession.h
+@@ -60,6 +60,7 @@
+     [[nodiscard]] std::vector<std::vector<std::uint8_t>> begin_display_reconfigure(
+         std::uint32_t width, std::uint32_t height);
+     [[nodiscard]] std::vector<std::vector<std::uint8_t>> complete_display_reconfigure();
++    [[nodiscard]] std::vector<std::uint8_t> request_video_sample() const;
+     void set_demo_mode(bool enabled) noexcept { options_.demo_mode = enabled; }
+     void reset();
+ 
+--- a/src/Core/src/Protocol/QuickTimeSession.cpp
++++ b/src/Core/src/Protocol/QuickTimeSession.cpp
+@@ -306,6 +306,11 @@
+     return event;
+ }
+ 
++std::vector<std::uint8_t> SessionProtocol::request_video_sample() const {
++    if (state_ != SessionState::Streaming || device_video_clock_ == 0) return {};
++    return make_need(device_video_clock_);
++}
++
+ std::vector<std::vector<std::uint8_t>> SessionProtocol::stop_messages() {
+     state_ = SessionState::Stopping;
+     std::vector<std::vector<std::uint8_t>> messages;
+--- a/src/Core/src/Capture/CaptureSession.cpp
++++ b/src/Core/src/Capture/CaptureSession.cpp
+@@ -1938,10 +1938,31 @@
+         detail::FastStreamReconnectGate fast_stream_reconnect_gate;
+         detail::StreamingSilenceWatchdog media_silence_watchdog;
+         detail::StreamingSilenceWatchdog video_silence_watchdog;
++        bool received_video = false;
++        auto next_frame_request = std::chrono::steady_clock::time_point{};
+         const auto request_fast_reconnect_for_missing_frame_rate = [&] {
+             const auto now = std::chrono::steady_clock::now();
+-            if (video_silence_watchdog.silence_duration(now) <
+-                std::chrono::milliseconds(2500)) return;
++            using detail::VideoSilenceAction;
++            const auto action = detail::video_silence_action(received_video,
++                video_silence_watchdog.silence_duration(now),
++                media_silence_watchdog.silence_duration(now));
++            if (action == VideoSilenceAction::None) return;
++            if (action == VideoSilenceAction::RequestFrame) {
++                // Audio is still arriving over the same QuickTime endpoint.
++                // Preserve those clocks and the last frame while asking for video.
++                if (now < next_frame_request) return;
++                next_frame_request = now + std::chrono::seconds(3);
++                const auto request = protocol.request_video_sample();
++                if (request.empty()) return;
++                try {
++                    usb->write(request, 250);
++                    logging::write("quicktime_video_need sent=true usb_configuration=retained");
++                } catch (const std::exception& error) {
++                    logging::write(logging::Level::Warning, "usb",
++                        std::format("quicktime_video_need send_failed={}", error.what()));
++                }
++                return;
++            }
+             if (!fast_stream_reconnect_gate.request()) return;
+             fast_stream_reconnect_requested.store(true, std::memory_order_release);
+             {
+@@ -2024,7 +2045,7 @@
+             }
+             const auto count = usb->read(read_buffer, 250);
+             video_worker_failure.rethrow_if_set();
+-            if (protocol.state() != quicktime::SessionState::WaitingForPing &&
++            if (!received_video && protocol.state() != quicktime::SessionState::WaitingForPing &&
+                 protocol.video_frames() == 0) {
+                 const auto now = std::chrono::steady_clock::now();
+                 if (!first_video_wait_started) first_video_wait_started = now;
+@@ -2230,6 +2251,7 @@
+                     const auto media_received_at = std::chrono::steady_clock::now();
+                     media_silence_watchdog.observe_media(media_received_at);
+                     if (event.video_sample) {
++                        received_video = true;
+                         video_silence_watchdog.observe_media(media_received_at);
+                         if (fast_stream_reconnect_gate.observe_video_frame())
+                             logging::write(std::format(

@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      ios_runtime_draft:
+        description: 'Draft release ID containing the verified v5.4.1 USB and AirPlay build inputs'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -15,6 +20,36 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  prepare-ios-runtime:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.ios_runtime_draft != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Read and verify the original iOS build inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DRAFT_ID: ${{ inputs.ios_runtime_draft }}
+        run: |
+          set -euo pipefail
+          [[ "$DRAFT_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GH_REPO/releases/$DRAFT_ID" | jq -e --arg sha "$GITHUB_SHA" \
+            '.draft and .tag_name == "v5.4.1" and .target_commitish == $sha'
+          mkdir ios-runtime
+          gh release download v5.4.1 --dir ios-runtime \
+            --pattern 'mirroleap-ios-usb-quicktime-final.zip' --pattern 'airplay-background.dll'
+          cd ios-runtime
+          sha256sum --check <<'CHECKSUMS'
+          e59a943ceb5de32933301fe5a81421164ec8f307d722836368056087183e4d80  mirroleap-ios-usb-quicktime-final.zip
+          d2d9735f398f015df9b0618c895611166480a073085b59ef38de7a13ab3d2bb0  airplay-background.dll
+          CHECKSUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MirroLeap-iOS-v5.4.1-runtime
+          path: ios-runtime/*
+          if-no-files-found: error
+
   checks:
     runs-on: ubuntu-22.04
     steps:
@@ -65,6 +100,8 @@ jobs:
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
   windows:
+    needs: prepare-ios-runtime
+    if: ${{ !cancelled() && (needs.prepare-ios-runtime.result == 'success' || needs.prepare-ios-runtime.result == 'skipped') }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +115,18 @@ jobs:
         with:
           workspaces: src-tauri -> target
       - run: npm ci
+      - uses: actions/download-artifact@v4
+        if: ${{ needs.prepare-ios-runtime.result == 'success' }}
+        with:
+          name: MirroLeap-iOS-v5.4.1-runtime
+          path: ${{ runner.temp }}/mirroleap-ios-runtime
+      - name: Embed the verified iOS runtimes in both Windows builds
+        if: ${{ needs.prepare-ios-runtime.result == 'success' }}
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'mirroleap-ios-runtime'
+          "MIRROLEAP_IOS_USB_BUNDLE=$(Join-Path $runtime 'mirroleap-ios-usb-quicktime-final.zip')" >> $env:GITHUB_ENV
+          "MIRROLEAP_AIRPLAY_SDL_ADAPTER=$(Join-Path $runtime 'airplay-background.dll')" >> $env:GITHUB_ENV
       - name: Real Edge dashboard geometry (idle, running and core-missing)
         run: node scripts/windows-dashboard-layout.mjs
       - name: Real Edge settings geometry (100%, 125%, 150% DPI)
@@ -88,6 +137,18 @@ jobs:
         run: node scripts/windows-phone-frame-visual.mjs
       - name: Build original standalone desktop executable (unpatched, without any installer)
         run: npm run tauri build -- --no-bundle
+      - name: Verify standalone executable embeds both iOS runtimes
+        if: ${{ needs.prepare-ios-runtime.result == 'success' }}
+        shell: pwsh
+        run: |
+          @'
+          import os
+          from pathlib import Path
+          app = Path('src-tauri/target/release/mirroleap.exe').read_bytes()
+          for resource in ('MIRROLEAP_IOS_USB_BUNDLE', 'MIRROLEAP_AIRPLAY_SDL_ADAPTER'):
+              assert Path(os.environ[resource]).read_bytes() in app, resource + ' was not embedded'
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Windows GDI video/bezel no-white-seam native pixel tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib device_frame::tests
       - name: Windows iOS clean-view and receiver settings unit tests

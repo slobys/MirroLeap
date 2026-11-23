@@ -333,7 +333,7 @@ pub(crate) fn acknowledge_frame_first_paint(
        current.hwnd().map_err(|e|e.to_string())? {
         return Err("Stale phone-frame first-paint acknowledgement".into());
     }
-    let active=app.state::<ScrcpyState>().processes.lock()
+    let active=[IOS_MIRROR_KEY,IOS_USB_KEY].into_iter().any(|key|name==label(key) && mirror_pid(app,key).is_some()) || app.state::<ScrcpyState>().processes.lock()
         .map_err(|e|e.to_string())?.keys()
         .any(|device|label(device)==name);
     if !active {return Err("Phone session is no longer active".into());}
@@ -434,7 +434,7 @@ fn drags() -> &'static Mutex<HashSet<String>> {
     ACTIVE_DRAGS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-fn is_dragging(device: &str) -> bool {
+pub(crate) fn is_dragging(device: &str) -> bool {
     drags().lock().map(|items| items.contains(device)).unwrap_or(false)
 }
 
@@ -446,6 +446,30 @@ fn hashed_label(prefix: &str, device: &str) -> String {
 
 fn label(device: &str) -> String { hashed_label("phone-frame", device) }
 fn toolbar_label(device: &str) -> String { hashed_label("phone-controls", device) }
+
+// Internal session key. A NUL cannot occur in an ADB serial or address.
+pub(crate) const IOS_MIRROR_KEY:&str="\0airplay";
+pub(crate) const IOS_USB_KEY:&str="\0ios-usb";
+
+fn is_ios_video(device:&str)->bool{matches!(device,IOS_MIRROR_KEY|IOS_USB_KEY)}
+
+fn ios_video_dimensions(app:&AppHandle,device:&str)->Option<(u32,u32)>{
+    if device==IOS_USB_KEY{return crate::ios_usb::video().map(|(_,pixels)|pixels);}
+    app.state::<crate::ios_airplay::IosAirplayState>().source_pixels.lock().ok().and_then(|state|*state)
+}
+
+fn mirror_pid(app:&AppHandle,device:&str)->Option<u32>{
+    if device==IOS_MIRROR_KEY {
+        return crate::ios_airplay::active_receiver_pid(&app.state::<crate::ios_airplay::IosAirplayState>())
+            .filter(|pid|crate::ios_device_frame::active_for(*pid));
+    }
+    if device==IOS_USB_KEY{return crate::ios_usb::video().map(|(pid,_)|pid);}
+    app.state::<ScrcpyState>().processes.lock().ok()?.get(device)?.id()
+}
+
+pub(crate) fn ios_toolbar_created(app:&AppHandle)->bool{
+    app.get_webview_window(&toolbar_label(IOS_MIRROR_KEY)).is_some()
+}
 
 struct CapturedWindow {
     hwnd: HWND,
@@ -829,7 +853,7 @@ fn virtual_desktop() -> ScreenRect {
 /// Use the current monitor's WORK AREA, not the virtual desktop (which
 /// includes the Windows taskbar). Also supports side-mounted taskbars and
 /// separate usable areas for multiple monitors.
-fn monitor_work_area(video: HWND) -> ScreenRect {
+pub(crate) fn monitor_work_area(video: HWND) -> ScreenRect {
     let monitor = unsafe { MonitorFromWindow(video, MONITOR_DEFAULTTONEAREST) };
     if !monitor.0.is_null() {
         let mut info = MONITORINFO {
@@ -1584,6 +1608,13 @@ async fn follow(app: AppHandle, device: String, overlay: WebviewWindow, toolbar:
 }
 
 fn device_for_controls(app: &AppHandle, caller: &tauri::Window) -> Result<String, String> {
+    if let Some(device)=[IOS_MIRROR_KEY,IOS_USB_KEY].into_iter().find(|key|caller.label()==toolbar_label(key)){
+        let current=app.get_webview_window(caller.label()).ok_or("iOS 工具栏已关闭")?;
+        if current.hwnd().ok()!=caller.hwnd().ok() || mirror_pid(app,device).is_none(){
+            return Err("iOS 工具栏已失效".into());
+        }
+        return Ok(device.to_string());
+    }
     let processes = app.state::<ScrcpyState>();
     let guard = processes.processes.lock().map_err(|e| e.to_string())?;
     guard.keys()
@@ -1675,8 +1706,7 @@ fn promote_drawing_windows(
     overlay: &WebviewWindow,
 ) -> Result<(), String> {
     let shell = overlay.hwnd().map_err(|e| e.to_string())?;
-    let video = app.state::<ScrcpyState>().processes.lock().ok()
-        .and_then(|map|map.get(device).and_then(|process|process.id()))
+    let video = mirror_pid(app,device)
         .and_then(|pid|capture_screen(pid).map(|capture|capture.hwnd));
     // Ensure a pinned SDL video cannot obscure a click ripple merely because
     // HWND_TOP was interpreted in the *normal* window tier.
@@ -1722,10 +1752,7 @@ pub(crate) async fn set_presentation_mode(
         }
         return Ok("off".into());
     }
-    let pid = app.state::<ScrcpyState>().processes.lock()
-        .map_err(|e| e.to_string())?
-        .get(device).and_then(|child| child.id())
-        .ok_or("The selected Android mirror is not running")?;
+    let pid = mirror_pid(app,device).ok_or("The selected mirror is not running")?;
     // HWND contains a raw pointer; convert it to a plain integer BEFORE
     // the async WebView ACK so this command remains Send in Tauri's executor.
     let video_hwnd = capture_screen(pid)
@@ -1808,10 +1835,7 @@ pub(crate) async fn set_presentation_snapshot(
     if width == 0 || height == 0 || width.saturating_mul(height) > 16_000_000 {
         return Err("Snapshot dimensions are outside safe bounds".into());
     }
-    let pid = app.state::<ScrcpyState>().processes.lock()
-        .map_err(|e| e.to_string())?
-        .get(device).and_then(|child| child.id())
-        .ok_or("Phone session ended before snapshot capture")?;
+    let pid = mirror_pid(app,device).ok_or("投屏已结束，请重新连接后再定格")?;
     let screenshot_ratio = width as f64 / height as f64;
     let video_ratio = {
         let actual = capture_screen(pid).ok_or("Restore the phone projection first")?;
@@ -1887,9 +1911,7 @@ async fn control_ink(app: &AppHandle, device: &str, action: &str) -> Result<bool
             // surviving ink bitmap to erase in the new WebView context.
             Ok(true)
         };
-        if let Some(pid) = app.state::<ScrcpyState>()
-            .processes.lock().ok()
-            .and_then(|map| map.get(device).and_then(|child| child.id()))
+        if let Some(pid) = mirror_pid(app,device)
         {
             if let Some(video) = crate::commands::find_window_by_pid(pid) {
                 let _ = unsafe { SetForegroundWindow(video) };
@@ -2203,8 +2225,7 @@ fn start_creator_click_sampler(app: AppHandle, device: String) {
                     !matches!(presentation_mode(&device).as_str(), "off" | "live") {
                     return None;
                 }
-                let pid = app.state::<ScrcpyState>().processes.lock().ok()?
-                    .get(&device)?.id()?;
+                let pid=mirror_pid(&app,&device)?;
                 let actual = capture_screen(pid)?;
                 let (px,py) = pointer()?;
                 if !inside(px,py,actual.screen,0) { return None; }
@@ -2267,19 +2288,35 @@ fn start_creator_click_sampler(app: AppHandle, device: String) {
 /// The real Windows Magnification control composites *every video frame*
 /// without Android screenshot polling. Returns an error if unsupported.
 fn start_native_video_magnifier(app:&AppHandle,device:&str)->Result<(),String> {
+    if is_ios_video(device){return crate::native_live_lens::start(device);}
     let owner=app.state::<ScrcpyState>().hq_sessions.lock()
         .map_err(|e|e.to_string())?.get(device).cloned();
     crate::native_live_lens::start_with_hq(device,owner)
 }
 
+async fn refresh_control_snapshot(app:&AppHandle,device:&str,hwnd:usize)->Result<(),String>{
+    if !is_ios_video(device){
+        return crate::commands::refresh_presenter_image(app,device,None).await;
+    }
+    if presentation_mode(device)!="magnifier"{
+        return Err("请先开启定格放大镜".into());
+    }
+    let png=tokio::task::spawn_blocking(move||crate::mirror_snapshot::window_png(hwnd))
+        .await.map_err(|e|e.to_string())??;
+    crate::device_frame::set_presentation_snapshot(app,device,&png).await
+}
+
 pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> Result<bool, String> {
     let device = device_for_controls(app, caller)?;
-    let pid = app.state::<ScrcpyState>().processes.lock()
-        .map_err(|e| e.to_string())?
-        .get(&device).and_then(|child| child.id())
-        .ok_or("scrcpy 会话已结束")?;
+    let airplay=is_ios_video(&device);
+    let pid=mirror_pid(app,&device).ok_or("投屏会话已结束")?;
     let hwnd_value = crate::commands::find_window_by_pid(pid)
         .ok_or("投屏窗口不可见")?.0 as usize;
+    if airplay && (action.starts_with("ink_") && !matches!(action,"ink_status"|"ink_reset") ||
+        matches!(action,"present_toggle"|"present_spotlight"|"present_live"|"creator_click_toggle")) &&
+        ios_video_dimensions(app,&device).is_none(){
+        return Err("请先连接 iPhone 或 iPad 并开始镜像".into());
+    }
 
     if action == "present_status" { return Ok(is_present_panel_open(&device)); }
     if action == "present_is_spotlight" { return Ok(presentation_mode(&device) == "spotlight"); }
@@ -2385,7 +2422,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
                     // useful lens. If ADB capture fails, release the overlay
                     // immediately so a dark invisible view cannot swallow
                     // touch input indefinitely.
-                    if let Err(error) = crate::commands::refresh_presenter_image(app, &device, None).await {
+                    if let Err(error) = refresh_control_snapshot(app, &device, hwnd_value).await {
                         let recovered = set_presentation_mode(app, &device, "off").await;
                         if let Err(reason) = recovered {
                             return Err(format!(
@@ -2432,7 +2469,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
                 Ok(next!="off")
             },
             "present_refresh" => {
-                crate::commands::refresh_presenter_image(app, &device, None).await?;
+                refresh_control_snapshot(app, &device, hwnd_value).await?;
                 Ok(true)
             },
             "present_off" => {
@@ -2444,6 +2481,7 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
     }
     if action == "quick_status" { return Ok(is_quick_open(&device)); }
     if action == "quick_remember_status" {
+        if airplay {return crate::ios_device_frame::remember_position_status(device==IOS_USB_KEY);}
         return Ok(remember_positions().lock().map_err(|e| e.to_string())?
             .get(&device).copied().unwrap_or(true));
     }
@@ -2474,6 +2512,10 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             return toggle_video_topmost(app, &device, HWND(hwnd_value as *mut _));
         }
         if action == "quick_remember_toggle" {
+            if airplay {
+                return crate::ios_device_frame::toggle_remember_position(
+                    app,device==IOS_USB_KEY,HWND(hwnd_value as *mut _));
+            }
             let updated = {
                 let mut state = remember_positions().lock().map_err(|e| e.to_string())?;
                 let updated = !state.get(&device).copied().unwrap_or(true);
@@ -2484,6 +2526,17 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
                 "device": device, "enabled": updated
             })).map_err(|e| format!("Cannot synchronize saved window preference: {e}"))?;
             return Ok(updated);
+        }
+        if airplay {
+            if action == "quick_camera_edge" {
+                return crate::ios_airplay::flip_landscape_camera(app);
+            }
+            let receiver_action=match action{
+                "quick_fullscreen"=>"fullscreen",
+                _=>return Err("iOS 投屏不支持此手机按键".into()),
+            };
+            crate::ios_airplay::send_window_action(HWND(hwnd_value as *mut _),receiver_action)?;
+            return Ok(true);
         }
         if action == "quick_rotate" {
             if presentation_mode(&device) != "off" {
@@ -2511,7 +2564,13 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
         }
         "close" => {
             quick_sessions().lock().map_err(|e| e.to_string())?.remove(&device);
-            crate::commands::stop_scrcpy_impl(app.state::<ScrcpyState>(), device, app).await?;
+            if device==IOS_USB_KEY {
+                crate::ios_usb::control(false)?;
+            } else if airplay {
+                crate::ios_airplay::stop_owned_receiver(app,&app.state::<crate::ios_airplay::IosAirplayState>())?;
+            } else {
+                crate::commands::stop_scrcpy_impl(app.state::<ScrcpyState>(), device, app).await?;
+            }
             Ok(false)
         }
         "drag" => {
@@ -2523,6 +2582,8 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
 }
 
 fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String> {
+    let ios = is_ios_video(&device);
+    let _dpi = ios.then(crate::ios_device_frame::ThreadDpi::physical).flatten();
     let cursor = pointer().ok_or("Could not read mouse position")?;
     let mut rect = RECT::default();
     unsafe { GetWindowRect(hwnd, &mut rect) }.map_err(|e| e.to_string())?;
@@ -2536,7 +2597,7 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
     // HWND is kept as an integer across await boundaries (Win32 HWND wrappers
     // carry pointer types that must not be held across Send async suspension).
     let hwnd_value = hwnd.0 as usize;
-    let companions: Vec<(usize, i32, i32)> = [label(&device), toolbar_label(&device)]
+    let mut companions: Vec<(usize, i32, i32)> = [label(&device), toolbar_label(&device)]
         .iter()
         .filter_map(|name| app.get_webview_window(name))
         .filter_map(|window| window.hwnd().ok())
@@ -2546,6 +2607,8 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
             Some((handle.0 as usize, current.left, current.top))
         })
         .collect();
+    let native_bezel=ios.then(||crate::ios_device_frame::drag_bezel(device==IOS_USB_KEY,hwnd)).flatten();
+    companions.extend(native_bezel);
     let start_x = rect.left;
     let start_y = rect.top;
     let dx = cursor.0 - rect.left;
@@ -2559,6 +2622,7 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
             interval.tick().await;
             let held = (unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } as u16 & 0x8000) != 0;
             if !held { break; }
+            let _dpi = ios.then(crate::ios_device_frame::ThreadDpi::physical).flatten();
             let Some((x,y)) = pointer() else { continue };
             let video = HWND(hwnd_value as *mut _);
             let new_x = x-dx;
@@ -2571,20 +2635,7 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
             // fall back to the previous direct native reposition logic.
             let mut moved = false;
             if native_batch_available {
-                let batch_result = (|| -> windows::core::Result<()> {
-                    let flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
-                    let mut batch = unsafe { BeginDeferWindowPos(1 + companions.len() as i32) }?;
-                    batch = unsafe {
-                        DeferWindowPos(batch, video, None, new_x, new_y, 0, 0, flags)
-                    }?;
-                    for &(window, left, top) in &companions {
-                        batch = unsafe { DeferWindowPos(batch, HWND(window as *mut _), None,
-                            left.saturating_add(new_x.saturating_sub(start_x)),
-                            top.saturating_add(new_y.saturating_sub(start_y)),
-                            0, 0, flags) }?;
-                    }
-                    unsafe { EndDeferWindowPos(batch) }
-                })();
+                let batch_result = move_drag_batch(video,(start_x,start_y),(new_x,new_y),&companions);
                 if batch_result.is_ok() {
                     moved = true;
                 } else {
@@ -2592,6 +2643,7 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
                 }
             }
             if !moved {
+                if native_bezel.is_some(){break;}
                 let flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
                 let _ = unsafe { SetWindowPos(video, None, new_x, new_y, 0, 0, flags) };
                 for &(window, left, top) in &companions {
@@ -2610,9 +2662,161 @@ fn begin_drag(app: &AppHandle, device: String, hwnd: HWND) -> Result<(), String>
     Ok(())
 }
 
+pub(crate) fn move_drag_batch(
+    video:HWND,start:(i32,i32),dest:(i32,i32),companions:&[(usize,i32,i32)],
+) -> windows::core::Result<()>{
+    let flags=SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+    let delta=(dest.0.saturating_sub(start.0),dest.1.saturating_sub(start.1));
+    let mut batch=unsafe{BeginDeferWindowPos(1+companions.len() as i32)}?;
+    batch=unsafe{DeferWindowPos(batch,video,None,dest.0,dest.1,0,0,flags)}?;
+    for &(window,left,top) in companions {
+        batch=unsafe{DeferWindowPos(batch,HWND(window as *mut _),None,
+            left.saturating_add(delta.0),top.saturating_add(delta.1),0,0,flags)}?;
+    }
+    unsafe{EndDeferWindowPos(batch)}
+}
+
+async fn follow_airplay(app:AppHandle,device:&'static str,pid:u32,overlay:WebviewWindow,toolbar:WebviewWindow){
+    let mut ticker=tokio::time::interval(Duration::from_millis(16));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut canvas_rect=None;
+    let mut controls_rect=None;
+    let mut canvas_geometry=None;
+    let mut toolbar_layout=None;
+    let mut last_nearby=Instant::now();
+    let mut last_stack=Instant::now();
+    let mut hover_top=None;
+    let mut shade=None;
+    loop {
+        ticker.tick().await;
+        if mirror_pid(&app,device)!=Some(pid) || frame_was_replaced(&app,device,&overlay){break;}
+        let state=app.state::<crate::ios_airplay::IosAirplayState>();
+        let style=if device==IOS_USB_KEY{"device-auto".into()}else{
+            state.window_style.lock().ok().map(|s|s.clone()).unwrap_or_default()
+        };
+        let source=ios_video_dimensions(&app,device);
+        let video=crate::commands::find_window_by_pid(pid);
+        let geometry=video.filter(|hwnd|style.starts_with("device-") &&
+            !crate::ios_device_frame::is_fullscreen(*hwnd))
+            .and_then(|hwnd|crate::ios_device_frame::tools_aperture(hwnd,&style,source)
+                .map(|shape|(hwnd,shape)));
+        if geometry.is_none() || source.is_none(){
+            if canvas_rect.take().is_some(){
+                let _=overlay.set_ignore_cursor_events(true);
+                let _=overlay.hide();
+                cancel_live_zoom(device);
+                disable_creator_clicks(&app,device);
+                update_presentation_mode(&app,device,"off");
+                if let Ok(mut ink)=ink_sessions().lock(){ink.remove(device);}
+                if let Ok(mut modes)=presenter_panels().lock(){modes.remove(device);}
+                let _=overlay.eval("window.scrcpyPresent?.setMode('off'); window.scrcpyInk?.clear(); window.scrcpyInk?.setEnabled(false)");
+                shade=None;
+            }
+        }
+        let Some((video,(screen,frame,radius)))=geometry else{
+            if controls_rect.take().is_some(){let _=toolbar.hide();}
+            hover_top=None;
+            continue;
+        };
+        let (Ok(canvas),Ok(bar))=(overlay.hwnd(),toolbar.hwnd()) else{break;};
+        if is_dragging(device){
+            last_nearby=Instant::now();
+            last_stack=Instant::now()-Duration::from_millis(400);
+            if presentation_mode(device)=="live" {
+                crate::native_live_lens::update(device,crate::native_live_lens::ViewUpdate{
+                    x:screen.x,y:screen.y,width:screen.width,height:screen.height,
+                    cursor_x:i32::MIN/2,cursor_y:i32::MIN/2,active:false,
+                    video_hwnd:0,frame_hwnd:0,controls_hwnd:0,
+                });
+            }
+            continue;
+        }
+        let restack=last_stack.elapsed()>=Duration::from_millis(400);
+        if restack{last_stack=Instant::now();}
+        let mut bar_anchor=video;
+        if source.is_some() && frame_presentation_ready(device){
+            let dimensions=(screen.width>screen.height,radius);
+            if canvas_geometry!=Some(dimensions){
+                let orientation=if dimensions.0{"landscape"}else{"portrait"};
+                let _=overlay.eval(format!("window.scrcpyFrame?.setOrientation('{orientation}'); document.documentElement.style.setProperty('--airplay-radius',({radius}/window.devicePixelRatio)+'px')"));
+                canvas_geometry=Some(dimensions);
+            }
+            if canvas_rect.is_none(){let _=overlay.show();}
+            if (canvas_rect!=Some(screen) || restack) && position_above(canvas,video,screen).is_ok(){
+                canvas_rect=Some(screen);
+            }
+            bar_anchor=canvas;
+        }
+        let cursor=pointer();
+        let foreground=unsafe{GetForegroundWindow()};
+        let inking=is_inking(device);
+        let palette_open=inking || is_present_panel_open(device) || is_quick_open(device);
+        let mode=presentation_mode(device);
+        if mode=="live"{
+            let (cursor_x,cursor_y)=cursor.unwrap_or((i32::MIN/2,i32::MIN/2));
+            crate::native_live_lens::update(device,crate::native_live_lens::ViewUpdate{
+                x:screen.x,y:screen.y,width:screen.width,height:screen.height,cursor_x,cursor_y,
+                active:[video,canvas,bar].contains(&foreground),
+                video_hwnd:video.0 as usize,frame_hwnd:canvas.0 as usize,controls_hwnd:bar.0 as usize,
+            });
+        }
+        let circle=(mode=="live" && presentation_privacy(device)!="off")
+            .then(||crate::native_live_lens::privacy_circle(device)).flatten();
+        if shade!=circle{
+            if let Some(c)=circle.filter(|c|c.width>0 && c.height>0){
+                let cx=(c.x as f64+c.diameter as f64/2.)/c.width as f64;
+                let cy=(c.y as f64+c.diameter as f64/2.)/c.height as f64;
+                let rx=c.diameter as f64/(2.*c.width as f64);
+                let ry=c.diameter as f64/(2.*c.height as f64);
+                let _=overlay.eval(format!("window.scrcpyPresent?.updatePrivacyCircle({{cx:{cx:.7},cy:{cy:.7},rx:{rx:.7},ry:{ry:.7}}})"));
+            }else{let _=overlay.eval("window.scrcpyPresent?.updatePrivacyCircle(null)");}
+            shade=circle;
+        }
+        let near=cursor.is_some_and(|(x,y)|is_frame_edge_hover(x,y,frame) ||
+            controls_rect.is_some_and(|r|inside(x,y,r,12)));
+        if near || foreground==bar || palette_open{
+            last_nearby=Instant::now();
+        }
+        let dpi=unsafe{GetDpiForWindow(bar)}.max(96);
+        let work=monitor_work_area(video);
+        if last_nearby.elapsed()<Duration::from_millis(700){
+            let top=*hover_top.get_or_insert_with(||cursor
+                .filter(|(_,y)|*y>=frame.y && *y<frame.y+frame.height)
+                .map(|(_,y)|y-frame.y-TOOLBAR_HEIGHT/2).unwrap_or(40));
+            if let Some(placement)=toolbar_placement(frame,frame.y+top,work,palette_open,dpi){
+                let shown=controls_rect.is_some();
+                if !shown{let _=toolbar.show();}
+                if (!shown || controls_rect!=Some(placement.rect) || restack)
+                    && position_above(bar,bar_anchor,placement.rect).is_ok(){
+                    controls_rect=Some(placement.rect);
+                }
+                let layout=(placement.layout,placement.zoom_percent);
+                if !shown || toolbar_layout!=Some(layout){
+                    let _=toolbar.eval(format!("window.scrcpyControls?.setLayout('{}', {}); window.scrcpyControls?.sync()",
+                        placement.layout.css_name(),placement.zoom_percent));
+                    toolbar_layout=Some(layout);
+                }
+                continue;
+            }
+        }
+        if controls_rect.take().is_some(){let _=toolbar.hide();}
+        hover_top=None;
+    }
+    if overlay.hwnd().ok().is_some_and(|old|app.get_webview_window(overlay.label())
+        .and_then(|current|current.hwnd().ok())==Some(old)){
+        close(&app,device);
+    }
+}
+
 pub fn start(
     app: &AppHandle, device: &str, always_on_top: bool, remember_position: bool,
 ) -> Result<(), String> {
+    let airplay=is_ios_video(device);
+    let init_script=match device{
+        IOS_USB_KEY=>"Object.defineProperty(window, '__MIRROLEAP_AIRPLAY__', {value:true}); Object.defineProperty(window, '__MIRROLEAP_IOS_USB__', {value:true});",
+        IOS_MIRROR_KEY=>"Object.defineProperty(window, '__MIRROLEAP_AIRPLAY__', {value:true});",
+        _=>"",
+    };
     if let Ok(mut prefs) = remember_positions().lock() {
         prefs.insert(device.to_string(), remember_position);
     }
@@ -2636,6 +2840,7 @@ pub fn start(
     let overlay = WebviewWindowBuilder::new(
         app, shell_name, WebviewUrl::App("frame.html".into())
     )
+        .initialization_script(init_script)
         .on_page_load(move |view, payload| {
             // An old WebView2 may deliver a late load event after its
             // replacement has taken over this label. Never reset the new
@@ -2699,6 +2904,7 @@ pub fn start(
     let toolbar = match WebviewWindowBuilder::new(
         app, controls_name, WebviewUrl::App("phone-controls.html".into())
     )
+        .initialization_script(init_script)
         .title("Phone controls")
         .transparent(true)
         .decorations(false)
@@ -2717,11 +2923,24 @@ pub fn start(
         }
     };
 
-    tokio::spawn(follow(app.clone(), device.to_owned(), overlay, toolbar));
+    if airplay {
+        let Some(pid)=mirror_pid(app,device) else{
+            close(app,device);
+            return Err("AirPlay receiver stopped before the toolbar opened".into());
+        };
+        let key=if device==IOS_USB_KEY{IOS_USB_KEY}else{IOS_MIRROR_KEY};
+        tauri::async_runtime::spawn(follow_airplay(app.clone(),key,pid,overlay,toolbar));
+    }else{
+        tokio::spawn(follow(app.clone(), device.to_owned(), overlay, toolbar));
+    }
     Ok(())
 }
 
 pub fn close(app: &AppHandle, device: &str) {
+    if is_ios_video(device){
+        cancel_live_zoom(device);
+        disable_creator_clicks(app,device);
+    }
     if let Ok(mut prefs) = remember_positions().lock() { prefs.remove(device); }
     if let Ok(mut topmost) = topmost_requests().lock() { topmost.remove(device); }
     if let Ok(mut quick) = quick_sessions().lock() { quick.remove(device); }

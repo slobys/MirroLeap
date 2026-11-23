@@ -55,6 +55,7 @@ fn process_handle(pid: u32) -> Option<OwnedHandle> {
 
 pub fn verified_receiver_pid(path: &Path) -> Option<u32> {
     if !path.is_file() { return None; }
+    let expected_name=path.file_name()?.to_str()?;
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }.ok()?;
     let snapshot = unsafe { OwnedHandle::from_raw_handle(snapshot.0) };
     let snapshot_handle = HANDLE(snapshot.as_raw_handle());
@@ -67,7 +68,7 @@ pub fn verified_receiver_pid(path: &Path) -> Option<u32> {
         let end = entry.szExeFile.iter().position(|&c| c == 0)
             .unwrap_or(entry.szExeFile.len());
         let name = String::from_utf16_lossy(&entry.szExeFile[..end]);
-        if name.eq_ignore_ascii_case("airplay-windows.exe") {
+        if name.eq_ignore_ascii_case(expected_name) {
             let pid = entry.th32ProcessID;
             if let Some(handle) = process_handle(pid) {
                 let handle = HANDLE(handle.as_raw_handle());

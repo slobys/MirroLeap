@@ -177,9 +177,9 @@
     .present-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;}
     .present-grid button {
       width:100%;min-width:0;height:37px;min-height:37px;gap:1px;
-      font-size:10px;background:rgba(113,129,147,.16);
+      font-size:11px;background:rgba(113,129,147,.16);
     }
-    #present-off {grid-column:1/-1;height:34px;min-height:34px;flex-direction:row;gap:6px;}
+    #present-off {grid-column:1/-1;height:34px;min-height:34px;display:flex;align-items:center;justify-content:center;gap:6px;}
     #present-privacy.active {background:rgba(18,185,151,.34);color:#a6fff0;}
     #present-privacy:disabled {opacity:.45;cursor:default;}
     #present-live.active,#creator-click.active {background:rgba(18,185,151,.34);color:#a6fff0;}
@@ -194,13 +194,13 @@
     }
 
     .present-grid button svg {width:17px;height:17px;}
-    .present-hint {font-size:11px;line-height:16px;color:#98a9bb;}
+    .present-hint {font-size:14px;line-height:16px;color:#98a9bb;}
     /* 7 actions in three rows must fit even 168x202 and emergency 136px
        palettes without making touch targets smaller than 34 CSS pixels. */
     body[data-layout^="stack"] #present-tools {padding:7px;gap:4px;}
     body[data-layout^="stack"] .present-grid {gap:4px;}
     body[data-layout^="stack"] .present-grid button {
-      height:37px;min-height:37px;font-size:9px;gap:0;
+      gap:0;
     }
     body[data-layout^="stack"] #present-off {height:34px;min-height:34px;}
     body[data-layout^="stack"] #present-feedback {
@@ -211,7 +211,7 @@
     }
 
     body[data-layout^="tight-ink"] .present-grid button {
-      height:34px;min-height:34px;font-size:8px;gap:0;
+      height:34px;min-height:34px;gap:0;
     }
     body[data-layout^="tight-ink"] .present-grid button svg {width:12px;height:12px;}
     body[data-layout^="tight-ink"] #present-off {height:34px;min-height:34px;}
@@ -234,7 +234,7 @@
     #quick-top.active::after {
       content:''; position:absolute; top:3px; right:4px;
       width:6px; height:6px; border-radius:50%;
-      background:#5ff1c4; box-shadow:0 0 5px #5ff1c4;
+      background:#5ff1c4;
     }
     .quick-grid button[data-feedback="busy"] {
       background: rgba(245, 158, 11, .26); color: #ffdb9a;
@@ -305,6 +305,9 @@
     }
     #status[data-error="true"] { display: block; }
     #ink-toggle[disabled] { opacity: .52; cursor: wait; }
+    [hidden] { display: none !important; }
+    html[data-airplay] button:focus-visible { outline: 2px solid #8de6dc; outline-offset: -3px; }
+    html[data-airplay] :is(.palette-heading, .present-hint) { font-size: 14px; }
   </style>
 </head>
 <body data-layout="compact" data-ink-page="basic">
@@ -424,6 +427,9 @@
         <button id="quick-rotate" aria-label="旋转画面" title="请求 Android 真正切换横竖屏（临时固定方向，正常停止投屏时恢复原来的旋转设置）">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 3a9 9 0 1 1-11 2M17 3v6h-6"/></svg>旋转
         </button>
+        <button id="quick-camera-edge" hidden aria-label="切换横屏摄像头位置" title="在横屏边框的左右两侧切换摄像头">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="m9 9-3 3 3 3m6-6 3 3-3 3"/></svg>摄像头
+        </button>
         <button id="quick-paste" aria-label="粘贴" title="粘贴电脑剪贴板文本 (Alt+V)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V3h6v2M9 10h6M9 14h6"/></svg>粘贴
         </button>
@@ -478,6 +484,27 @@
       const presenterButton = document.getElementById('present-toggle');
       const presenterFeedback = document.getElementById('present-feedback');
       const quickFeedback = document.getElementById('quick-feedback');
+      const airplay = Boolean(window.__MIRROLEAP_AIRPLAY__);
+      if (airplay) {
+        document.documentElement.dataset.airplay = '';
+        for (const id of ['quick-home', 'quick-back', 'quick-recents', 'quick-power',
+          'quick-rotate', 'quick-paste']) {
+          document.getElementById(id).hidden = true;
+        }
+        document.getElementById('quick-camera-edge').hidden = false;
+        document.getElementById('quick-fullscreen').title = '切换投屏全屏 (F11)';
+        document.getElementById('quick-tools').setAttribute('aria-label', '投屏窗口快捷操作');
+        quickButton.title = '投屏窗口快捷操作';
+        quickButton.setAttribute('aria-label', quickButton.title);
+        quickFeedback.textContent = '投屏快捷操作';
+        document.getElementById('present-magnifier').title = '定格当前投屏画面 · 滚轮调大小';
+        document.getElementById('present-refresh').title = '重新定格当前投屏画面';
+        const reset = document.getElementById('restore');
+        reset.title = '一键恢复投屏画面';
+        reset.setAttribute('aria-label', reset.title);
+        document.getElementById('present-off').title = '退出演示';
+        document.getElementById('creator-click').title = '显示电脑鼠标点击位置';
+      }
       let enabled = false;
       let switching = false;
       let quickSwitching = false;
@@ -531,7 +558,7 @@
         if (!open || (!magnifier && !live)) displayPrivacyState('off',false);
         document.getElementById('present-hint').textContent = live
           ? '正在检测实际画质来源'
-          : '实时模式跟随视频；定格和聚光灯暂停触控';
+          : (airplay ? '定格后可刷新画面，滚轮调整放大范围' : '实时模式跟随视频；定格和聚光灯暂停触控');
       }
       function displayPrivacyState(level, allowed) {
         const button=document.getElementById('present-privacy');
@@ -557,7 +584,13 @@
           if (document.getElementById('present-live').getAttribute('aria-pressed') !== 'true') return;
           const width=Number(quality?.sourceWidth);
           const height=Number(quality?.sourceHeight);
-          if (quality?.mode === 'hq_cpu' && Number.isInteger(width) &&
+          if (quality?.mode === 'window' && width > 0 && height > 0) {
+            hint.textContent='投屏窗口 '+width+'×'+height+' · 滚轮调大小';
+            hint.title='窗口帧实时取样。按住 Ctrl 滚动鼠标可调整放大倍率';
+          } else if (airplay) {
+            hint.textContent=quality?.mode==='desktop' ? '桌面放大 · 正在等待窗口画面' : '移入投屏画面开始放大';
+            hint.title='滚轮调大小，Ctrl+滚轮调倍率';
+          } else if (quality?.mode === 'hq_cpu' && Number.isInteger(width) &&
               Number.isInteger(height) && width > 0 && height > 0) {
             hint.textContent='HQ 原始帧 '+width+'×'+height+' · CPU 抗锯齿';
             hint.title='Win32 已接收 scrcpy 原始解码帧绘制；需目视确认实际可见性。此版本尚不是 GPU D3D11 高清渲染。滚轮调圆圈、Ctrl+滚轮调倍率';
@@ -844,7 +877,7 @@
             await invoke(action === 'privacy' ? 'present_privacy_cycle' : 'present_' + action);
             clearReport();
             presentFeedback('sent', action === 'off' ?
-              '演示已退出，手机触控恢复' : action === 'privacy' ?
+              (airplay ? '演示已退出，已恢复窗口操作' : '演示已退出，手机触控恢复') : action === 'privacy' ?
               '防窥状态已切换 · 仅遮挡可见画面，原始录制不受影响' :
               presentLabels[action] + '已就绪 · 滚轮缩放');
           } catch (error) {
@@ -869,7 +902,8 @@
           delete button.dataset.nativeClicks;
           button.classList.toggle('active',active);
           button.setAttribute('aria-pressed',String(active));
-          presentFeedback('sent',active ? '已开启 Windows 原生光圈：点击手机后角标显示实际绘制次数' : '已关闭点击光圈');
+          presentFeedback('sent',active ? (airplay ? '点击投屏画面时显示光圈' :
+            '已开启 Windows 原生光圈：点击手机后角标显示实际绘制次数') : '已关闭点击光圈');
         } catch(error) {
           report(error);
           presentFeedback('error','点击特效未开启 · '+String(error));
@@ -924,6 +958,20 @@
       const quickLabels = Object.freeze({
         fullscreen: '全屏', home: '主页', back: '返回', recents: '最近任务',
         power: '电源键', rotate: '旋转', paste: '粘贴',
+      });
+      const cameraEdge = document.getElementById('quick-camera-edge');
+      cameraEdge.addEventListener('click', async () => {
+        if (!airplay || cameraEdge.disabled || !document.body.classList.contains('quick-open')) return;
+        cameraEdge.disabled = true;
+        try {
+          const right = await invoke('quick_camera_edge');
+          clearReport();
+          actionFeedback(cameraEdge, 'sent', right ? '横屏摄像头已设为右侧' : '横屏摄像头已设为左侧');
+        } catch (error) {
+          actionFeedback(cameraEdge, 'error', '切换摄像头位置失败 · ' + String(error));
+        } finally {
+          cameraEdge.disabled = false;
+        }
       });
       for (const action of ['fullscreen','home','back','recents','power','rotate','paste']) {
         const button = document.getElementById('quick-' + action);

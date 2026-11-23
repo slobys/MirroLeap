@@ -85,6 +85,35 @@ pub fn open_official_community_link(
         .map_err(|error| format!("Cannot open the official link in your browser: {error}"))
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectLink {
+    Mirroleap,
+    ScrcpyGui,
+    Scrcpy,
+}
+
+impl ProjectLink {
+    fn url(&self) -> &'static str {
+        match self {
+            Self::Mirroleap => "https://github.com/slobys/MirroLeap",
+            Self::ScrcpyGui => "https://github.com/kil0bit-kb/scrcpy-gui",
+            Self::Scrcpy => "https://github.com/Genymobile/scrcpy",
+        }
+    }
+}
+
+#[tauri::command]
+pub fn open_official_project_link(
+    window: Window, app_handle: tauri::AppHandle, destination: ProjectLink,
+) -> Result<(), String> {
+    require_main_window(&window)?;
+    use tauri_plugin_shell::ShellExt;
+    #[allow(deprecated)]
+    app_handle.shell().open(destination.url(), None)
+        .map_err(|error| format!("Cannot open the official project in your browser: {error}"))
+}
+
 fn get_binary_path(binary_name: &str, custom_folder: Option<String>) -> String {
     let exe_ext = std::env::consts::EXE_EXTENSION;
     let binary_filename = if exe_ext.is_empty() {
@@ -2623,7 +2652,7 @@ enum AttemptOutcome {
 }
 
 #[tauri::command]
-pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: ScrcpyConfig, app_handle: tauri::AppHandle) -> Result<(), String> {
+pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, mut config: ScrcpyConfig, app_handle: tauri::AppHandle) -> Result<(), String> {
     require_main_window(&window)?;
 
     let fallback_dir = app_handle.path().video_dir().ok()
@@ -2636,6 +2665,13 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
         return Err("This Android device is already being mirrored".into());
     }
     let mut exe_path = get_binary_path("scrcpy", config.scrcpy_path.clone());
+    #[cfg(target_os="windows")]
+    if experimental_hq_selected(config.hq_lens,config.hq_experimental_core) &&
+        !crate::hq_runtime::has_verified_download(){
+        config.hq_experimental_core=Some(false);
+        let _=window.emit("scrcpy-log",
+            "[PERFORMANCE] 此构建使用已配置的标准 scrcpy 核心启动本次投屏。");
+    }
     if config.hq_lens==Some(true) && config.hq_experimental_core!=Some(true) {
         let _=window.emit("scrcpy-log",
             "[PERFORMANCE] Smooth 2.35x lens: retaining normal scrcpy 5.x and configured decoder. Experimental raw-frame core is not active.");
@@ -3088,6 +3124,21 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_links_only_accept_the_three_repository_identifiers() {
+        for (id, url) in [
+            ("mirroleap", "https://github.com/slobys/MirroLeap"),
+            ("scrcpy_gui", "https://github.com/kil0bit-kb/scrcpy-gui"),
+            ("scrcpy", "https://github.com/Genymobile/scrcpy"),
+        ] {
+            let destination: ProjectLink = serde_json::from_value(serde_json::json!(id)).unwrap();
+            assert_eq!(destination.url(), url);
+        }
+        assert!(serde_json::from_value::<ProjectLink>(
+            serde_json::json!("https://github.com/other/repository")
+        ).is_err());
+    }
 
     #[test]
     fn old_hq_setting_migrates_to_smooth_scrcpy_without_v4_core() {

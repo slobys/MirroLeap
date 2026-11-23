@@ -19,6 +19,9 @@ mod hq_cpu_lens_windows;
 mod hq_runtime;
 mod app_update;
 mod ios_airplay;
+mod ios_usb;
+#[cfg(target_os = "windows")]
+mod mirror_snapshot;
 #[cfg(target_os = "windows")]
 mod ios_receiver_process;
 #[cfg(target_os = "windows")]
@@ -140,6 +143,8 @@ pub fn run() {
                 final_capture_hint: Mutex::new(HashMap::new()),
             });
             app.manage(ios_airplay::IosAirplayState::default());
+            #[cfg(target_os = "windows")]
+            ios_usb::start(app.handle());
 
             // Ctrl+Alt+Shift+C (recentre the active mirror window) on every
             // platform, plus Ctrl+Alt+Shift+W (drag the borderless window) on
@@ -177,12 +182,16 @@ pub fn run() {
             ios_airplay::ios_airplay_status,
             ios_airplay::ios_airplay_install,
             ios_airplay::ios_airplay_start,
+            ios_airplay::ios_airplay_set_receiver_name,
             ios_airplay::ios_airplay_set_compact_mode,
             ios_airplay::ios_airplay_set_window_style,
             ios_airplay::ios_airplay_set_quality_tier,
+            ios_airplay::ios_airplay_set_window_size,
             ios_airplay::ios_airplay_window_action,
             ios_airplay::ios_airplay_stop,
             ios_airplay::ios_airplay_open_source,
+            ios_usb::ios_usb_install_driver,
+            ios_usb::ios_usb_control,
             commands::get_devices,
             commands::adb_connect,
             commands::adb_usb_to_wireless,
@@ -200,6 +209,7 @@ pub fn run() {
             commands::ensure_hq_runtime,
             commands::get_app_install_kind,
             commands::open_official_community_link,
+            commands::open_official_project_link,
             commands::device_frame_ack,
             commands::device_frame_page_ready,
             commands::device_frame_lens_aperture,

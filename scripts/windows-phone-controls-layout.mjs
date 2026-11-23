@@ -121,7 +121,9 @@ try {
             const el=document.getElementById(name==='creator-click' ? name : 'present-'+name);
             const b=el.getBoundingClientRect();
             const hit=document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);
-            return {name,ok:b.width>=34&&b.height>=34&&b.left>=p.left-1&&b.right<=p.right+1&&
+            const textFits = Number.parseFloat(getComputedStyle(el).fontSize) >= 11 &&
+              el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight;
+            return {name,ok:textFits&&b.width>=34&&b.height>=34&&b.left>=p.left-1&&b.right<=p.right+1&&
               b.top>=p.top-1&&b.bottom<=p.bottom+1&&(hit===el||el.contains(hit))};
           }),
         };
@@ -133,6 +135,67 @@ try {
       }
       console.log('PASS',entry.layout,`${dpi*100}% DPI, all quick + seven presenter controls reachable`);
       await page.close();
+    }
+    for (const usb of [false,true]) {
+    const airplay = await context.newPage();
+    await airplay.setViewportSize({width:268,height:370});
+    await airplay.addInitScript(usb => {
+      window.__MIRROLEAP_AIRPLAY__ = true;
+      window.__MIRROLEAP_IOS_USB__ = usb;
+      let quick = false;
+      let present = false;
+      let frozen = false;
+      let cameraRight = false;
+      let remember = true;
+      window.__TAURI__ = {core:{invoke:async (_, {action}) => {
+        if (action === 'quick_toggle') { quick = !quick; present = false; }
+        if (action === 'present_toggle') { present = !present; quick = false; }
+        if (action === 'quick_toggle' || action === 'quick_status') return quick;
+        if (action === 'present_toggle' || action === 'present_status') return present;
+        if (action === 'present_magnifier') { frozen = !frozen; return frozen; }
+        if (action === 'present_is_magnifier') return frozen;
+        if (action === 'quick_camera_edge') { cameraRight = !cameraRight; return cameraRight; }
+        if (action === 'quick_remember_toggle') remember = !remember;
+        if (action === 'quick_remember_toggle' || action === 'quick_remember_status') return remember;
+        if (action === 'present_refresh') { window.refreshed = true; return true; }
+        return false;
+      }}};
+    }, usb);
+    await airplay.goto(file);
+    await airplay.evaluate(() => window.scrcpyControls.setLayout('side-right'));
+    await airplay.locator('#quick-toggle').click();
+    await airplay.waitForFunction(() => document.body.classList.contains('quick-open'));
+    for (const action of ['fullscreen','top','camera-edge','remember']) {
+      assert(await airplay.locator(`#quick-${action}`).isVisible());
+    }
+    for (const action of ['home','back','recents','power','rotate','paste']) {
+      assert(await airplay.locator(`#quick-${action}`).isHidden());
+    }
+    assert(await airplay.locator('#quick-record').count() === 0);
+    const remember = airplay.locator('#quick-remember');
+    for (const enabled of ['false','true']) {
+      await remember.click();
+      await airplay.waitForFunction(pressed =>
+        document.getElementById('quick-remember').getAttribute('aria-pressed') === pressed, enabled);
+    }
+    for (const edge of ['右','左']) {
+      await airplay.getByRole('button',{name:'切换横屏摄像头位置'}).click();
+      await airplay.getByText(`横屏摄像头已设为${edge}侧`,{exact:true}).waitFor();
+    }
+    await airplay.locator('#present-toggle').click();
+    await airplay.waitForFunction(() => document.body.classList.contains('present-open'));
+    assert(await airplay.locator('#present-live').isVisible());
+    assert(await airplay.locator('#present-spotlight').isVisible());
+    await airplay.locator('#present-magnifier').click();
+    await airplay.locator('#present-refresh').click();
+    assert(await airplay.evaluate(() => window.refreshed === true));
+    assert(await airplay.locator('#present-privacy').isEnabled());
+    const airplayLabelsFit = await airplay.locator('.present-grid button:visible').evaluateAll(buttons =>
+      buttons.every(button => Number.parseFloat(getComputedStyle(button).fontSize) >= 11 &&
+        button.scrollWidth <= button.clientWidth && button.scrollHeight <= button.clientHeight));
+    assert(airplayLabelsFit,'AirPlay presentation labels must be readable and fit their buttons');
+    console.log(`PASS ${usb?'USB':'AirPlay'} quick and presentation tools`,`${dpi*100}% DPI`);
+    await airplay.close();
     }
     await context.close();
   }
