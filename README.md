@@ -1,47 +1,41 @@
 # <img src="src-tauri/icons/128x128.png" width="44" height="44" alt="MirroLeap 客户端图标"> MirroLeap
 
-MirroLeap 可以把安卓手机、iPhone 和 iPad 的画面投到 Windows 电脑。投屏时可以用画笔标注、打开聚光灯或放大画面。安卓投屏还支持用电脑键鼠操作手机、截图和录屏。
+把安卓、iPhone 和 iPad 的画面投到 Windows。投屏时可以用画笔、聚光灯和放大镜。
 
-[下载 Windows 版](https://github.com/slobys/MirroLeap/releases/latest) · [查看版本更新](https://github.com/slobys/MirroLeap/releases)
+**[下载 Windows 版](https://github.com/slobys/MirroLeap/releases/latest)** · Windows 10/11（64 位）
 
-## 下载和打开
+下载文件名以 `Portable.zip` 结尾的免安装版，解压后双击 `Run-MirroLeap.cmd`。
 
-适用于 Windows 10/11 x64，需要 WebView2 运行时。在发布页的 **Assets**（下载文件）里选一种即可。以下以 v5.1.4 为例。
+## 安卓投屏
 
-| 下载方式 | 文件名示例 | 怎么打开 |
-| --- | --- | --- |
-| **免安装版（推荐）** | `MirroLeap_5.1.4_x64_Portable.zip` | 完整解压，再双击 `Run-MirroLeap.cmd` |
-| EXE 安装版 | `MirroLeap_5.1.4_x64-setup.exe` | 双击后按提示安装 |
-| MSI 安装版 | `MirroLeap_5.1.4_x64_en-US.msi` | 用 Windows Installer 安装 |
+- **USB**。手机开启「USB 调试」，插线后在手机上确认授权。
+- **Wi-Fi**。手机和电脑连同一个网络。手机开启「无线调试」，电脑点「无线连接 / 配对设备」。
 
-安卓投屏首次使用时，如果软件提示缺少 scrcpy，按界面提示下载。发布页的 `SHA256SUMS.txt` 可以用来核对下载文件。
+连好后，在电脑上选中手机，点「开始投屏」。
 
-## 连接设备
+## iPhone / iPad 投屏
 
-### 安卓
+需要 MirroLeap v5.4.1 或更新版本。
 
-- **USB 有线**。在手机的「开发者选项」里打开「USB 调试」，用数据线连接电脑，并在手机上确认授权。在 MirroLeap 首页选择设备，再点「开始投屏」。
-- **Wi-Fi 无线**。手机和电脑连到同一个局域网。在手机上开启「无线调试」，然后在 MirroLeap 点击「无线连接 / 配对设备」，按提示完成配对。
+- **USB**。插线并解锁，弹出提示时点「信任」，然后在电脑上点「USB投屏」。
+- **Wi-Fi**。设备和电脑连同一个网络。电脑点「启动 iOS 投屏」，iPhone 或 iPad 打开「控制中心 → 屏幕镜像」，选电脑上显示的名称。
 
-在首页选择「分辨率」即可调整画质。旧版的「场景预设」已并入这个入口。
+<details>
+<summary>首次连接提示安装组件</summary>
 
-### iPhone 和 iPad
+- **USB**。按提示安装 Apple Devices 或 USB 驱动。装好驱动后重新插一次数据线。
+- **Wi-Fi**。先点「安装 iOS 接收器」，装好后再点「启动 iOS 投屏」。
 
-使用 v5.4.1 或更新版本，在首页找到「iPhone / iPad 投屏」。
+</details>
 
-- **USB 有线**。用数据线连接电脑，解锁设备。看到「信任此电脑」时点「信任」。在 MirroLeap 点「USB投屏」，如需 Apple Devices 或 USB 驱动，按界面提示安装。
-- **Wi-Fi 无线**。设备和电脑连到同一个局域网。在 MirroLeap 安装并启动 iOS 接收器，再在设备的「控制中心 → 屏幕镜像」里选择首页显示的接收器名称。
+<details>
+<summary>其他下载和帮助</summary>
 
-[查看 iPhone / iPad 投屏步骤](https://github.com/slobys/MirroLeap/blob/714bae65d62b63c0e5800ade2f5f41ece5ae918a/IOS_AIRPLAY_CN.md)
+- **下载文件示例（v5.1.4）**。免安装版 `MirroLeap_5.1.4_x64_Portable.zip`，EXE 安装版 `MirroLeap_5.1.4_x64-setup.exe`，MSI 安装版 `MirroLeap_5.1.4_x64_en-US.msi`。 [版本列表](https://github.com/slobys/MirroLeap/releases)
+- **打开软件**。需要 WebView2。安卓投屏提示缺少 scrcpy 时，按软件提示下载。 [安装恢复指南](INSTALL_RECOVERY_CN.md)
+- **画质和录屏**。安卓首页的「分辨率」包含旧版「场景预设」。scrcpy 原始录像记录安卓设备画面。 [画笔和演示工具](IMMERSIVE_CONTROLS_CN.md)
+- **日志和连接问题**。在「设置 → 工具与日志」查看日志。 [安全与隐私说明](SECURITY_CN.md) · [iPhone / iPad 投屏排查和组件说明](https://github.com/slobys/MirroLeap/blob/714bae65d62b63c0e5800ade2f5f41ece5ae918a/IOS_AIRPLAY_CN.md)
 
-## 常用功能和帮助
+</details>
 
-- **标注和演示**。在投屏窗口旁的悬浮栏打开画笔、聚光灯或放大镜。scrcpy 原始录像记录的是安卓设备画面。录制演示时，请先确认画笔和遮挡效果是否出现在录屏里。 [画笔和演示工具](IMMERSIVE_CONTROLS_CN.md)
-- **安装、升级或卸载遇到问题**。可先用免安装版启动。 [安装恢复指南](INSTALL_RECOVERY_CN.md)
-- **查看日志或分享诊断报告**。打开「设置 → 工具与日志」。 [安全与隐私说明](SECURITY_CN.md)
-
-## 关于项目
-
-MirroLeap 由 slobys 独立维护，基于 scrcpy-gui 二次开发，安卓投屏使用 Genymobile/scrcpy。 [原始项目](https://github.com/kil0bit-kb/scrcpy-gui) · [投屏核心](https://github.com/Genymobile/scrcpy) · [项目迁移说明](MIGRATION_CN.md)
-
-主项目采用 MIT 许可证。iOS 接收和捕获组件的许可及源码出处见投屏指南。 [MIT 许可证](LICENSE) · [iOS 组件说明](https://github.com/slobys/MirroLeap/blob/714bae65d62b63c0e5800ade2f5f41ece5ae918a/IOS_AIRPLAY_CN.md)
+MirroLeap 由 slobys 维护，基于 scrcpy-gui，安卓投屏采用 Genymobile/scrcpy。 [原始项目](https://github.com/kil0bit-kb/scrcpy-gui) · [投屏核心](https://github.com/Genymobile/scrcpy) · [项目迁移说明](MIGRATION_CN.md) · [MIT 许可证](LICENSE)
