@@ -277,6 +277,39 @@ describe('single-page iOS AirPlay experience',()=>{
         expect(screen.getByText(/DRM/)).not.toBeVisible();
         expect(connected).toBeVisible();
     });
+    it('keeps USB connected and Bluetooth ready while video pauses, and exports diagnostics on request',async()=>{
+        const current={...ready,installed:true,usbStatus:'streaming',usbSourceWidth:1640,
+            usbSourceHeight:2360,diagnostics:{usbVideo:'paused',bluetooth:'ready',bluetoothTransport:'usb'}};
+        invokeMock.mockImplementation(async(name:string)=>{
+            if(name==='ios_airplay_export_diagnostics')return 'C:\\Downloads\\mirroleap-ios-test.json';
+            return current;
+        });
+        render(<IosReceiverPanel locale="zh-CN"/>);
+        expect(await screen.findByText('USB连接',{exact:true})).toBeVisible();
+        expect(screen.queryByRole('button',{name:'导出诊断日志'})).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button',{name:'投屏详情'}));
+        expect(screen.getByTestId('ios-usb-detail')).toHaveTextContent('USB 已连接');
+        expect(screen.getByTestId('ios-video-detail')).toHaveTextContent('USB · 暂无新画面，等待恢复');
+        expect(screen.getByTestId('ios-bluetooth-detail')).toHaveTextContent('USB · 已连接，键鼠可用');
+        const exportButton=screen.getByRole('button',{name:'导出诊断日志'});
+        expect(invokeMock).not.toHaveBeenCalledWith('ios_airplay_export_diagnostics');
+        fireEvent.click(exportButton);
+        expect(await screen.findByText(/已保存到「下载」文件夹 · mirroleap-ios-test.json/)).toBeVisible();
+        expect(invokeMock).toHaveBeenCalledWith('ios_airplay_export_diagnostics');
+        expect(exportButton).toBeEnabled();
+    });
+
+    it('allows retrying a failed diagnostics export',async()=>{
+        invokeMock.mockImplementation(async(name:string)=>{
+            if(name==='ios_airplay_export_diagnostics')throw new Error('simulated write failure');
+            return {...ready,usbStatus:'waiting'};
+        });
+        render(<IosReceiverPanel locale="en"/>);
+        fireEvent.click(await screen.findByRole('button',{name:'Mirroring details'}));
+        fireEvent.click(await screen.findByRole('button',{name:'Export diagnostics'}));
+        expect(await screen.findByRole('alert')).toHaveTextContent('Could not save diagnostics');
+        expect(screen.getByRole('button',{name:'Export diagnostics'})).toBeEnabled();
+    });
     it('shows unsupported hosts and component verification errors without false readiness',async()=>{
         invokeMock.mockResolvedValueOnce({...ready,supported:false});
         const {unmount}=render(<IosReceiverPanel locale="zh-CN"/>);

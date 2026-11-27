@@ -145,6 +145,7 @@ async function checkAirPlayWaiting(browser, scale) {
         supported: true, installed: true, running: false, installing: false,
         receiverReady: false, receiverName: 'AirPlay-Windows', receiverIp: null,
         usbStatus: 'ready', windowStyle: 'device-auto',
+        diagnostics: {usbVideo:'idle', bluetooth:'off'},
       };
       window.addEventListener('fixture-wifi-frame', () => {
         Object.assign(status, {sourceWidth: 1246, sourceHeight: 1792});
@@ -157,6 +158,10 @@ async function checkAirPlayWaiting(browser, scale) {
             Object.assign(status, {running: false, receiverReady: false, receiverIp: null});
           } else if (command === 'ios_usb_control') {
             status.usbStatus = args.start ? 'streaming' : 'ready';
+            status.diagnostics = args.start ? {usbVideo:'paused', bluetooth:'ready', bluetoothTransport:'usb'} :
+              {usbVideo:'idle', bluetooth:'off'};
+          } else if (command === 'ios_airplay_export_diagnostics') {
+            return 'mirroleap-ios-layout-test.json';
           } else if (command === 'ios_airplay_set_receiver_name') {
             status.receiverName = args.name;
           }
@@ -207,6 +212,22 @@ async function checkAirPlayWaiting(browser, scale) {
     await panel.getByRole('button', {name: 'USB投屏'}).click();
     await usbMirroring.waitFor({state: 'visible'});
     await page.setViewportSize({width: 620, height: 480});
+    await toggle.click();
+    assert((await details.getByTestId('ios-video-detail').innerText()).includes('暂无新画面'));
+    assert((await details.getByTestId('ios-bluetooth-detail').innerText()).includes('键鼠可用'));
+    const exportButton = details.getByRole('button', {name:'导出诊断日志'});
+    await exportButton.click();
+    await details.getByText(/已保存到「下载」文件夹/).waitFor({state:'visible'});
+    const layoutFits = await details.evaluate(root => {
+      const bounds = root.getBoundingClientRect();
+      return [...root.querySelectorAll('dl dd, button')].every(element => {
+        const rect = element.getBoundingClientRect();
+        return rect.left >= bounds.left - 1 && rect.right <= bounds.right + 1 &&
+          parseFloat(getComputedStyle(element).fontSize) >= 11;
+      });
+    });
+    assert(layoutFits,'Details must remain legible and inside the panel at a narrow viewport');
+    await toggle.click();
     const narrowSize = await panel.getByRole('combobox', {name: 'iOS 投屏窗口大小'}).boundingBox();
     const narrowWifi = await wifi.boundingBox();
     const narrowUsb = await usbMirroring.boundingBox();

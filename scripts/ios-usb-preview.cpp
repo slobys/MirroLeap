@@ -145,6 +145,49 @@ struct UsbRecovery {
     }
 };
 
+struct VideoProgress {
+    static constexpr ULONGLONG PauseAfterMs = 3500;
+    std::uint64_t last_count{};
+    ULONGLONG last_frame_at{};
+    std::string_view phase{"waiting"};
+
+    const char* observe(const CaptureStatus& status, ULONGLONG now) {
+        const auto count = status.video_frames;
+        const bool new_video = status.state == CaptureState::Streaming && status.width &&
+            status.height && count && count != last_count;
+        if (new_video) last_frame_at = now;
+        last_count = count;
+        if (!last_frame_at) return nullptr;
+        const char* next = status.state == CaptureState::Handshaking ? "video recovering" :
+            now - last_frame_at >= PauseAfterMs ? "video paused" : "video receiving";
+        if (phase == next) return nullptr;
+        phase = next;
+        return next;
+    }
+};
+
+bool test_usb_video_progress() {
+    VideoProgress video;
+    CaptureStatus sample{};
+    sample.state = CaptureState::Streaming;
+    sample.width = 1640;
+    sample.height = 2360;
+    if (video.observe(sample, 500)) return false; // A ready capture is not proof of a video frame.
+    const auto changed_to = [&](ULONGLONG now, std::string_view expected) {
+        const auto phase = video.observe(sample, now);
+        return phase && expected == phase;
+    };
+    sample.video_frames = 10;
+    if (!changed_to(600, "video receiving") || video.observe(sample, 4099)) return false;
+    if (!changed_to(4100, "video paused") || video.observe(sample, 10000)) return false;
+    sample.state = CaptureState::Handshaking;
+    sample.video_frames = 0;
+    if (!changed_to(10300, "video recovering")) return false;
+    sample.state = CaptureState::Streaming;
+    sample.video_frames = 1;
+    return changed_to(10600, "video receiving");
+}
+
 const char* capture_readiness(const DeviceInfo& device, int probe, bool driver_ready) {
     if (probe != 0) return "detecting";
     if (driver_ready) return "ready";
@@ -263,6 +306,7 @@ struct UsbPreview {
     unsigned size_width{}, size_height{}, status_failures{};
     std::wstring selected_device;
     UsbRecovery recovery;
+    VideoProgress video_progress;
 
     void close_session() {
         ShowWindow(window, SW_HIDE);
@@ -270,6 +314,7 @@ struct UsbPreview {
         size_width = size_height = 0;
         stream_started = 0;
         status_failures = 0;
+        video_progress = {};
         if (session) {
             core.session_stop(session);
             core.session_destroy(session);
@@ -374,6 +419,9 @@ struct UsbPreview {
                 return;
             }
             status_failures = 0;
+            if (status.state != CaptureState::Error && status.state != CaptureState::Stopped) {
+                if (const auto phase = video_progress.observe(status, now)) report(phase);
+            }
             if (status.state == CaptureState::Streaming && status.width && status.height) {
                 if (!stream_started) stream_started = now;
                 if (now - stream_started >= UsbRecovery::StablePlaybackMs) recovery.attempts = 0;
@@ -382,6 +430,9 @@ struct UsbPreview {
             }
             if (status.state != CaptureState::Error && status.state != CaptureState::Stopped &&
                 (stream_started || status.video_frames || now-activated < 20000)) return;
+            report(("failure " + std::to_string(static_cast<int>(status.failure_kind)) + " " +
+                std::to_string(static_cast<int>(status.failure_stage)) + " " +
+                std::to_string(status.error_code)).c_str());
             capture_failed(recoverable_usb_failure(status));
             return;
         }
@@ -506,7 +557,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         if (arguments) LocalFree(arguments);
         UsbPreview app;
         if (mode == L"--self-test-usb") {
-            if (test_usb_readiness() && test_usb_recovery()) {
+            if (test_usb_readiness() && test_usb_recovery() && test_usb_video_progress()) {
                 report("USB readiness and recovery tests passed");
                 result = 0;
             }

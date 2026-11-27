@@ -19,7 +19,12 @@ mod hq_cpu_lens_windows;
 mod hq_runtime;
 mod app_update;
 mod ios_airplay;
+mod ios_diagnostics;
 mod ios_usb;
+#[cfg(target_os = "windows")]
+mod ios_bluetooth;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod ios_input;
 #[cfg(target_os = "windows")]
 mod mirror_snapshot;
 #[cfg(target_os = "windows")]
@@ -180,6 +185,7 @@ pub fn run() {
             commands::greet,
             commands::check_scrcpy,
             ios_airplay::ios_airplay_status,
+            ios_airplay::ios_airplay_export_diagnostics,
             ios_airplay::ios_airplay_install,
             ios_airplay::ios_airplay_start,
             ios_airplay::ios_airplay_set_receiver_name,
@@ -205,6 +211,8 @@ pub fn run() {
             commands::run_scrcpy,
             commands::stop_scrcpy,
             commands::device_frame_control,
+            commands::device_frame_ios_bluetooth,
+            commands::device_frame_ios_input,
             commands::get_mirrocreator_lens_status,
             commands::ensure_hq_runtime,
             commands::get_app_install_kind,

@@ -45,6 +45,11 @@ tauri-plugin-process = "2.4.0"
 # Tauri 2.12's 0.62 HWND types; mixing 0.61 and 0.62 breaks native HWND APIs.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
+    "Devices_Bluetooth_GenericAttributeProfile",
+    "Devices_Enumeration",
+    "Devices_Radios",
+    "Security_Cryptography",
+    "Storage_Streams",
     "Graphics_Capture",
     "Graphics_DirectX_Direct3D11",
     "Win32_Foundation",

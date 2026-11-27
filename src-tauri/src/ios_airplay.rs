@@ -85,6 +85,7 @@ pub struct IosAirplayStatus {
     pub usb_status: &'static str,
     pub usb_source_width: Option<u32>,
     pub usb_source_height: Option<u32>,
+    pub diagnostics: crate::ios_diagnostics::Status,
     pub source_width: Option<u32>,
     pub source_height: Option<u32>,
     pub display_width: Option<u32>,
@@ -584,6 +585,8 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
         }
         let quality=prefer_quality_tier(app)?;
         let usb_source=crate::ios_usb::video().map(|(_,pixels)|pixels);
+        let airplay_phase = if source.is_some() { "received" } else if is_running { "waiting" } else { "idle" };
+        crate::ios_diagnostics::observe(crate::ios_diagnostics::Channel::AirplayVideo, airplay_phase, None);
         let quality_pending=is_running && state.active_quality_tier.lock()
             .map_err(|e|e.to_string())?.as_ref().is_some_and(|active|active!=&quality);
         let connection=state.connection.lock().map_err(|e|e.to_string())?;
@@ -618,6 +621,7 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
             usb_status: crate::ios_usb::status(),
             usb_source_width: usb_source.map(|(width,_)|width),
             usb_source_height: usb_source.map(|(_,height)|height),
+            diagnostics: crate::ios_diagnostics::status(),
             source_width: source.map(|(width,_)|width),
             source_height: source.map(|(_,height)|height),
             display_width: display.map(|(width,_)|width),
@@ -642,12 +646,24 @@ fn status_for(app: &AppHandle, state: &IosAirplayState) -> Result<IosAirplayStat
             quality_tier: "high".to_string(),
             window_size: "auto".to_string(), quality_pending:false, usb_status:"not_bundled",
             usb_source_width:None, usb_source_height:None,
+            diagnostics: crate::ios_diagnostics::Status::default(),
             source_width: None, source_height:None,
             display_width:None, display_height:None,
             frame_attached: false,
             frame_error: None,
         })
     }
+}
+
+#[tauri::command]
+pub async fn ios_airplay_export_diagnostics(
+    window: Window, app: AppHandle, state: State<'_, IosAirplayState>,
+) -> Result<String, String> {
+    main_only(&window)?;
+    let _ = status_for(&app, &state)?;
+    let report = crate::ios_diagnostics::report(&app.package_info().version.to_string())?;
+    let name = format!("mirroleap-ios-{}.json", chrono::Utc::now().format("%Y%m%d-%H%M%S-%9f"));
+    crate::commands::save_report(window, app, report, name).await
 }
 
 #[tauri::command]

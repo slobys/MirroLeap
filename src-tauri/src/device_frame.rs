@@ -1623,6 +1623,51 @@ fn device_for_controls(app: &AppHandle, caller: &tauri::Window) -> Result<String
         .ok_or_else(|| "This control bar is not attached to an active scrcpy window".into())
 }
 
+pub(crate) async fn ios_bluetooth(
+    app: &AppHandle, caller: &tauri::Window, action: &str, token: Option<u32>,
+) -> Result<crate::ios_bluetooth::Status, String> {
+    let device = device_for_controls(app, caller)?;
+    if !is_ios_video(&device) || !is_quick_open(&device) ||
+        ios_video_dimensions(app, &device).is_none() {
+        return Err("请从当前 iOS 投屏的快捷操作面板连接蓝牙".into());
+    }
+    let owner = crate::ios_bluetooth::Owner::new(device == IOS_USB_KEY);
+    crate::ios_bluetooth::setup(owner, action, token).await
+}
+
+fn ios_input_available(device: &str) -> bool {
+    !is_dragging(device)
+        && !is_inking(device)
+        && presentation_mode(device) == "off"
+        && ink_busy().lock().is_ok_and(|busy| !busy.contains(device))
+        && presentation_busy().lock().is_ok_and(|busy| !busy.contains(device))
+}
+
+pub(crate) async fn ios_input(
+    app: &AppHandle, caller: &tauri::Window, events: Vec<crate::ios_input::Event>,
+) -> Result<(), String> {
+    let device = [IOS_MIRROR_KEY, IOS_USB_KEY].into_iter()
+        .find(|key| caller.label() == label(key))
+        .ok_or("请在 iOS 投屏画面中操作")?;
+    let current = app.get_webview_window(caller.label()).ok_or("投屏画面已关闭")?;
+    let hwnd = caller.hwnd().map_err(|error| error.to_string())?.0 as usize;
+    if current.hwnd().ok().map(|window| window.0 as usize) != Some(hwnd) {
+        return Err("投屏画面已失效".into());
+    }
+    let mut rect = RECT::default();
+    let has_viewport = unsafe { GetClientRect(HWND(hwnd as *mut _), &mut rect) }.is_ok();
+    let pointer_allowed = has_viewport
+        && ios_input_available(device)
+        && frame_presentation_ready(device)
+        && mirror_pid(app, device).is_some()
+        && ios_video_dimensions(app, device).is_some();
+    let keyboard_allowed = unsafe { GetForegroundWindow() }.0 as usize == hwnd;
+    let owner = crate::ios_bluetooth::Owner::new(device == IOS_USB_KEY);
+    let viewport = ((rect.right - rect.left).clamp(1, 4096) as u16,
+        (rect.bottom - rect.top).clamp(1, 4096) as u16);
+    crate::ios_bluetooth::send_input(owner, events, pointer_allowed, keyboard_allowed, viewport).await
+}
+
 /// Only the Tauri toolbar bound to the current device can inspect whether
 /// the user is really seeing decoded-source pixels or desktop fallback.
 pub(crate) fn creator_lens_status(
@@ -2528,6 +2573,14 @@ pub async fn control(app: &AppHandle, caller: &tauri::Window, action: &str) -> R
             return Ok(updated);
         }
         if airplay {
+            if let Some(key) = crate::ios_bluetooth::Action::from_toolbar(action) {
+                if ios_video_dimensions(app, &device).is_none() {
+                    return Err("iOS 投屏会话已结束".into());
+                }
+                let owner = crate::ios_bluetooth::Owner::new(device == IOS_USB_KEY);
+                crate::ios_bluetooth::send(owner, key).await?;
+                return Ok(true);
+            }
             if action == "quick_camera_edge" {
                 return crate::ios_airplay::flip_landscape_camera(app);
             }
@@ -2687,6 +2740,12 @@ async fn follow_airplay(app:AppHandle,device:&'static str,pid:u32,overlay:Webvie
     let mut last_stack=Instant::now();
     let mut hover_top=None;
     let mut shade=None;
+    let mut had_source=false;
+    let mut input_active = false;
+    let mut input_cursor_inside = false;
+    let mut missing_mouse_up = None;
+    let mut bluetooth_ready = false;
+    let mut next_bluetooth_check = Instant::now();
     loop {
         ticker.tick().await;
         if mirror_pid(&app,device)!=Some(pid) || frame_was_replaced(&app,device,&overlay){break;}
@@ -2695,12 +2754,22 @@ async fn follow_airplay(app:AppHandle,device:&'static str,pid:u32,overlay:Webvie
             state.window_style.lock().ok().map(|s|s.clone()).unwrap_or_default()
         };
         let source=ios_video_dimensions(&app,device);
+        if had_source && source.is_none(){
+            crate::ios_bluetooth::close(device==IOS_USB_KEY);
+            bluetooth_ready = false;
+        }
+        had_source=source.is_some();
         let video=crate::commands::find_window_by_pid(pid);
         let geometry=video.filter(|hwnd|style.starts_with("device-") &&
             !crate::ios_device_frame::is_fullscreen(*hwnd))
             .and_then(|hwnd|crate::ios_device_frame::tools_aperture(hwnd,&style,source)
                 .map(|shape|(hwnd,shape)));
         if geometry.is_none() || source.is_none(){
+            if input_active {
+                let _ = overlay.eval("window.mirroleapIosInput?.setEnabled(false)");
+                input_active = false;
+                input_cursor_inside = false;
+            }
             if canvas_rect.take().is_some(){
                 let _=overlay.set_ignore_cursor_events(true);
                 let _=overlay.hide();
@@ -2720,6 +2789,12 @@ async fn follow_airplay(app:AppHandle,device:&'static str,pid:u32,overlay:Webvie
         };
         let (Ok(canvas),Ok(bar))=(overlay.hwnd(),toolbar.hwnd()) else{break;};
         if is_dragging(device){
+            if input_active {
+                let _ = overlay.eval("window.mirroleapIosInput?.setEnabled(false)");
+                let _ = overlay.set_ignore_cursor_events(true);
+                input_active = false;
+                input_cursor_inside = false;
+            }
             last_nearby=Instant::now();
             last_stack=Instant::now()-Duration::from_millis(400);
             if presentation_mode(device)=="live" {
@@ -2752,6 +2827,44 @@ async fn follow_airplay(app:AppHandle,device:&'static str,pid:u32,overlay:Webvie
         let inking=is_inking(device);
         let palette_open=inking || is_present_panel_open(device) || is_quick_open(device);
         let mode=presentation_mode(device);
+        if Instant::now() >= next_bluetooth_check {
+            let owner = crate::ios_bluetooth::Owner::new(device == IOS_USB_KEY);
+            bluetooth_ready = crate::ios_bluetooth::input_ready(owner, bluetooth_ready);
+            next_bluetooth_check = Instant::now() + Duration::from_millis(300);
+        }
+        let direct = bluetooth_ready && source.is_some() && canvas_rect == Some(screen)
+            && frame_presentation_ready(device) && ios_input_available(device);
+        if direct != input_active {
+            if direct {
+                if overlay.eval("window.mirroleapIosInput?.setEnabled(true)").is_ok()
+                    && overlay.set_ignore_cursor_events(false).is_ok() {
+                    input_active = true;
+                }
+            } else {
+                let _ = overlay.eval("window.mirroleapIosInput?.setEnabled(false)");
+                if !inking && !matches!(mode.as_str(), "spotlight" | "magnifier")
+                    && ink_busy().lock().is_ok_and(|busy| !busy.contains(device))
+                    && presentation_busy().lock().is_ok_and(|busy| !busy.contains(device)) {
+                    let _ = overlay.set_ignore_cursor_events(true);
+                }
+                input_active = false;
+            }
+        }
+        let cursor_inside = input_active && cursor.is_some_and(|(x, y)| inside(x, y, screen, 0));
+        if input_active && input_cursor_inside && !cursor_inside {
+            let _ = overlay.eval("window.mirroleapIosInput?.release()");
+        }
+        input_cursor_inside = cursor_inside;
+        let owner = crate::ios_bluetooth::Owner::new(device == IOS_USB_KEY);
+        if input_active && crate::ios_bluetooth::stale_mouse_press(owner) {
+            let since = missing_mouse_up.get_or_insert_with(Instant::now);
+            if since.elapsed() >= Duration::from_millis(120) {
+                missing_mouse_up = None;
+                tauri::async_runtime::spawn(crate::ios_bluetooth::recover_mouse_release(owner));
+            }
+        } else {
+            missing_mouse_up = None;
+        }
         if mode=="live"{
             let (cursor_x,cursor_y)=cursor.unwrap_or((i32::MIN/2,i32::MIN/2));
             crate::native_live_lens::update(device,crate::native_live_lens::ViewUpdate{
@@ -2938,6 +3051,7 @@ pub fn start(
 
 pub fn close(app: &AppHandle, device: &str) {
     if is_ios_video(device){
+        crate::ios_bluetooth::close(device == IOS_USB_KEY);
         cancel_live_zoom(device);
         disable_creator_clicks(app,device);
     }

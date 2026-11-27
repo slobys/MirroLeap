@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Read one QuickTime chunk without aborting the whole bulk endpoint on timeout.
+// Poll one QuickTime USB read without canceling it at software polling deadlines.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winioctl.h>
@@ -22,9 +22,29 @@ enum {
 };
 
 typedef int (__cdecl *CloseDevice)(void *);
+typedef int (__cdecl *ReleaseInterface)(usb_dev_handle *, int);
+typedef int (__cdecl *ControlMessage)(usb_dev_handle *, int, int, int, int, char *, int, int);
 
 static INIT_ONCE resolve_once = INIT_ONCE_STATIC_INIT;
 static CloseDevice original_close;
+static ReleaseInterface original_release;
+static ControlMessage original_control;
+
+typedef struct PendingRead {
+    usb_dev_handle *owner;
+    HANDLE device;
+    int endpoint;
+    SRWLOCK lock;
+    OVERLAPPED io;
+    BOOL pending;
+    DWORD offset;
+    DWORD count;
+    struct PendingRead *next;
+    char bytes[LIBUSB_MAX_READ_WRITE];
+} PendingRead;
+
+static SRWLOCK readers_lock = SRWLOCK_INIT;
+static PendingRead *readers;
 
 static __declspec(thread) struct {
     void *handle;
@@ -53,7 +73,9 @@ static BOOL CALLBACK resolve_original(PINIT_ONCE once, PVOID parameter, PVOID *c
         LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!original) return FALSE;
     original_close = (CloseDevice)GetProcAddress(original, "usb_close");
-    if (original_close) return TRUE;
+    original_release = (ReleaseInterface)GetProcAddress(original, "usb_release_interface");
+    original_control = (ControlMessage)GetProcAddress(original, "usb_control_msg");
+    if (original_close && original_release && original_control) return TRUE;
     FreeLibrary(original);
     return FALSE;
 }
@@ -81,36 +103,134 @@ static void log_read_error(const char *event, DWORD error, ULONGLONG elapsed) {
     CloseHandle(file);
 }
 
-static int read_chunk(HANDLE device, int ep, char *bytes, DWORD size, int timeout) {
-    libusb_request request = {0};
-    request.endpoint.endpoint = (unsigned int)ep;
-    OVERLAPPED io = {0};
-    io.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-    if (!io.hEvent) return USB_IO_ERROR;
+static PendingRead *find_reader(usb_dev_handle *owner, int endpoint) {
+    for (PendingRead *reader = readers; reader; reader = reader->next) {
+        if (reader->owner == owner && reader->endpoint == endpoint) return reader;
+    }
+    return NULL;
+}
 
-    DWORD transferred = 0;
-    DWORD error = ERROR_SUCCESS;
-    if (!DeviceIoControl(device, LIBUSB_IOCTL_INTERRUPT_OR_BULK_READ,
-            &request, sizeof(request), bytes, size, &transferred, &io)) {
-        error = GetLastError();
-        if (error == ERROR_IO_PENDING) {
-            const DWORD wait = WaitForSingleObject(io.hEvent, timeout ? (DWORD)timeout : INFINITE);
-            const DWORD wait_error = wait == WAIT_TIMEOUT ? ERROR_SEM_TIMEOUT :
-                (wait == WAIT_OBJECT_0 ? ERROR_SUCCESS : GetLastError());
-            if (wait != WAIT_OBJECT_0) CancelIoEx(device, &io);
+// Return a reader with the registry held shared so teardown cannot free it.
+static PendingRead *lock_reader(usb_dev_handle *owner, int endpoint) {
+    AcquireSRWLockShared(&readers_lock);
+    PendingRead *reader = find_reader(owner, endpoint);
+    if (reader) return reader;
+    ReleaseSRWLockShared(&readers_lock);
 
-            // Drain this request before releasing the event or the caller's
-            // buffer. If data arrived during cancellation, deliver it.
-            error = GetOverlappedResult(device, &io, &transferred, TRUE) ?
-                ERROR_SUCCESS : GetLastError();
-            if (error == ERROR_OPERATION_ABORTED && wait_error != ERROR_SUCCESS) {
-                error = wait_error;
+    AcquireSRWLockExclusive(&readers_lock);
+    reader = find_reader(owner, endpoint);
+    if (!reader) {
+        reader = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*reader));
+        if (reader) {
+            reader->io.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+            if (reader->io.hEvent) {
+                reader->owner = owner;
+                reader->device = owner->impl_info;
+                reader->endpoint = endpoint;
+                InitializeSRWLock(&reader->lock);
+                reader->next = readers;
+                readers = reader;
+            } else {
+                HeapFree(GetProcessHeap(), 0, reader);
+                reader = NULL;
             }
         }
     }
-    CloseHandle(io.hEvent);
+    ReleaseSRWLockExclusive(&readers_lock);
+    if (!reader) return NULL;
+
+    AcquireSRWLockShared(&readers_lock);
+    reader = find_reader(owner, endpoint);
+    if (!reader) ReleaseSRWLockShared(&readers_lock);
+    return reader;
+}
+
+static void cancel_read(PendingRead *reader) {
+    if (!reader->pending) return;
+    CancelIoEx(reader->device, &reader->io);
+    DWORD ignored;
+    // The request owns the buffer until Windows reports completion.
+    GetOverlappedResult(reader->device, &reader->io, &ignored, TRUE);
+    reader->pending = FALSE;
+}
+
+static void clear_readers(usb_dev_handle *owner) {
+    AcquireSRWLockExclusive(&readers_lock);
+    PendingRead **entry = &readers;
+    while (*entry) {
+        PendingRead *reader = *entry;
+        if (reader->owner != owner) {
+            entry = &reader->next;
+            continue;
+        }
+        *entry = reader->next;
+        cancel_read(reader);
+        CloseHandle(reader->io.hEvent);
+        HeapFree(GetProcessHeap(), 0, reader);
+    }
+    ReleaseSRWLockExclusive(&readers_lock);
+    if (read_state.handle == owner) read_state.handle = NULL;
+}
+
+static DWORD receive_chunk(PendingRead *reader, DWORD size, int timeout) {
+    DWORD transferred = 0;
+    if (!reader->pending) {
+        libusb_request request = {0};
+        request.endpoint.endpoint = (unsigned int)reader->endpoint;
+        HANDLE event = reader->io.hEvent;
+        reader->io = (OVERLAPPED){0};
+        reader->io.hEvent = event;
+        if (!ResetEvent(event)) return GetLastError();
+        if (DeviceIoControl(reader->device, LIBUSB_IOCTL_INTERRUPT_OR_BULK_READ,
+                &request, sizeof(request), reader->bytes, size, &transferred, &reader->io)) {
+            reader->count = transferred;
+            return ERROR_SUCCESS;
+        }
+        const DWORD error = GetLastError();
+        if (error != ERROR_IO_PENDING) return error;
+        reader->pending = TRUE;
+    }
+
+    const DWORD wait = WaitForSingleObject(reader->io.hEvent, timeout ? (DWORD)timeout : INFINITE);
+    if (wait == WAIT_TIMEOUT) return ERROR_SEM_TIMEOUT;
+    if (wait != WAIT_OBJECT_0) {
+        const DWORD error = GetLastError();
+        cancel_read(reader);
+        return error;
+    }
+
+    if (!GetOverlappedResult(reader->device, &reader->io, &transferred, FALSE)) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_IO_INCOMPLETE) return ERROR_SEM_TIMEOUT;
+        reader->pending = FALSE;
+        return error;
+    }
+    reader->pending = FALSE;
+    reader->count = transferred;
+    return ERROR_SUCCESS;
+}
+
+static int read_chunk(usb_dev_handle *owner, int ep, char *bytes, DWORD size, int timeout) {
+    PendingRead *reader = lock_reader(owner, ep);
+    if (!reader) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return USB_IO_ERROR;
+    }
+    AcquireSRWLockExclusive(&reader->lock);
+    const DWORD error = reader->offset < reader->count ? ERROR_SUCCESS :
+        receive_chunk(reader, size, timeout);
+    DWORD copied = 0;
+    if (error == ERROR_SUCCESS) {
+        const DWORD remaining = reader->count - reader->offset;
+        copied = size < remaining ? size : remaining;
+        CopyMemory(bytes, reader->bytes + reader->offset, copied);
+        reader->offset += copied;
+        if (reader->offset == reader->count) reader->offset = reader->count = 0;
+    }
+    ReleaseSRWLockExclusive(&reader->lock);
+    ReleaseSRWLockShared(&readers_lock);
     SetLastError(error);
-    if (error == ERROR_SUCCESS) return (int)transferred;
+    if (error == ERROR_SUCCESS) return (int)copied;
     if (error == ERROR_SEM_TIMEOUT) return USB_TRANSFER_TIMED_OUT;
     if (error == ERROR_INVALID_PARAMETER) return USB_INVALID_ARGUMENT;
     return USB_IO_ERROR;
@@ -126,7 +246,7 @@ int __cdecl mirroleap_bulk_read(usb_dev_handle *handle, int ep, char *bytes, int
     // a later request times out it returns an error and loses earlier bytes.
     // Return each completed chunk immediately so QuickTime can reassemble it.
     const DWORD chunk = (DWORD)(size > LIBUSB_MAX_READ_WRITE ? LIBUSB_MAX_READ_WRITE : size);
-    const int result = read_chunk(handle->impl_info, ep, bytes, chunk, timeout);
+    const int result = read_chunk(handle, ep, bytes, chunk, timeout);
     const DWORD error = GetLastError();
     const BOOL same_pipe = read_state.handle == handle && read_state.endpoint == ep;
     if (result > 0) {
@@ -161,6 +281,20 @@ int __cdecl mirroleap_bulk_read(usb_dev_handle *handle, int ep, char *bytes, int
 
 int __cdecl mirroleap_usb_close(usb_dev_handle *handle) {
     if (!InitOnceExecuteOnce(&resolve_once, resolve_original, NULL, NULL)) return USB_IO_ERROR;
-    if (read_state.handle == handle) read_state.handle = NULL;
+    clear_readers(handle);
     return original_close(handle);
+}
+
+int __cdecl mirroleap_usb_release_interface(usb_dev_handle *handle, int interface_number) {
+    if (!InitOnceExecuteOnce(&resolve_once, resolve_original, NULL, NULL)) return USB_IO_ERROR;
+    clear_readers(handle);
+    return original_release(handle, interface_number);
+}
+
+int __cdecl mirroleap_usb_control_msg(usb_dev_handle *handle, int request_type, int request,
+        int value, int index, char *bytes, int size, int timeout) {
+    if (!InitOnceExecuteOnce(&resolve_once, resolve_original, NULL, NULL)) return USB_IO_ERROR;
+    // QuickTime handshake restart or USB mode switch invalidates old stream bytes.
+    if (request_type == 0x40 && (request == 0x40 || request == 0x52)) clear_readers(handle);
+    return original_control(handle, request_type, request, value, index, bytes, size, timeout);
 }

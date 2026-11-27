@@ -3911,6 +3911,41 @@ pub async fn device_frame_control(
     }
 }
 
+#[tauri::command]
+pub async fn device_frame_ios_bluetooth(
+    window: Window,
+    app_handle: tauri::AppHandle,
+    action: String,
+    token: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let status = crate::device_frame::ios_bluetooth(&app_handle, &window, &action, token).await?;
+        serde_json::to_value(status).map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, app_handle, action, token);
+        Err("iOS Bluetooth controls are available only on Windows".into())
+    }
+}
+
+#[tauri::command]
+pub async fn device_frame_ios_input(
+    window: Window,
+    app_handle: tauri::AppHandle,
+    events: Vec<crate::ios_input::Event>,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        crate::device_frame::ios_input(&app_handle, &window, events).await
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, app_handle, events);
+        Err("iOS Bluetooth controls are available only on Windows".into())
+    }
+}
 
 #[tauri::command]
 pub async fn get_videos_dir(app_handle: tauri::AppHandle) -> Result<String, String> {

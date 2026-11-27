@@ -11,6 +11,7 @@ pub(crate) fn status() -> &'static str {
 #[cfg(target_os = "windows")]
 mod native {
     use super::STATUS;
+    use crate::ios_diagnostics::{self, CaptureFailure, Channel};
     use sha2::{Digest, Sha256};
     use std::{fs, io::{BufRead, BufReader, Cursor, Read, Write}, path::{Path, PathBuf},
         process::{ChildStdin, Command, Stdio}, sync::Mutex};
@@ -66,6 +67,44 @@ mod native {
 
     fn set(status: &'static str) {
         if let Ok(mut current) = STATUS.lock() { *current = status; }
+        ios_diagnostics::observe(Channel::Usb, status, None);
+        let video = match status {
+            "streaming" => return,
+            "connecting" => "waiting",
+            "reconnecting" => "recovering",
+            "interrupted" | "unavailable" => "interrupted",
+            _ => "idle",
+        };
+        ios_diagnostics::observe(Channel::UsbVideo, video, None);
+    }
+
+    fn capture_failure(value: &str) -> Option<CaptureFailure> {
+        let mut fields = value.split_ascii_whitespace();
+        let failure = CaptureFailure {
+            kind: fields.next()?.parse().ok()?,
+            stage: fields.next()?.parse().ok()?,
+            code: fields.next()?.parse().ok()?,
+        };
+        fields.next().is_none().then_some(failure)
+    }
+
+    fn observe_capture_message(line: &str) -> bool {
+        if let Some(failure) = line.strip_prefix("failure ") {
+            if let Some(failure) = capture_failure(failure) {
+                ios_diagnostics::usb_failure(failure);
+            }
+            return true;
+        }
+        let phase = match line {
+            "video receiving" => "receiving",
+            "video paused" => "paused",
+            "video recovering" => "recovering",
+            _ => return false,
+        };
+        // These events describe the picture only. Keep both the preview and
+        // the Bluetooth session around during a pause or in-place recovery.
+        ios_diagnostics::observe(Channel::UsbVideo, phase, None);
+        true
     }
 
     fn monitor(app: AppHandle, directory: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -79,6 +118,7 @@ mod native {
         if let Some(stdout) = child.stdout.take() {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 // Accept only the state code, never forward device details.
+                if observe_capture_message(line.trim()) { continue; }
                 if let Some(dimensions) = line.strip_prefix("streaming ") {
                     if let Some(dimensions) = video_dimensions(dimensions) {
                         let first_frame = VIDEO.lock().is_ok_and(|mut state| {
@@ -165,6 +205,18 @@ mod native {
             };
             Err(message.into())
         }).await.map_err(|e| e.to_string())?
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn failure_lines_accept_only_three_numeric_fields() {
+            assert_eq!(capture_failure("3 5 -5").unwrap().code, -5);
+            assert!(capture_failure("3 5 -5 device_serial").is_none());
+            assert!(capture_failure("3 5 missing").is_none());
+        }
     }
 }
 

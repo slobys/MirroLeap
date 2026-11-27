@@ -9,7 +9,12 @@ import tempfile
 
 
 PINNED_LIBUSB_SHA256 = "4f18b5d2c28aa66b648c8683c6d09b52b92cbbee85984bbefad5f38a64bc2a14"
-WRAPPED = {"usb_bulk_read": "mirroleap_bulk_read", "usb_close": "mirroleap_usb_close"}
+WRAPPED = {
+    "usb_bulk_read": "mirroleap_bulk_read",
+    "usb_close": "mirroleap_usb_close",
+    "usb_control_msg": "mirroleap_usb_control_msg",
+    "usb_release_interface": "mirroleap_usb_release_interface",
+}
 
 
 def main():

@@ -248,7 +248,13 @@
       background: rgba(244, 63, 94, .25); color: #ffb4bf;
       outline: 1px solid rgba(244, 63, 94, .7);
     }
-    #quick-feedback { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #quick-feedback { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    html[data-airplay] body[data-layout^="tight-ink"] .quick-grid button {
+      height: 34px; min-height: 34px; font-size: 11px;
+    }
+    html[data-airplay] body[data-layout^="tight-ink"] .quick-grid button svg {
+      width: 15px; height: 15px;
+    }
     #quick-feedback[data-feedback="busy"] { color: #ffd080; }
     #quick-feedback[data-feedback="sent"] { color: #7ff2d8; }
     #quick-feedback[data-feedback="error"] { color: #fda4af; }
@@ -424,6 +430,9 @@
         <button id="quick-power" aria-label="电源键" title="手机电源键：切换亮屏/息屏">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v9m-5-6a9 9 0 1 0 10 0"/></svg>电源
         </button>
+        <button id="quick-ios-bluetooth" hidden title="连接 iPhone 或 iPad 蓝牙控制">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2v20l6-5L6 7m6-5 6 5L6 17"/></svg><span>连接蓝牙</span>
+        </button>
         <button id="quick-rotate" aria-label="旋转画面" title="请求 Android 真正切换横竖屏（临时固定方向，正常停止投屏时恢复原来的旋转设置）">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 3a9 9 0 1 1-11 2M17 3v6h-6"/></svg>旋转
         </button>
@@ -485,12 +494,22 @@
       const presenterFeedback = document.getElementById('present-feedback');
       const quickFeedback = document.getElementById('quick-feedback');
       const airplay = Boolean(window.__MIRROLEAP_AIRPLAY__);
+      const iosKeys = ['home', 'back', 'recents', 'power'].map(action =>
+        document.getElementById('quick-' + action));
+      const bluetoothButton = document.getElementById('quick-ios-bluetooth');
+      let bluetooth = {phase:'off'};
+      let bluetoothBusy = false;
+      let bluetoothSyncing = false;
+      const pairingHint = '在 iPhone 或 iPad 打开「设置 → 辅助功能 → 触控 → 辅助触控 → 设备 → 蓝牙设备」，选择这台电脑，然后在悬浮栏确认设备。';
       if (airplay) {
         document.documentElement.dataset.airplay = '';
-        for (const id of ['quick-home', 'quick-back', 'quick-recents', 'quick-power',
-          'quick-rotate', 'quick-paste']) {
+        for (const id of ['quick-rotate', 'quick-paste']) {
           document.getElementById(id).hidden = true;
         }
+        for (const button of iosKeys) button.disabled = true;
+        bluetoothButton.hidden = false;
+        document.getElementById('quick-back').title = '返回上一页（⌘+[，适用于 Safari 等支持该快捷键的应用）';
+        document.getElementById('quick-power').title = '打开 iPhone 或 iPad 的锁屏界面';
         document.getElementById('quick-camera-edge').hidden = false;
         document.getElementById('quick-fullscreen').title = '切换投屏全屏 (F11)';
         document.getElementById('quick-tools').setAttribute('aria-label', '投屏窗口快捷操作');
@@ -636,6 +655,82 @@
         } catch (error) { report(error); }
       }
       let feedbackTimer = null;
+      function quickIdleFeedback() {
+        const messages = {
+          off: '连接蓝牙后即可控制设备',
+          waiting: '在 iOS 辅助触控中配对',
+          confirm: '确认「' + bluetooth.deviceName + '」',
+          connected: bluetooth.pointerReady ? '蓝牙已连接 · 可直接操作画面' : '蓝牙已连接 · 等待鼠标',
+          reconnecting: '等待「' + bluetooth.deviceName + '」重新连接',
+          multiple: '请只连接一台 iOS 设备',
+          in_use: '蓝牙控制正用于另一个投屏',
+        };
+        const message = airplay ? messages[bluetooth.phase] :
+          (pinned ? '已置顶 · 点击可取消' : '普通窗口 · 点击可置顶');
+        if (quickFeedback.textContent !== message) quickFeedback.textContent = message;
+        quickFeedback.title = airplay && ['off','waiting'].includes(bluetooth.phase) ? pairingHint :
+          airplay && bluetooth.phase === 'connected' && !bluetooth.pointerReady ?
+            '旧测试版已配对的设备，请在 iOS 和 Windows 两端移除旧配对，再重新连接。' : message;
+      }
+
+      function displayIosBluetooth(status) {
+        bluetooth = status;
+        for (const button of iosKeys) {
+          button.disabled = status.phase !== 'connected' || button.hasAttribute('aria-busy');
+        }
+        const label = {off:'连接蓝牙', confirm:'确认设备', waiting:'取消配对',
+          multiple:'取消配对', connected:'断开蓝牙', reconnecting:'断开蓝牙',
+          in_use:'蓝牙占用'}[status.phase];
+        const text = bluetoothButton.querySelector('span');
+        if (text.textContent !== label) text.textContent = label;
+        bluetoothButton.disabled = bluetoothBusy || status.phase === 'in_use';
+        bluetoothButton.classList.toggle('active', status.phase === 'connected');
+        bluetoothButton.title = status.phase === 'confirm' ? '确认控制「' + status.deviceName + '」' :
+          ['off','waiting'].includes(status.phase) ? pairingHint : label;
+        if (feedbackTimer === null) quickIdleFeedback();
+      }
+
+      function invokeIosBluetooth(action, token = null) {
+        return window.__TAURI__.core.invoke('device_frame_ios_bluetooth', {action, token});
+      }
+
+      async function syncIosBluetooth() {
+        if (!airplay || bluetoothBusy || bluetoothSyncing ||
+            !document.body.classList.contains('quick-open')) return;
+        bluetoothSyncing = true;
+        try {
+          const result = await invokeIosBluetooth('status');
+          if (!bluetoothBusy) displayIosBluetooth(result);
+        }
+        catch (error) { bluetoothButton.title = String(error); }
+        finally { bluetoothSyncing = false; }
+      }
+
+      bluetoothButton.addEventListener('click', async () => {
+        if (!airplay || bluetoothBusy || bluetoothButton.disabled ||
+            !document.body.classList.contains('quick-open')) return;
+        const {phase, token} = bluetooth;
+        bluetoothBusy = true;
+        bluetoothButton.disabled = true;
+        try {
+          const action = phase === 'off' ? 'start' : phase === 'confirm' ? 'confirm' : 'stop';
+          const result = await invokeIosBluetooth(action, token ?? null);
+          clearReport();
+          displayIosBluetooth(result);
+          actionFeedback(bluetoothButton, 'sent', result.phase === 'waiting' ?
+            '请在 iOS 辅助触控中配对' : result.phase === 'connected' ?
+              '已连接「' + result.deviceName + '」' : '蓝牙控制已关闭');
+        } catch (error) {
+          actionFeedback(bluetoothButton, 'error', String(error));
+        } finally {
+          bluetoothBusy = false;
+          displayIosBluetooth(bluetooth);
+          void syncIosBluetooth();
+        }
+      });
+
+      if (airplay) window.setInterval(() => { void syncIosBluetooth(); }, 1200);
+
       function actionFeedback(button, state, message) {
         if (feedbackTimer !== null) clearTimeout(feedbackTimer);
         const previous = document.querySelectorAll('.quick-grid button[data-feedback]');
@@ -647,8 +742,7 @@
         feedbackTimer = setTimeout(() => {
           delete button.dataset.feedback;
           delete quickFeedback.dataset.feedback;
-          quickFeedback.textContent = pinned ? '已置顶 · 点击可取消' : '普通窗口 · 点击可置顶';
-          quickFeedback.title = '';
+          quickIdleFeedback();
           feedbackTimer = null;
         }, state === 'error' ? 6000 : 3500);
       }
@@ -658,6 +752,7 @@
         document.body.classList.toggle('quick-open', expanded);
         quickButton.classList.toggle('active', expanded);
         quickButton.setAttribute('aria-pressed', String(expanded));
+        if (expanded) void syncIosBluetooth();
       }
       function displayTopState(value) {
         pinned = !!value;
@@ -669,7 +764,7 @@
           '普通窗口 · 点击立即置顶（不重启投屏）';
         document.getElementById('quick-top-label').textContent = pinned ? '已置顶' : '置顶';
         if (feedbackTimer === null) {
-          quickFeedback.textContent = pinned ? '已置顶 · 点击可取消' : '普通窗口 · 点击可置顶';
+          quickIdleFeedback();
         }
       }
       async function syncTopState() {
@@ -988,8 +1083,8 @@
             report(error);
             actionFeedback(button,'error',quickLabels[action]+'失败 · '+String(error));
           } finally {
-            button.disabled = false;
             button.removeAttribute('aria-busy');
+            button.disabled = airplay && iosKeys.includes(button) && bluetooth.phase !== 'connected';
           }
         });
       }

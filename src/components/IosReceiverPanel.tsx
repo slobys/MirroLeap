@@ -21,6 +21,11 @@ export type IosAirplayStatus = {
     usbStatus?:string;
     usbSourceWidth?:number|null;
     usbSourceHeight?:number|null;
+    diagnostics?:{
+        usbVideo:string;
+        bluetooth:string;
+        bluetoothTransport?:'usb'|'wifi'|null;
+    };
     /** Actual received decoder texture, not the chosen advertisement cap. */
     sourceWidth?:number|null;
     sourceHeight?:number|null;
@@ -63,6 +68,8 @@ export default function IosReceiverPanel({locale}:Props) {
     const [busy,setBusy]=useState<string|null>(null);
     const [error,setError]=useState<string|null>(null);
     const [detailsOpen,setDetailsOpen]=useState(false);
+    const [exporting,setExporting]=useState(false);
+    const [exportResult,setExportResult]=useState<{ok:boolean;message:string}|null>(null);
     const [feedback,setFeedback]=useState<string|null>(null);
     const [receiverNameDraft,setReceiverNameDraft]=useState<string|null>(null);
     const [nameError,setNameError]=useState<string|null>(null);
@@ -165,6 +172,20 @@ export default function IosReceiverPanel({locale}:Props) {
         try{await invoke('ios_airplay_open_source');}
         catch(e){setError(String(e));}
     };
+    const exportDiagnostics=async()=>{
+        if(exporting)return;
+        setExporting(true);
+        setExportResult(null);
+        try{
+            const path=await invoke<string>('ios_airplay_export_diagnostics');
+            const file=path.split(/[\\/]/).pop();
+            setExportResult({ok:true,message:copy(`已保存到「下载」文件夹 · ${file}`,
+                `Saved to Downloads · ${file}`)});
+        }catch{
+            setExportResult({ok:false,message:copy('诊断日志未能保存。请确认「下载」文件夹可写后重试。',
+                'Could not save diagnostics. Check that Downloads is writable and try again.')});
+        }finally{setExporting(false);}
+    };
     const working=busy!==null || Boolean(status?.installing);
     const hasUsb=Boolean(status?.supported && status.usbStatus && status.usbStatus!=='not_bundled');
     const usbState=status?.usbStatus;
@@ -188,6 +209,24 @@ export default function IosReceiverPanel({locale}:Props) {
         usbState==='busy'?copy('设备占用中','Device busy'):null;
     const isRunning=Boolean(status?.running);
     const hasVideo=Boolean(isRunning && status?.sourceWidth && status.sourceHeight);
+    const usbVideoPhase=status?.diagnostics?.usbVideo ?? (usbState==='streaming'?'receiving':'idle');
+    const usbPicture=({
+        waiting:copy('USB · 等待画面','USB · waiting for video'),
+        receiving:copy('USB · 接收画面中','USB · receiving video'),
+        paused:copy('USB · 暂无新画面，等待恢复','USB · no new frames, waiting to resume'),
+        recovering:copy('USB · 正在恢复画面','USB · recovering video'),
+        interrupted:copy('USB · 画面已中断','USB · video interrupted'),
+    } as Record<string,string>)[usbVideoPhase];
+    const bluetoothPhase=status?.diagnostics?.bluetooth ?? 'off';
+    const bluetoothStatus=({
+        off:copy('未连接控制','Controls not connected'),
+        ready:copy('已连接，键鼠可用','Connected · keyboard and mouse ready'),
+        keyboard_only:copy('已连接，等待鼠标','Connected · waiting for the mouse'),
+        reconnecting:copy('等待设备重新连接','Waiting for the device to reconnect'),
+        waiting:copy('等待设备配对','Waiting for pairing'),
+        confirm:copy('等待确认设备','Waiting for device confirmation'),
+        multiple:copy('请只连接一台 iOS 设备','Connect only one iOS device'),
+    } as Record<string,string>)[bluetoothPhase];
     const style=status?.windowStyle || (status?.compactMode===false?'classic':'device-auto');
     const quality=status?.qualityTier || 'adaptive';
     const canChangeStyle=!working && Boolean(status?.installed) && (!isRunning || style!=='classic');
@@ -354,11 +393,10 @@ export default function IosReceiverPanel({locale}:Props) {
         {error && <p role="alert" className="mt-2 text-xs text-red-500 break-words">{error}</p>}
         {feedback && <p role="status" className="mt-2 text-xs">{feedback}</p>}
         <div id="ios-receiver-details" hidden={!detailsOpen} className="mt-2 space-y-2 text-xs leading-5">
-            {hasUsb && status?.usbStatus &&
-            <div className="flex flex-wrap items-center gap-2">
-                <div className="min-w-[180px] flex-1">
-                    <p className="text-xs font-semibold">{copy('USB 有线投屏','Wired USB mirroring')}</p>
-                    <p className="ml-muted mt-1 text-xs" role="status">{({
+            <dl className="grid gap-x-6 gap-y-3 pb-2 sm:grid-cols-3">
+                <div className="min-w-0">
+                    <dt className="font-semibold">{copy('USB 状态','USB status')}</dt>
+                    <dd className="ml-muted mt-1" role="status" data-testid="ios-usb-detail">{hasUsb && usbState?({
                         starting:copy('正在检测 USB 设备…','Checking for USB devices…'),
                         waiting:copy('请插入 USB 数据线。','Connect a USB data cable.'),
                         ready:copy('已连接，点击上方「USB投屏」开始。','Connected. Click USB mirroring above to start.'),
@@ -368,23 +406,49 @@ export default function IosReceiverPanel({locale}:Props) {
                         apple_driver:copy('首次使用需安装 Apple Devices。','Install Apple Devices for first-time setup.'),
                         capture_driver:copy('此设备需要一次性安装 USB 捕获驱动。','This device needs a one-time USB capture driver setup.'),
                         busy:copy('USB 捕获设备正在使用，请先关闭其他投屏程序。','USB capture is busy. Close any other mirroring app.'),
-                        connecting:copy('正在通过 USB 接收画面…','Connecting to the USB display…'),
-                        reconnecting:copy('USB 画面中断，正在重新连接同一台设备。','USB video was interrupted. Reconnecting to the same device.'),
-                        interrupted:copy('USB 投屏已中断。可点击「USB投屏」重试。','USB mirroring was interrupted. Click USB mirroring to try again.'),
-                        stopping:copy('正在停止 USB 投屏…','Stopping USB mirroring…'),
-                        streaming:status.usbSourceWidth && status.usbSourceHeight
-                            ? copy('USB 视频源 ','USB video source ') + status.usbSourceWidth+' × '+status.usbSourceHeight
-                            : copy('USB 投屏中','Mirroring over USB'),
+                        connecting:copy('正在打开 USB 捕获连接…','Opening the USB capture connection…'),
+                        reconnecting:copy('正在恢复与同一设备的 USB 捕获连接。','Restoring USB capture for the same device.'),
+                        interrupted:copy('捕获连接已结束，可以点击「USB投屏」重试。','Capture ended. Click USB mirroring to try again.'),
+                        stopping:copy('正在关闭 USB 捕获连接…','Closing the USB capture connection…'),
+                        streaming:copy('USB 已连接','USB connected'),
                         unavailable:copy('暂时无法接收 USB 画面，请解锁设备并重新插线。','USB video is unavailable. Unlock the device and reconnect the cable.'),
-                    } as Record<string,string>)[status.usbStatus]}</p>
+                    } as Record<string,string>)[usbState]:copy('USB 组件不可用','USB component unavailable')}</dd>
+                    {usbState==='apple_driver' && <dd className="mt-2"><a href="https://apps.microsoft.com/detail/9np83lwlpz9k"
+                        target="_blank" rel="noreferrer" className="ml-secondary-action !min-h-10 px-3 text-xs inline-flex items-center gap-2">
+                        Apple Devices <ExternalLink size={14} aria-hidden="true"/></a></dd>}
+                    {usbState==='capture_driver' && <dd className="mt-2"><button type="button" disabled={working} onClick={()=>void installUsbDriver()}
+                        className="ml-secondary-action !min-h-10 px-3 text-xs">
+                        {busy==='usb'?copy('正在安装…','Installing…'):copy('安装 USB 驱动','Install USB driver')}
+                    </button></dd>}
                 </div>
-                {status.usbStatus==='apple_driver' && <a href="https://apps.microsoft.com/detail/9np83lwlpz9k"
-                    target="_blank" rel="noreferrer" className="ml-secondary-action !min-h-10 px-3 text-xs inline-flex items-center gap-2">
-                    Apple Devices <ExternalLink size={14} aria-hidden="true"/></a>}
-                {status.usbStatus==='capture_driver' && <button type="button" disabled={working} onClick={()=>void installUsbDriver()}
-                    className="ml-secondary-action !min-h-10 px-3 text-xs">
-                    {busy==='usb'?copy('正在安装…','Installing…'):copy('安装 USB 驱动','Install USB driver')}
-                </button>}
+                <div className="min-w-0">
+                    <dt className="font-semibold">{copy('画面状态','Video status')}</dt>
+                    <dd className="ml-muted mt-1" role="status" data-testid="ios-video-detail">
+                        {usbPicture && <p>{usbPicture}</p>}
+                        {status?.usbSourceWidth && status.usbSourceHeight &&
+                            <p>{copy('USB 视频源 ','USB video source ')}{status.usbSourceWidth} × {status.usbSourceHeight}</p>}
+                        {isRunning && <p>{hasVideo?copy('Wi-Fi · 已接收画面','Wi-Fi · video received'):
+                            copy('Wi-Fi · 等待画面','Wi-Fi · waiting for video')}</p>}
+                        {!usbPicture && !isRunning && copy('未接收投屏画面','No mirroring video')}
+                    </dd>
+                </div>
+                <div className="min-w-0">
+                    <dt className="font-semibold">{copy('蓝牙控制','Bluetooth controls')}</dt>
+                    <dd className="ml-muted mt-1" role="status" data-testid="ios-bluetooth-detail">
+                        {status?.diagnostics?.bluetoothTransport==='usb'?'USB · ':
+                            status?.diagnostics?.bluetoothTransport==='wifi'?'Wi-Fi · ':null}
+                        {bluetoothStatus}
+                    </dd>
+                </div>
+            </dl>
+            {status?.supported && <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-current/10 pt-2">
+                <button type="button" disabled={exporting} onClick={()=>void exportDiagnostics()}
+                    className="ml-secondary-action !min-h-9 px-3 text-xs inline-flex items-center gap-1.5">
+                    <Download size={14} aria-hidden="true"/>
+                    {exporting?copy('正在导出…','Exporting…'):copy('导出诊断日志','Export diagnostics')}
+                </button>
+                {exportResult && <p className={(exportResult.ok?'ml-muted':'text-red-500')+' min-w-0 break-words'}
+                    role={exportResult.ok?'status':'alert'}>{exportResult.message}</p>}
             </div>}
             {status?.installed && <p className="ml-muted mt-2 text-[11px] leading-5" role="note">
                 {copy('真机边框使用 Windows 原生透明图层，避免跨进程绑定造成主窗口 DPI 异常。画面保持原样，外壳不参与视频解码。可运行中切换真机/纯画面。',
